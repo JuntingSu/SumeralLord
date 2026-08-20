@@ -11,10 +11,11 @@ import {
   SelectForceBodySchema,
   TransferHostBodySchema,
 } from '@dl/shared';
-import type { CreateRoomResult, JoinRoomResult } from '@dl/shared';
+import type { CreateRoomResult, JoinRoomResult, SeatAssignment } from '@dl/shared';
 import { users } from '../db/schema.js';
 import { RoomError, type RoomUser } from '../room/manager.js';
 import { authPreHandler } from '../auth/guard.js';
+import { config } from '../config.js';
 import { ok, fail } from '../utils/respond.js';
 
 const HTTP_BY_CODE: Record<string, number> = {
@@ -130,6 +131,46 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
       const body = parseBody(SelectForceBodySchema, request.body);
       const room = app.rooms.selectForce(roomUserOf(request).id, id, body.seat);
       return ok(reply, room);
+    } catch (err) {
+      return sendRoomError(reply, err);
+    }
+  });
+
+  app.post('/api/rooms/:id/start', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const user = roomUserOf(request);
+      const roomData = app.rooms.toRoomData(app.rooms.mustGet(id));
+      const map = app.maps.get(roomData.mapId);
+      if (!map) return fail(reply, 400, ERROR_CODES.MAP_NOT_FOUND, '地图不存在');
+
+      // M4 备忘：isAI = 开启 AI 接管且无玩家扮演；未接管且无玩家的势力开局时由前端删兵
+      const seatAssignments: SeatAssignment[] = roomData.forces.map((f) => ({
+        seat: f.seat,
+        playerId: f.playerId,
+        isAI: roomData.aiTakeover && f.playerId === null,
+      }));
+
+      const { game, startMsg } = app.games.create({
+        roomId: id,
+        map,
+        seatAssignments,
+        aiTakeover: roomData.aiTakeover,
+        randomSpawn: roomData.randomSpawn,
+        timeSettings: roomData.timeSettings,
+        reducerVersion: config.reducerVersion,
+      });
+      // startGame 校验房主/全员准备，成功后 emit GAME_START（网关广播给房间所有人）
+      app.rooms.startGame(user.userId, id, {
+        gameId: game.id,
+        seatAssignments: startMsg.seatAssignments,
+        spawnAssignments: startMsg.spawnAssignments,
+        seed: game.seed,
+        reducerVersion: config.reducerVersion,
+        map,
+        timeSettings: roomData.timeSettings,
+      });
+      return ok(reply, { gameId: game.id });
     } catch (err) {
       return sendRoomError(reply, err);
     }

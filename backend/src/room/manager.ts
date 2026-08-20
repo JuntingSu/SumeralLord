@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { ROOMS } from '@dl/shared';
-import type { ErrorCode, MapFullData, RoomData, RoomForce, RoomListItem, RoomManagerEvent } from '@dl/shared';
+import type {
+  ErrorCode,
+  GameStartMsg,
+  MapFullData,
+  RoomData,
+  RoomForce,
+  RoomListItem,
+  RoomManagerEvent,
+  SeatAssignment,
+  SpawnAssignment,
+} from '@dl/shared';
 
 export class RoomError extends Error {
   constructor(
@@ -38,6 +48,7 @@ interface Room {
   status: 'ROOM_OPEN' | 'IN_GAME';
   players: Map<number, RoomPlayerInternal>;
   forces: RoomForce[];
+  gameId?: string;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -307,6 +318,60 @@ export class RoomManager {
     const data = this.toRoomData(room);
     this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: data });
     return data;
+  }
+
+  /** 开始对局：房主 + 全员已准备 + 房间等待中；不再要求全部 seat 已分配（M4 备忘） */
+  startGame(
+    hostUserId: number,
+    roomId: string,
+    payload: {
+      gameId: string;
+      seatAssignments: SeatAssignment[];
+      spawnAssignments: SpawnAssignment[];
+      seed: string;
+      reducerVersion: string;
+      map: MapFullData;
+      timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
+    },
+  ): RoomData {
+    const room = this.mustGet(roomId);
+    this.touch(room);
+    if (room.hostId !== hostUserId) throw new RoomError('NOT_HOST', '仅房主可执行此操作');
+    if (room.status !== 'ROOM_OPEN') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    const players = [...room.players.values()].filter((p) => p.state !== 'spectating');
+    if (players.length === 0) throw new RoomError('INVALID_PARAMS', '房间内没有可参战玩家');
+    if (!players.every((p) => p.state === 'prepared')) {
+      throw new RoomError('PLAYERS_NOT_READY', '仍有玩家未准备');
+    }
+    room.status = 'IN_GAME';
+    room.gameId = payload.gameId;
+    for (const p of room.players.values()) {
+      if (p.state !== 'spectating') p.state = 'in_game';
+    }
+    const startMsg: GameStartMsg = {
+      type: 'GAME_START',
+      roomId: room.id,
+      gameId: payload.gameId,
+      map: payload.map,
+      seatAssignments: payload.seatAssignments,
+      spawnAssignments: payload.spawnAssignments,
+      seed: payload.seed,
+      timeSettings: payload.timeSettings,
+      reducerVersion: payload.reducerVersion,
+    };
+    this.emit(startMsg);
+    return this.toRoomData(room);
+  }
+
+  /** 某玩家对局中的 seat（无则 -1；观战 -1） */
+  seatOf(roomId: string, userId: number): number {
+    const room = this.rooms.get(roomId);
+    if (!room) return -1;
+    return room.forces.find((f) => f.playerId === userId)?.seat ?? -1;
+  }
+
+  gameIdOf(roomId: string): string | undefined {
+    return this.rooms.get(roomId)?.gameId;
   }
 
   disband(hostUserId: number, roomId: string): void {

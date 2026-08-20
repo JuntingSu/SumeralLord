@@ -3,9 +3,10 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { CHAT, WS_CLOSE_CODES } from '@dl/shared';
-import { ChatSendSchema } from '@dl/shared';
-import type { ChatMsg, RoomManagerEvent, RoomServerMsg } from '@dl/shared';
+import { ChatSendSchema, IntentSubmitSchema } from '@dl/shared';
+import type { ChatMsg, IntentBroadcastMsg, RoomManagerEvent, RoomServerMsg } from '@dl/shared';
 import type { RoomManager } from '../room/manager.js';
+import type { GameManager } from '../game/manager.js';
 import type { TicketService } from '../auth/ticket.js';
 import { createRateLimiter } from '../utils/rateLimit.js';
 
@@ -37,6 +38,7 @@ export class WsGateway {
   constructor(
     private readonly app: FastifyInstance,
     private readonly rooms: RoomManager,
+    private readonly games: GameManager,
     private readonly tickets: TicketService,
     private readonly log: FastifyBaseLogger,
   ) {
@@ -155,13 +157,51 @@ export class WsGateway {
       this.broadcast(conn.roomId, chatMsg);
       return;
     }
+    if (msg?.type === 'INTENT_SUBMIT') {
+      this.onIntentSubmit(conn, parsed);
+      return;
+    }
     this.send(conn, { type: 'ERROR', code: 'INVALID_PARAMS', message: `未知消息类型: ${msg?.type ?? 'null'}`, fatal: false });
   }
 
-  private broadcast(roomId: string, msg: RoomServerMsg | RoomManagerEvent): void {
+  /** 意图中继（P1）：分配 eventId → 持久化 → ACK 发送者 → 广播他人（不回环） */
+  private onIntentSubmit(conn: RoomConnection, parsed: unknown): void {
+    const submit = IntentSubmitSchema.safeParse(parsed);
+    if (!submit.success) {
+      this.send(conn, { type: 'ERROR', code: 'INVALID_INTENT', message: '意图结构非法', fatal: false });
+      return;
+    }
+    const gameId = this.rooms.gameIdOf(conn.roomId);
+    const game = gameId ? this.games.get(gameId) : undefined;
+    if (!game || game.status !== 'in_game') {
+      // 对局未开始/已结束：丢弃 + 日志（前端 reducer 也有 NO_GAME 拒绝，双保险）
+      this.log.warn({ roomId: conn.roomId, userId: conn.userId }, 'INTENT_SUBMIT 对局未在进行，丢弃');
+      return;
+    }
+    const fromSeat = this.rooms.seatOf(conn.roomId, conn.userId);
+    if (fromSeat === -1) {
+      // 观战/未分配势力者发意图：告警 + 回 ERROR，不中继
+      this.log.warn({ roomId: conn.roomId, userId: conn.userId }, '观战/无席位玩家尝试发意图');
+      this.send(conn, { type: 'ERROR', code: 'SPECTATOR_CANNOT_ACT', message: '观战中，无法影响对局', fatal: false });
+      return;
+    }
+    const eventId = this.games.allocateEventId(game);
+    const broadcast: IntentBroadcastMsg = {
+      type: 'INTENT_BROADCAST',
+      from: String(conn.userId),
+      fromSeat,
+      intent: submit.data.intent,
+      eventId,
+    };
+    this.games.appendEvent(game, broadcast);
+    this.send(conn, { type: 'INTENT_ACK', clientTempId: submit.data.clientTempId, eventId });
+    this.broadcast(conn.roomId, broadcast, conn.userId);
+  }
+
+  private broadcast(roomId: string, msg: RoomServerMsg | RoomManagerEvent, excludeUserId?: number): void {
     const data = JSON.stringify(msg);
     for (const conn of this.conns) {
-      if (conn.roomId === roomId && conn.ws.readyState === conn.ws.OPEN) {
+      if (conn.roomId === roomId && conn.ws.readyState === conn.ws.OPEN && conn.userId !== excludeUserId) {
         conn.ws.send(data);
       }
     }

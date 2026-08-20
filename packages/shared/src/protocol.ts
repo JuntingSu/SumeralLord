@@ -1,7 +1,7 @@
 // REST 请求体 / WS 消息的 Zod schema：前后端共享的协议契约
 import { z } from 'zod';
 import { TIME_OPTIONS } from './constants.js';
-import type { RoomData, RoomPlayer } from './types.js';
+import type { MapFullData, RoomData, RoomPlayer } from './types.js';
 
 const oneOf = (options: readonly number[], label: string) =>
   z
@@ -180,7 +180,9 @@ export type RoomServerMsg =
   | ErrorMsg;
 
 /** RoomManager 状态变更事件（WS 网关广播源） */
-export type RoomManagerEvent = Exclude<RoomServerMsg, ConnectAckMsg | PongMsg | ChatMsg | ErrorMsg>;
+export type RoomManagerEvent =
+  | Exclude<RoomServerMsg, ConnectAckMsg | PongMsg | ChatMsg | ErrorMsg>
+  | GameStartMsg;
 
 // ---------- 对局：意图（P1） ----------
 
@@ -264,4 +266,31 @@ export interface ConsensusConfirmedMsg {
   consensusId: string;
   confirmed: ConsensusPayload;
   eventId: number;
+}
+
+// ---------- 对局：开局（P4：不带 initialBoardState，带随机源） ----------
+
+export interface SeatAssignment {
+  seat: number;
+  playerId: number | null;
+  /** aiTakeover && 无玩家时 true；难度由前端从 map.player_list[].computer 读取 */
+  isAI: boolean;
+}
+
+export interface SpawnAssignment {
+  seat: number;
+  /** 该 seat 王城地块的线性 index（randomSpawn=false 时即地图原始王城位置） */
+  spawnIndex: number;
+}
+
+export interface GameStartMsg {
+  type: 'GAME_START';
+  roomId: string;
+  gameId: string;
+  map: MapFullData;
+  seatAssignments: SeatAssignment[];
+  spawnAssignments: SpawnAssignment[];
+  seed: string;
+  timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
+  reducerVersion: string;
 }

@@ -248,7 +248,7 @@ describe('§8.1.2 进攻事件', () => {
     const asg = assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: 102 });
     const { state } = startGame(map, asg);
     // 断兵 str1 → 力 1 === 防守 1：成功；防守反击 1 → 进攻兵 1-1=0 死
-    const r = act(state, 1, { intentType: 'ATTACK', from: 18, to: 19 });
+    const r = act(state, 1, { intentType: 'ATTACK', from: 7, to: 2 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(soldierAt(r.state, 7)).toBeNull();
