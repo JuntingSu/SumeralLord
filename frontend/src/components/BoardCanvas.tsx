@@ -1,8 +1,9 @@
-// 双层 Canvas 棋盘（前端规划 §1.3，M5.1 动画版）：底层静态层（地形+迷雾+据点圆点，dirty 重绘）、
-// 上层动态层（兵+动画中间帧+hover/选中/光圈/高亮，每帧）。
+// 双层 Canvas 棋盘（前端规划 §1.3，M5.1 动画版 + M5.2 交互版）：
+// 底层静态层（地形+迷雾+据点圆点，dirty 重绘）、上层动态层（兵+动画中间帧+hover/选中/光圈/高亮，每帧）。
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
-// 断兵视觉：过渡期用 globalCompositeOperation 擦边实现 2px 镂空（正式 hollow sprite 后补，M5.2）。
-import { useEffect, useMemo, useRef, useCallback } from 'react';
+// M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）+ 双击复位（view 变换统一应用于两层与拾取）；
+// 断兵视觉正式化：flag_{n}_hollow.png 镂空 sprite（未加载完成时回退 punchHollow 擦边）。
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { TERRAIN, TILE_OWNER } from '@dl/shared';
 import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
@@ -29,6 +30,10 @@ const FLASH_COLORS: Record<FlashKind, string> = {
 };
 
 const SQRT3 = Math.sqrt(3);
+/** 拖拽阈值（px）：位移超过视为拖拽而非点击/长按 */
+const DRAG_THRESHOLD = 4;
+const MIN_SCALE = 0.3;
+const MAX_SCALE = 4;
 
 interface BoardCanvasProps {
   board: GameState;
@@ -55,6 +60,19 @@ interface View {
   offY: number;
 }
 
+interface DragState {
+  x: number;
+  y: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+}
+
+interface SpriteEntry {
+  solid: HTMLImageElement | null;
+  hollow: HTMLImageElement | null;
+}
+
 function centerOf(index: number, column: number, size: number, offX: number, offY: number, totalH: number) {
   const r = Math.floor(index / column);
   const col = index % column;
@@ -64,7 +82,7 @@ function centerOf(index: number, column: number, size: number, offX: number, off
   return { cx, cy };
 }
 
-/** 断兵 2px 镂空：擦除六边形外圈（过渡方案） */
+/** 断兵 2px 镂空（过渡方案；hollow sprite 未加载时回退） */
 function punchHollow(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
   ctx.save();
   ctx.beginPath();
@@ -112,10 +130,16 @@ export default function BoardCanvas({
 }: BoardCanvasProps) {
   const staticRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
-  const viewRef = useRef<View>({ scale: 1, offX: 0, offY: 0 });
   const hoverRef = useRef<number | null>(null);
-  const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
-  const spritesRef = useRef<Record<string, HTMLImageElement | null>>({});
+  const dragRef = useRef<DragState | null>(null);
+  const spritesRef = useRef<Record<string, SpriteEntry>>({});
+
+  // M5.2：视图变换（缩放/平移）；state 驱动静态层重绘，viewRef 供 rAF 层与拾取实时读取
+  const [view, setView] = useState<View>({ scale: 1, offX: 0, offY: 0 });
+  const viewRef = useRef<View>(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   const geoRef = useRef({ rows: board.rows, columns: board.columns, cylindrical: board.cylindrical });
 
@@ -174,7 +198,27 @@ export default function BoardCanvas({
     [],
   );
 
-  // 静态层绘制（dirty 重绘）：地形 + 迷雾遮罩 + 据点归属圆点（兵在 overlay 层）
+  // 滚轮缩放（以指针为锚点；原生 listener 以 preventDefault 阻止页面滚动）
+  useEffect(() => {
+    const canvas = staticRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setView((v) => {
+        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
+        const k = scale / v.scale;
+        return { scale, offX: px - (px - v.offX) * k, offY: py - (py - v.offY) * k };
+      });
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // 静态层绘制（dirty 重绘，view 变化时重绘）：地形 + 迷雾遮罩 + 据点归属圆点（兵在 overlay 层）
   useEffect(() => {
     const canvas = staticRef.current;
     if (!canvas) return;
@@ -198,12 +242,13 @@ export default function BoardCanvas({
     const totalH = totalHUnits * size;
     const offX = (cssW - totalW) / 2;
     const offY = (cssH - totalH) / 2;
-    viewRef.current = { scale: 1, offX: 0, offY: 0 };
+    // M5.2：视图变换
+    const tx = (c: { cx: number; cy: number }) => ({ cx: view.offX + c.cx * view.scale, cy: view.offY + c.cy * view.scale });
 
     // 1. 地形底色
     for (let i = 0; i < board.tiles.length; i++) {
-      const { cx, cy } = centerOf(i, columns, size, offX, offY, totalH);
-      hexPath(ctx, cx, cy, size);
+      const c = tx(centerOf(i, columns, size, offX, offY, totalH));
+      hexPath(ctx, c.cx, c.cy, size * view.scale);
       ctx.fillStyle = TERRAIN_COLORS[board.tiles[i].terrain] ?? '#9e9e9e';
       ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,0.25)';
@@ -214,14 +259,14 @@ export default function BoardCanvas({
     // 2. 迷雾遮罩（hidden/explored）
     if (fogEnabled && fogLevels) {
       for (let i = 0; i < board.tiles.length; i++) {
-        const { cx, cy } = centerOf(i, columns, size, offX, offY, totalH);
+        const c = tx(centerOf(i, columns, size, offX, offY, totalH));
         const level = fogLevels[i];
         if (level === 'hidden') {
-          hexPath(ctx, cx, cy, size);
+          hexPath(ctx, c.cx, c.cy, size * view.scale);
           ctx.fillStyle = FOG_COLOR;
           ctx.fill();
         } else if (level === 'explored') {
-          hexPath(ctx, cx, cy, size);
+          hexPath(ctx, c.cx, c.cy, size * view.scale);
           ctx.fillStyle = EXPLORED_DIM;
           ctx.fill();
         }
@@ -234,29 +279,31 @@ export default function BoardCanvas({
       if (t.terrain !== TERRAIN.CITY) continue;
       const belongs = t.soldier?.owner ?? TILE_OWNER.EMPTY;
       if (belongs === TILE_OWNER.EMPTY || belongs === TILE_OWNER.BLOCKER) continue;
-      const { cx, cy } = centerOf(i, columns, size, offX, offY, totalH);
+      const c = tx(centerOf(i, columns, size, offX, offY, totalH));
       ctx.beginPath();
-      ctx.arc(cx, cy, Math.max(2.5, size * 0.14), 0, Math.PI * 2);
+      ctx.arc(c.cx, c.cy, Math.max(2.5, size * 0.14) * view.scale, 0, Math.PI * 2);
       ctx.fillStyle = belongs === TILE_OWNER.WILD ? '#9e9e9e' : SEAT_COLORS[(belongs - 1) % SEAT_COLORS.length];
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-  }, [board, fogEnabled, fogLevels]);
+  }, [board, fogEnabled, fogLevels, view]);
 
-  // 旗帜 sprite 预加载
+  // 旗帜 sprite 预加载（实心 + 镂空）
   useEffect(() => {
     const load = (n: number) => {
       if (spritesRef.current[String(n)] !== undefined) return;
-      const img = new Image();
-      img.src = `/static/flags/flag_${n}.png`;
-      spritesRef.current[String(n)] = img;
+      const solid = new Image();
+      solid.src = `/static/flags/flag_${n}.png`;
+      const hollow = new Image();
+      hollow.src = `/static/flags/flag_${n}_hollow.png`;
+      spritesRef.current[String(n)] = { solid, hollow };
     };
     for (let n = 1; n <= 9; n++) load(n);
   }, []);
 
-  /** 画单个兵（旗帜 + 断兵镂空 + 兵力数字 + 闪光描边；alpha 控制淡入淡出） */
+  /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；断兵用 hollow sprite，未加载时擦边回退） */
   const drawSoldier = useCallback(
     (
       ctx: CanvasRenderingContext2D,
@@ -270,18 +317,21 @@ export default function BoardCanvas({
     ) => {
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      const flag = spritesRef.current[String(flagNum)];
+      const entry = spritesRef.current[String(flagNum)];
+      const img = soldier.isLinked ? entry?.solid : entry?.hollow;
       const flagW = size * 1.1;
       const flagH = size * 1.24;
-      if (flag && flag.complete && flag.naturalWidth > 0) {
-        ctx.drawImage(flag, cx - flagW / 2, cy - flagH / 2 - size * 0.12, flagW, flagH);
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, cx - flagW / 2, cy - flagH / 2 - size * 0.12, flagW, flagH);
       } else {
         // 兜底：旗帜色块
         ctx.fillStyle = SEAT_COLORS[(soldier.owner - 1) % SEAT_COLORS.length] ?? '#888';
         ctx.fillRect(cx - size * 0.22, cy - size * 0.3, size * 0.44, size * 0.6);
       }
-      // 断兵 2px 镂空（过渡方案）
-      if (!soldier.isLinked) punchHollow(ctx, cx, cy, size * 0.52);
+      // 断兵：hollow sprite 未就绪时用擦边过渡方案
+      if (!soldier.isLinked && (!entry?.hollow || !entry.hollow.complete || entry.hollow.naturalWidth === 0)) {
+        punchHollow(ctx, cx, cy, size * 0.52);
+      }
       // 兵力数字
       ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
       ctx.textAlign = 'center';
@@ -303,7 +353,7 @@ export default function BoardCanvas({
     [],
   );
 
-  // 动态层：动画帧兵表 + hover / 选中 / 高亮，每帧
+  // 动态层：动画帧兵表 + hover / 选中 / 高亮，每帧（视图变换实时读 viewRef）
   useEffect(() => {
     let raf = 0;
     const draw = () => {
@@ -328,6 +378,8 @@ export default function BoardCanvas({
         const totalH = totalHUnits * size;
         const offX = (cssW - totalWUnits * size) / 2;
         const offY = (cssH - totalH) / 2;
+        const v = viewRef.current;
+        const tx = (c: { cx: number; cy: number }) => ({ cx: v.offX + c.cx * v.scale, cy: v.offY + c.cy * v.scale });
 
         // 动画帧（M5.1）：播放中画动画态+中间帧，空闲画权威 board
         const af = animatorRef?.current?.frame(now) ?? null;
@@ -344,8 +396,8 @@ export default function BoardCanvas({
             const geo = { rows, columns, cylindrical: board.cylindrical };
             for (const n of neighborsOf(selected, geo)) {
               const t = board.tiles[n];
-              const c = centerOf(n, columns, size, offX, offY, totalH);
-              hexPath(ctx, c.cx, c.cy, size);
+              const c = tx(centerOf(n, columns, size, offX, offY, totalH));
+              hexPath(ctx, c.cx, c.cy, size * v.scale);
               if (!t.soldier) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
                 ctx.fill();
@@ -379,16 +431,25 @@ export default function BoardCanvas({
           if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
           const soldier = showTiles[i];
           if (!soldier) continue;
-          const c = centerOf(i, columns, size, offX, offY, totalH);
+          const c = tx(centerOf(i, columns, size, offX, offY, totalH));
           // MOVE：起点兵沿 from→to 插值滑动
           if (ev?.kind === 'MOVE' && ev.from === i) {
-            const tc = centerOf(ev.to, columns, size, offX, offY, totalH);
-            drawSoldier(ctx, c.cx + (tc.cx - c.cx) * progress, c.cy + (tc.cy - c.cy) * progress, size, soldier, flagOf(soldier.owner), 1, null);
+            const tc = tx(centerOf(ev.to, columns, size, offX, offY, totalH));
+            drawSoldier(
+              ctx,
+              c.cx + (tc.cx - c.cx) * progress,
+              c.cy + (tc.cy - c.cy) * progress,
+              size * v.scale,
+              soldier,
+              flagOf(soldier.owner),
+              1,
+              null,
+            );
             continue;
           }
           // DESPAWN：淡出
           if (ev?.kind === 'DESPAWN' && ev.tile === i) {
-            drawSoldier(ctx, c.cx, c.cy, size, soldier, flagOf(soldier.owner), 1 - progress, null);
+            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null);
             continue;
           }
           // 闪光判定
@@ -397,49 +458,49 @@ export default function BoardCanvas({
           else if (af && af.breakTiles.includes(i)) flash = 'break';
           else if (ev?.kind === 'REJOIN' && ev.tile === i) flash = 'rejoin';
           else if (victorySeats.includes(soldier.owner)) flash = 'victory';
-          drawSoldier(ctx, c.cx, c.cy, size, soldier, flagOf(soldier.owner), 1, flash);
+          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash);
         }
         // SPAWN：目标地块淡入（起点 30% 保证移动连续性）
         if (ev?.kind === 'SPAWN') {
           if (!(fogEnabled && fogLevels && fogLevels[ev.tile] !== 'visible')) {
-            const c = centerOf(ev.tile, columns, size, offX, offY, totalH);
-            drawSoldier(ctx, c.cx, c.cy, size, ev.soldier, flagOf(ev.soldier.owner), 0.3 + 0.7 * progress, null);
+            const c = tx(centerOf(ev.tile, columns, size, offX, offY, totalH));
+            drawSoldier(ctx, c.cx, c.cy, size * v.scale, ev.soldier, flagOf(ev.soldier.owner), 0.3 + 0.7 * progress, null);
           }
         }
         // ATTACK：目标地块红闪（进攻演出）
         if (ev?.kind === 'ATTACK') {
-          const c = centerOf(ev.to, columns, size, offX, offY, totalH);
-          hexPath(ctx, c.cx, c.cy, size);
+          const c = tx(centerOf(ev.to, columns, size, offX, offY, totalH));
+          hexPath(ctx, c.cx, c.cy, size * v.scale);
           ctx.fillStyle = `rgba(230, 57, 70, ${0.25 * Math.sin(progress * Math.PI)})`;
           ctx.fill();
         }
 
         // 加点阶段连兵白字高亮
         for (const i of addPointHighlights) {
-          const c = centerOf(i, columns, size, offX, offY, totalH);
-          ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
+          const c = tx(centerOf(i, columns, size, offX, offY, totalH));
+          ctx.font = `bold ${Math.max(10, size * 0.5 * v.scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#ffffff';
           ctx.strokeStyle = 'rgba(0,0,0,0.7)';
           ctx.lineWidth = 2;
-          ctx.strokeText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52);
-          ctx.fillText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52);
+          ctx.strokeText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52 * v.scale);
+          ctx.fillText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52 * v.scale);
         }
 
         // 选中光圈
         if (selected !== null) {
-          const c = centerOf(selected, columns, size, offX, offY, totalH);
+          const c = tx(centerOf(selected, columns, size, offX, offY, totalH));
           ctx.beginPath();
-          ctx.arc(c.cx, c.cy, size * 0.78, 0, Math.PI * 2);
+          ctx.arc(c.cx, c.cy, size * 0.78 * v.scale, 0, Math.PI * 2);
           ctx.strokeStyle = 'rgba(255, 235, 59, 0.9)';
           ctx.lineWidth = 2.5;
           ctx.stroke();
         }
         // hover 描边
         if (hoverRef.current !== null && hoverRef.current !== selected) {
-          const c = centerOf(hoverRef.current, columns, size, offX, offY, totalH);
-          hexPath(ctx, c.cx, c.cy, size);
+          const c = tx(centerOf(hoverRef.current, columns, size, offX, offY, totalH));
+          hexPath(ctx, c.cx, c.cy, size * v.scale);
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
           ctx.lineWidth = 1.5;
           ctx.stroke();
@@ -455,23 +516,45 @@ export default function BoardCanvas({
     <div className={className} style={{ position: 'relative', overflow: 'hidden' }}>
       <canvas
         ref={staticRef}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', touchAction: 'none' }}
         onPointerDown={(e) => {
+          dragRef.current = { x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, moved: false };
+          (e.currentTarget as HTMLCanvasElement).setPointerCapture?.(e.pointerId);
           const tile = tileAtPointer(e.clientX, e.clientY);
           if (tile !== null) {
             if (onTilePointerDown) onTilePointerDown(tile);
             else onTileClick(tile);
           }
-          dragRef.current = { x: e.clientX, y: e.clientY, ox: 0, oy: 0 };
         }}
-        onPointerUp={() => onTilePointerUp?.()}
         onPointerMove={(e) => {
+          const d = dragRef.current;
+          if (d) {
+            // M5.2：拖拽平移（位移超过阈值才生效；生效即取消加点长按）
+            if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > DRAG_THRESHOLD) {
+              if (!d.moved) {
+                d.moved = true;
+                onTilePointerUp?.();
+              }
+              setView((v) => ({ ...v, offX: v.offX + (e.clientX - d.x), offY: v.offY + (e.clientY - d.y) }));
+            }
+            d.x = e.clientX;
+            d.y = e.clientY;
+          }
           const tile = tileAtPointer(e.clientX, e.clientY);
           if (tile !== hoverRef.current) {
             hoverRef.current = tile;
             onTileHover(tile);
           }
         }}
+        onPointerUp={() => {
+          dragRef.current = null;
+          onTilePointerUp?.();
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null;
+          onTilePointerUp?.();
+        }}
+        onDoubleClick={() => setView({ scale: 1, offX: 0, offY: 0 })}
         onPointerLeave={() => {
           hoverRef.current = null;
           onTileHover(null);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { MapFullData, MapMeta, RoomSettingsPatch } from '@dl/shared';
 import { TIME_OPTIONS } from '@dl/shared';
@@ -22,6 +22,7 @@ import { useGame } from '../stores/game';
 import { WsClient } from '../ws/client';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
+import Chat from '../components/Chat';
 
 const STATE_BADGE: Record<string, { text: string; cls: string }> = {
   unready: { text: '未准备', cls: 'bg-slate-600 text-slate-200' },
@@ -47,9 +48,7 @@ export default function Room() {
   const [mapFull, setMapFull] = useState<MapFullData | null>(null);
   const [maps, setMaps] = useState<MapMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [chatInput, setChatInput] = useState('');
   const wsRef = useRef<WsClient | null>(null);
-  const chatListRef = useRef<HTMLDivElement>(null);
 
   // 加载房间 + 成员身份校验
   useEffect(() => {
@@ -141,12 +140,6 @@ export default function Room() {
     navigate('/lobby', { replace: true });
   }, [notice, navigate, setJoined]);
 
-  // 聊天滚动到底
-  useEffect(() => {
-    const el = chatListRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [chat]);
-
   if (!room || !me) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-900 text-slate-400">加载中…</div>
@@ -181,17 +174,6 @@ export default function Room() {
     await guard(() => disbandRoom(room.id));
     setJoined(null);
     navigate('/lobby');
-  };
-
-  const handleChatSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    const text = chatInput.trim();
-    if (!text) return;
-    if (!wsRef.current?.sendChat(text)) {
-      setError('连接已断开，消息未发送');
-      return;
-    }
-    setChatInput('');
   };
 
   const handleSettingsPatch = (patch: RoomSettingsPatch) => {
@@ -496,32 +478,11 @@ export default function Room() {
 
       {/* 底部聊天 */}
       <footer className="border-t border-slate-700 px-6 py-3">
-        <div className="mx-auto flex max-w-6xl gap-3">
-          <div ref={chatListRef} className="h-24 flex-1 space-y-1 overflow-y-auto rounded bg-slate-800 px-3 py-2 text-sm">
-            {chat.length === 0 && <p className="text-slate-500">暂无消息</p>}
-            {chat.map((m) => (
-              <p key={`${m.ts}-${m.from}`}>
-                <span className="text-emerald-400">{m.username}：</span>
-                <span className="text-slate-200">{m.text}</span>
-              </p>
-            ))}
-          </div>
-          <form onSubmit={handleChatSubmit} className="flex gap-2">
-            <input
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              maxLength={200}
-              placeholder={isSpectator ? '观战中…（房间内可发言）' : '输入消息…'}
-              className="w-64 rounded bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            <button
-              type="submit"
-              className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-            >
-              发送
-            </button>
-          </form>
-        </div>
+        <Chat
+          chat={chat}
+          placeholder={isSpectator ? '观战中…（房间内可发言）' : '输入消息…'}
+          onSend={(text) => !!wsRef.current?.sendChat(text)}
+        />
       </footer>
     </div>
   );

@@ -93,4 +93,17 @@ COLORS.forEach((hex, i) => {
   const file = path.join(outDir, `flag_${i + 1}.png`);
   writeFileSync(file, png);
   console.log(`written ${file} (${png.length} bytes)`);
+  // 镂空版（M5.2，断兵视觉正式化）：外缘 3px 透明，其余实心
+  const hollow = encodePng(W, H, (x, y) => {
+    const dx = Math.abs(x - CX);
+    const dy = Math.abs(y - CY);
+    const inside = dx <= (SQRT3 / 2) * R && dy <= R - dx / SQRT3;
+    if (!inside) return [0, 0, 0, 0];
+    const dEdge = Math.min((SQRT3 / 2) * R - dx, (R - dy - dx / SQRT3) * 0.866);
+    if (dEdge < 3) return [0, 0, 0, 0]; // 外圈镂空
+    return [r, g, b, 255];
+  });
+  const hollowFile = path.join(outDir, `flag_${i + 1}_hollow.png`);
+  writeFileSync(hollowFile, hollow);
+  console.log(`written ${hollowFile} (${hollow.length} bytes)`);
 });

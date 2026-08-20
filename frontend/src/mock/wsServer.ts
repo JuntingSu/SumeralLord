@@ -156,6 +156,12 @@ export class MockWsServer implements GameTransport {
     // Mock 端无需真正同步（单端模拟）
   }
 
+  sendChat(text: string): boolean {
+    // Mock 单端模拟：本地回显
+    this.emit({ type: 'CHAT', roomId: 'mock-room', from: 0, username: '我', text, ts: Date.now() });
+    return true;
+  }
+
   sendReconnect(lastEventId: number, _gameId: string): void {
     const batch = this.log
       .filter((e) => e.eventId > lastEventId)

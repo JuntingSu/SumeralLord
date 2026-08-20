@@ -21,6 +21,7 @@ import type { GameState } from '@dl/shared';
 import { collectConsensusNodes, sameConsensus } from '../game/consensus';
 import { initialTimer, onTurnChange, tick, type TimerState } from '../game/timer';
 import type { EventQueueItem } from '../canvas/animator';
+import type { ChatEntry } from './room';
 import type { WsStatus } from '../ws/client';
 
 export interface GameTransport {
@@ -32,6 +33,8 @@ export interface GameTransport {
   submitConsensus(consensusId: string, result: ConsensusPayload): void;
   sendTimeSync(gameId: string, seat: number, stepTimeRemain: number, gameTimeRemain: number): void;
   sendReconnect(lastEventId: number, gameId: string): void;
+  /** 对局内聊天（M5.3） */
+  sendChat(text: string): boolean;
   /** 结算页关闭上报（对局结束后；全员上报后房间立即回落等待中） */
   sendSettlementDismissed(gameId: string): void;
   /** EVENT_GAP / RECONNECT 续拉（同构接口） */
@@ -86,6 +89,8 @@ interface GameStore {
   fatal: FatalError | null;
   /** 客户端意图发送回执（用于 UI 禁用反馈） */
   submitting: boolean;
+  /** 对局内聊天记录（M5.3；房间期聊天由 room store 维护） */
+  chat: ChatEntry[];
 
   startGame(params: { roomId: string; startMsg: GameStartMsg; myUserId: number | null; fogMode: boolean }): void;
   onServerMessage(msg: RoomServerMsg): void;
@@ -93,6 +98,8 @@ interface GameStore {
   submitIntent(intent: PlayerIntent): void;
   /** 超时投降（本地计时归零） */
   submitTimeoutSurrender(): void;
+  /** 对局内聊天（M5.3）：返回是否发送成功 */
+  sendChat(text: string): boolean;
   tickClock(): void;
   /** 动画播放器弹出已播完的链 */
   popChain(): void;
@@ -202,6 +209,7 @@ export const useGame = create<GameStore>((set, get) => {
     gameOver: null,
     fatal: null,
     submitting: false,
+    chat: [],
 
     startGame: ({ roomId, startMsg, myUserId, fogMode }) => {
       const init = initState({
@@ -233,6 +241,7 @@ export const useGame = create<GameStore>((set, get) => {
         fatal: null,
         disconnectedSeats: [],
         opponentClocks: {},
+        chat: [],
       });
       // 首个回合的计时基准（initState 已自动完成首势力准备 → 行动）
       const seat = init.state.currentSeat;
@@ -341,6 +350,12 @@ export const useGame = create<GameStore>((set, get) => {
           });
           return;
         }
+        case 'CHAT': {
+          set({
+            chat: [...s.chat, { from: msg.from, username: msg.username, text: msg.text, ts: msg.ts }].slice(-200),
+          });
+          return;
+        }
         default:
           return; // 房间阶段消息由房间 store 处理
       }
@@ -371,6 +386,12 @@ export const useGame = create<GameStore>((set, get) => {
       const s = get();
       if (s.mySeat === null || s.isSpectator || s.gameOver || s.fatal) return;
       get().submitIntent({ intentType: 'SURRENDER', seat: s.mySeat, reason: 'timeout' });
+    },
+
+    sendChat: (text) => {
+      const s = get();
+      if (s.isSpectator || s.gameOver || s.fatal) return false;
+      return s.transport?.sendChat(text) ?? false;
     },
 
     tickClock: () => {
@@ -430,6 +451,7 @@ export const useGame = create<GameStore>((set, get) => {
         opponentClocks: {},
         disconnectedSeats: [],
         submitting: false,
+        chat: [],
       });
     },
   };

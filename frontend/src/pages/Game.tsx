@@ -16,6 +16,7 @@ import { computeFog, type FogLevel } from '../game/fog';
 import { formatClock } from '../game/timer';
 import { EventAnimator } from '../canvas/animator';
 import BoardCanvas from '../components/BoardCanvas';
+import Chat from '../components/Chat';
 import ResultModal from './Result';
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
@@ -44,6 +45,7 @@ export default function Game() {
   const disconnectedSeats = useGame((s) => s.disconnectedSeats);
   const eventQueue = useGame((s) => s.eventQueue);
   const fogMode = useGame((s) => s.fogMode);
+  const chat = useGame((s) => s.chat);
 
   const [selected, setSelected] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -498,6 +500,11 @@ export default function Game() {
           </div>
         </aside>
       </main>
+
+      {/* 底部聊天（M5.3）：对局内参战可发、观战灰禁 */}
+      <footer className="border-t border-slate-700 px-6 py-2">
+        <Chat chat={chat} disabled={isSpectator} onSend={(text) => useGame.getState().sendChat(text)} />
+      </footer>
 
       {/* 结算/中止弹窗 */}
       {(gameOver !== null || fatal !== null) && (
