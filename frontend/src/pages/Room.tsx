@@ -11,12 +11,14 @@ import {
   leaveRoom,
   selectForce,
   setReady,
+  startRoomGame,
   updateRoomSettings,
 } from '../api/room';
 import { ApiError } from '../api/client';
 import { useAuth } from '../stores/auth';
 import { useLobby } from '../stores/lobby';
 import { useRoom } from '../stores/room';
+import { useGame } from '../stores/game';
 import { WsClient } from '../ws/client';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
@@ -80,6 +82,21 @@ export default function Room() {
       if (msg.type === 'PLAYER_LEAVE' && msg.playerId === me?.id) {
         useRoom.getState().setNotice('你已被移出房间');
       }
+      if (msg.type === 'GAME_START') {
+        // 对局开始：初始化对局状态机并跳转对局页（startMsg 已入 store，Game 页直接读取）
+        useGame.getState().startGame({
+          roomId: roomId!,
+          startMsg: msg,
+          myUserId: me?.id ?? null,
+          fogMode: useRoom.getState().room?.fogMode ?? false,
+        });
+        navigate(`/game/${roomId}`, { replace: true });
+        return;
+      }
+      if (msg.type === 'ROOM_UPDATE' && msg.room.status === 'waiting' && useGame.getState().board !== null) {
+        // 对局中止/回落：回房间页继续
+        useGame.getState().reset();
+      }
       useRoom.getState().applyServer(msg);
     });
     client.connect().catch(() => undefined);
@@ -90,7 +107,7 @@ export default function Room() {
       wsRef.current = null;
       useRoom.getState().reset();
     };
-  }, [roomId, me]);
+  }, [roomId, me, navigate]);
 
   // 房间地图变化 → 拉全量地图数据（预览 + 信息）
   useEffect(() => {
@@ -336,7 +353,7 @@ export default function Room() {
             )}
             {isHost && (
               <button
-                onClick={() => window.alert('对局启动将在 BM4 接入（GAME_START / 意图中继）')}
+                onClick={() => guard(() => startRoomGame(room.id))}
                 disabled={!canStart}
                 title={canStart ? '开始游戏（未分配势力将按设置删除或由 AI 接管）' : '等待所有玩家准备'}
                 className={`rounded px-5 py-2 font-medium ${

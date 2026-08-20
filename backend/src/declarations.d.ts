@@ -3,6 +3,7 @@ import type * as schema from './db/schema.js';
 import type { TicketService } from './auth/ticket.js';
 import type { RoomManager } from './room/manager.js';
 import type { MapCatalog } from './maps/catalog.js';
+import type { GameManager } from './game/manager.js';
 import type { AuthTokenPayload } from './auth/jwt.js';
 
 declare module 'fastify' {
@@ -11,6 +12,7 @@ declare module 'fastify' {
     tickets: TicketService;
     rooms: RoomManager;
     maps: MapCatalog;
+    games: GameManager;
   }
 
   interface FastifyRequest {

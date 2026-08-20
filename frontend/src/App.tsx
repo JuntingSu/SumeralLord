@@ -7,6 +7,7 @@ import Lobby from './pages/Lobby';
 import CreateRoom from './pages/CreateRoom';
 import Maps from './pages/Maps';
 import Room from './pages/Room';
+import Game from './pages/Game';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
@@ -54,6 +55,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Room />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/game/:roomId"
+        element={
+          <RequireAuth>
+            <Game />
           </RequireAuth>
         }
       />

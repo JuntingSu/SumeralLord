@@ -27,6 +27,17 @@ export function openDb(dbPath?: string): DbHandle {
       wins INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS match_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT NOT NULL UNIQUE,
+      room_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER NOT NULL,
+      winners TEXT NOT NULL,
+      winning_team INTEGER NOT NULL DEFAULT -1,
+      participants TEXT NOT NULL,
+      aborted INTEGER NOT NULL DEFAULT 0
+    );
   `);
   return { db: drizzle(sqlite, { schema }), sqlite };
 }

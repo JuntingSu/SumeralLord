@@ -87,6 +87,7 @@ export function soldierAt(state: GameState, index: number) {
   return state.tiles[index].soldier;
 }
 
-export function chainKinds(result: { chain: Array<{ kind: string }> }): string[] {
-  return result.chain.map((e) => e.kind);
+export function chainKinds(result: ApplyResult | { chain: Array<{ kind: string }> }): string[] {
+  if ('ok' in result && !result.ok) return [];
+  return (result as { chain: Array<{ kind: string }> }).chain.map((e) => e.kind);
 }

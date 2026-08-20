@@ -161,7 +161,7 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
         reducerVersion: config.reducerVersion,
       });
       // startGame 校验房主/全员准备，成功后 emit GAME_START（网关广播给房间所有人）
-      app.rooms.startGame(user.userId, id, {
+      app.rooms.startGame(user.id, id, {
         gameId: game.id,
         seatAssignments: startMsg.seatAssignments,
         spawnAssignments: startMsg.spawnAssignments,

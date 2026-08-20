@@ -80,3 +80,8 @@ export function changeRoomMap(id: string, mapId: string): Promise<RoomData> {
     body: JSON.stringify({ mapId }),
   });
 }
+
+/** 房主开始对局（成功后房间 WS 广播 GAME_START，前端据此跳转对局页） */
+export function startRoomGame(id: string): Promise<{ gameId: string }> {
+  return api<{ gameId: string }>(`/api/rooms/${id}/start`, { method: 'POST' });
+}

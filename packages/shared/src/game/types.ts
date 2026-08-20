@@ -79,7 +79,7 @@ export type GameEvent =
   | { level: 3; kind: 'REJOIN'; tile: number }
   | { level: 3; kind: 'BREAK'; tile: number; branches: number[] }
   // 四级
-  | { level: 4; kind: 'BREAK_JUDGE'; tile: number; connected: boolean }
+  | { level: 4; kind: 'BREAK_JUDGE'; tile: number; connected: boolean; region: number[] }
   | { level: 4; kind: 'FORCE_CLEAR'; seat: number; reason: 'no_stronghold' | 'surrender' | 'timeout' }
   | { level: 4; kind: 'VICTORY'; winningTeam: number; winners: string[]; losers: string[] };
 

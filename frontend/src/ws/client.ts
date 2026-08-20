@@ -1,4 +1,6 @@
-import type { RoomServerMsg } from '@dl/shared';
+import type { ConsensusPayload, PlayerIntent, RoomServerMsg } from '@dl/shared';
+import { reducerVersion } from '@dl/shared';
+import type { GameTransport } from '../stores/game';
 
 export type WsStatus = 'connecting' | 'open' | 'closed';
 
@@ -7,9 +9,10 @@ const PING_INTERVAL_MS = 30_000;
 
 /**
  * 房间阶段 WS 客户端：一次性 ticket 握手、30s 心跳、指数退避重连。
- * 4001/4002/4007 等业务性拒绝不重连（ticket 失效/房间不存在/非成员）。
+ * 对局阶段（M4）：实现 GameTransport——意图提交 / 共识上报 / TIME_SYNC / RECONNECT / 补发拉取。
+ * 4001/4002/4007 等业务性拒绝不重连；4003（版本不一致）不重连。
  */
-export class WsClient {
+export class WsClient implements GameTransport {
   private ws: WebSocket | null = null;
   private pingTimer: number | null = null;
   private reconnectAttempt = 0;
@@ -41,12 +44,16 @@ export class WsClient {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     const body = (await res.json()) as { success: boolean; data?: { ticket: string }; message?: string };
+    // close() 已调用（组件卸载/顶替）：不再建立连接，避免迟到连接顶替新连接
+    if (this.closedByUser) return;
     if (!body.success || !body.data) {
       this.emitStatus('closed');
       throw new Error(body.message ?? '获取连接票据失败');
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws?ticket=${body.data.ticket}&roomId=${this.roomId}`);
+    const ws = new WebSocket(
+      `${proto}://${location.host}/ws?ticket=${body.data.ticket}&roomId=${this.roomId}&reducerVersion=${encodeURIComponent(reducerVersion())}`,
+    );
     this.ws = ws;
 
     ws.onopen = () => {
@@ -88,6 +95,42 @@ export class WsClient {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify({ type: 'CHAT', text }));
     return true;
+  }
+
+  // ---------- 对局阶段（GameTransport） ----------
+
+  submitIntent(clientTempId: string, intent: PlayerIntent): void {
+    this.sendJson({ type: 'INTENT_SUBMIT', clientTempId, intent });
+  }
+
+  submitConsensus(consensusId: string, result: ConsensusPayload): void {
+    this.sendJson({ type: 'CONSENSUS_RESULT', consensusId, result });
+  }
+
+  sendTimeSync(gameId: string, seat: number, stepTimeRemain: number, gameTimeRemain: number): void {
+    this.sendJson({ type: 'TIME_SYNC', gameId, seat, stepTimeRemain, gameTimeRemain, ts: Date.now() });
+  }
+
+  sendReconnect(lastEventId: number, gameId: string): void {
+    this.sendJson({ type: 'RECONNECT', lastEventId, gameId });
+  }
+
+  async fetchEvents(
+    gameId: string,
+    after: number,
+    limit = 500,
+  ): Promise<{ events: Array<Record<string, unknown>>; nextCursor: number }> {
+    const token = localStorage.getItem('dl_token') ?? '';
+    const res = await fetch(`/api/game/${gameId}/events?after=${after}&limit=${limit}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const body = (await res.json()) as { success: boolean; data?: { events: Array<Record<string, unknown>>; nextCursor: number } };
+    if (!body.success || !body.data) throw new Error('补发拉取失败');
+    return body.data;
+  }
+
+  private sendJson(msg: object): void {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
   close(): void {

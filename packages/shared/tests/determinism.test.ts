@@ -35,7 +35,7 @@ function fullGame() {
     applied.push({ seat, intent, ok: r.ok });
     if (r.ok) cur = r.state;
   }
-  return { init: state, final: cur, steps };
+  return { init: state, final: cur, steps, applied };
 }
 
 describe('确定性（M4 验收：同输入重复调用输出全等）', () => {
@@ -44,7 +44,7 @@ describe('确定性（M4 验收：同输入重复调用输出全等）', () => {
     const run2 = fullGame();
     expect(hashGameState(run1.final)).toBe(hashGameState(run2.final));
     expect(stableStringify(run1.final)).toBe(stableStringify(run2.final));
-    expect(run1.steps.map((s) => s.ok)).toEqual(run2.steps.map((s) => s.ok));
+    expect(run1.applied.map((s) => s.ok)).toEqual(run2.applied.map((s) => s.ok));
     expect(stableStringify(run1.steps)).toBe(stableStringify(run2.steps));
   });
 

@@ -3,6 +3,8 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TERRAIN } from '@dl/shared';
+import { matchHistory } from '../db/schema.js';
+import type { Db } from '../db/client.js';
 import type {
   GameStartMsg,
   IntentBroadcastMsg,
@@ -23,14 +25,30 @@ export class GameError extends Error {
   }
 }
 
+/** 参战者会话状态（BM5：共识期望集合与断线时间线的数据源；非游戏演算） */
+export interface ParticipantState {
+  playerId: number | null;
+  /** AI seat（playerId=null 且 isAI）不参与共识，connected 恒 false */
+  isAI: boolean;
+  connected: boolean;
+  /** 断线时间戳（断开时刻；重连清除） */
+  disconnectedAt?: number;
+}
+
 export interface Game {
   id: string;
   roomId: string;
   reducerVersion: string;
   seed: string;
   spawnAssignments: SpawnAssignment[];
-  status: 'in_game' | 'finished';
+  seatAssignments: SeatAssignment[];
+  /** 开局地图（重连/观战初始状态数据源，随 meta 接口下发） */
+  map: MapFullData;
+  timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
+  status: 'in_game' | 'finished' | 'aborted';
   clearedSeats: Set<number>;
+  /** seat → 参战者状态（开局时从 seatAssignments 构造） */
+  participants: Map<number, ParticipantState>;
   eventIdCounter: number;
   createdAt: number;
   logFile: string;
@@ -51,11 +69,11 @@ export interface StartGameResult {
   startMsg: GameStartMsg;
 }
 
-/** 从 battlefield 提取某 seat 的王城地块 index（terrain=2 且 belongs=seat） */
+/** 从 battlefield 提取某 seat 的据点地块 index（terrain=1 且 belongs=seat；原"王城"编码 2 已并入据点，见地图结构变更说明） */
 export function findKingdom(map: MapFullData, seat: number): number {
   for (let i = 0; i < map.battlefield.length; i++) {
     const [terrain, belongs] = map.battlefield[i];
-    if (terrain === TERRAIN.KINGDOM && belongs === seat) return i;
+    if (terrain === TERRAIN.CITY && belongs === seat) return i;
   }
   return -1;
 }
@@ -64,7 +82,10 @@ export function findKingdom(map: MapFullData, seat: number): number {
 export class GameManager {
   private readonly games = new Map<string, Game>();
 
-  constructor(private readonly logDir: string = path.join(__dirname, '../../data/game_logs')) {
+  constructor(
+    private readonly logDir: string = path.join(__dirname, '../../data/game_logs'),
+    private readonly db?: Db,
+  ) {
     mkdirSync(this.logDir, { recursive: true });
   }
 
@@ -81,8 +102,14 @@ export class GameManager {
       reducerVersion: input.reducerVersion,
       seed: randomBytes(8).toString('hex'),
       spawnAssignments,
+      seatAssignments: input.seatAssignments,
+      map: input.map,
+      timeSettings: input.timeSettings,
       status: 'in_game',
       clearedSeats: new Set(),
+      participants: new Map(
+        input.seatAssignments.map((a) => [a.seat, { playerId: a.playerId, isAI: a.isAI, connected: false }]),
+      ),
       eventIdCounter: 0,
       createdAt: Date.now(),
       logFile: path.join(this.logDir, `${gameId}.jsonl`),
@@ -114,7 +141,7 @@ export class GameManager {
   }
 
   /** 对局流消息持久化（广播序 = 分配序 = 写入序） */
-  appendEvent(game: Game, msg: IntentBroadcastMsg | { type: string; [k: string]: unknown }): void {
+  appendEvent(game: Game, msg: object): void {
     appendFileSync(game.logFile, JSON.stringify(msg) + '\n');
   }
 
@@ -146,6 +173,53 @@ export class GameManager {
 
   markFinished(game: Game): void {
     game.status = 'finished';
+  }
+
+  markAborted(game: Game): void {
+    game.status = 'aborted';
+  }
+
+  /** 已确认 FORCE_CLEAR 的 seat 登记（会话账本；非游戏演算） */
+  addClearedSeat(game: Game, seat: number): void {
+    game.clearedSeats.add(seat);
+  }
+
+  /** 共识期望集合：在线参战 seat − 已确认清除 seat（AI seat 恒不在内） */
+  expectedSeatsOf(game: Game): number[] {
+    return [...game.participants.entries()]
+      .filter(([seat, p]) => !p.isAI && p.connected && !game.clearedSeats.has(seat))
+      .map(([seat]) => seat)
+      .sort((a, b) => a - b);
+  }
+
+  /** 参战玩家断线/重连状态更新（BM6 disconnectWatch 数据源） */
+  setConnected(game: Game, seat: number, connected: boolean, at?: number): void {
+    const p = game.participants.get(seat);
+    if (!p || p.isAI) return;
+    p.connected = connected;
+    if (connected) delete p.disconnectedAt;
+    else p.disconnectedAt = at;
+  }
+
+  /** VICTORY 确认后写结算记录（中止的对局不写） */
+  recordMatchHistory(game: Game, winners: string[], winningTeam: number, finishedAt: number): void {
+    if (!this.db) return;
+    const participants = JSON.stringify(
+      [...game.participants.entries()].map(([seat, p]) => ({ seat, playerId: p.playerId, isAI: p.isAI })),
+    );
+    this.db
+      .insert(matchHistory)
+      .values({
+        gameId: game.id,
+        roomId: game.roomId,
+        startedAt: game.createdAt,
+        finishedAt,
+        winners: JSON.stringify(winners),
+        winningTeam,
+        participants,
+        aborted: 0,
+      })
+      .run();
   }
 
   dispose(): void {

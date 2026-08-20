@@ -30,6 +30,23 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
     const { events, nextCursor } = app.games.readEvents(gameId, Number.isFinite(after) ? after : 0, Number.isFinite(limit) ? limit : 500);
     return ok(reply, { events, nextCursor });
   });
+
+  /** 对局初始数据（刷新重连/中途观战恢复 boardState 用；与 GAME_START 同构） */
+  app.get('/api/game/:gameId/meta', async (request, reply) => {
+    const { gameId } = request.params as { gameId: string };
+    const game = app.games.get(gameId);
+    if (!game) return fail(reply, 404, ERROR_CODES.ROOM_NOT_FOUND, '对局不存在');
+    return ok(reply, {
+      gameId: game.id,
+      roomId: game.roomId,
+      map: game.map,
+      seatAssignments: game.seatAssignments,
+      spawnAssignments: game.spawnAssignments,
+      seed: game.seed,
+      timeSettings: game.timeSettings,
+      reducerVersion: game.reducerVersion,
+    });
+  });
 };
 
 export type { SeatAssignment };

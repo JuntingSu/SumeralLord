@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { TIME_OPTIONS } from './constants.js';
 import type { MapFullData, RoomData, RoomPlayer } from './types.js';
+import type { SeatAssignment, SpawnAssignment } from './game/types.js';
 
 const oneOf = (options: readonly number[], label: string) =>
   z
@@ -92,13 +93,22 @@ export interface PingMsg {
   type: 'PING';
 }
 
-export type RoomClientMsg = PingMsg | ChatSendMsg;
+export type RoomClientMsg =
+  | PingMsg
+  | ChatSendMsg
+  | z.infer<typeof IntentSubmitSchema>
+  | z.infer<typeof ConsensusResultSchema>
+  | z.infer<typeof ReconnectMsgSchema>
+  | z.infer<typeof TimeSyncMsgSchema>;
 
 // ---------- WS 房间阶段（BM3）：服务器 → 客户端 ----------
 
 export interface ConnectAckMsg {
   type: 'CONNECT_ACK';
   roomId: string;
+  /** 对局进行中时携带：当前对局与已发生 eventId（前端据此决定重连重放） */
+  gameId?: string;
+  lastEventId?: number;
 }
 
 export interface PongMsg {
@@ -156,7 +166,7 @@ export interface ForceSelectMsg {
 export interface RoomDisbandedMsg {
   type: 'ROOM_DISBANDED';
   roomId: string;
-  reason: 'host_disband' | 'idle_timeout';
+  reason: 'host_disband' | 'idle_timeout' | 'game_timeout';
 }
 
 export interface ErrorMsg {
@@ -177,11 +187,23 @@ export type RoomServerMsg =
   | RoomUpdateMsg
   | ForceSelectMsg
   | RoomDisbandedMsg
-  | ErrorMsg;
+  | ErrorMsg
+  // 对局开始（广播；不带 eventId，但前端据此初始化本地对局状态）
+  | GameStartMsg
+  // 对局流消息（带 eventId，需按序应用/重放）
+  | IntentAckMsg
+  | IntentBroadcastMsg
+  | ConsensusConfirmedMsg
+  | GameOverMsg
+  // 对局会话消息（不带 eventId）
+  | TimeSyncMsg
+  | PlayerDisconnectMsg
+  | PlayerReconnectMsg
+  | ReconnectAckMsg;
 
 /** RoomManager 状态变更事件（WS 网关广播源） */
 export type RoomManagerEvent =
-  | Exclude<RoomServerMsg, ConnectAckMsg | PongMsg | ChatMsg | ErrorMsg>
+  | Exclude<RoomServerMsg, ConnectAckMsg | PongMsg | ChatMsg | ErrorMsg | IntentAckMsg | TimeSyncMsg | PlayerDisconnectMsg | PlayerReconnectMsg | ReconnectAckMsg | IntentBroadcastMsg | ConsensusConfirmedMsg | GameOverMsg>
   | GameStartMsg;
 
 // ---------- 对局：意图（P1） ----------
@@ -245,6 +267,21 @@ export const ConsensusResultSchema = z.object({
   result: ConsensusPayloadSchema,
 });
 
+export const ReconnectMsgSchema = z.object({
+  type: z.literal('RECONNECT'),
+  lastEventId: z.number().int().nonnegative(),
+  gameId: z.string().min(1),
+});
+
+export const TimeSyncMsgSchema = z.object({
+  type: z.literal('TIME_SYNC'),
+  gameId: z.string().min(1),
+  seat: z.number().int().positive(),
+  stepTimeRemain: z.number().int().nonnegative(),
+  gameTimeRemain: z.number().int().nonnegative(),
+  ts: z.number().int(),
+});
+
 // ---------- WS 服务器 → 客户端（结构声明，供前端类型使用） ----------
 
 export interface IntentBroadcastMsg {
@@ -268,20 +305,57 @@ export interface ConsensusConfirmedMsg {
   eventId: number;
 }
 
-// ---------- 对局：开局（P4：不带 initialBoardState，带随机源） ----------
-
-export interface SeatAssignment {
+/** 对局结束时各势力会话结果（服务器会话账本，非游戏演算；前端结算以本地 reducer 状态为准） */
+export interface ForceResult {
   seat: number;
-  playerId: number | null;
-  /** aiTakeover && 无玩家时 true；难度由前端从 map.player_list[].computer 读取 */
+  playerId: string | null;
   isAI: boolean;
+  /** 对局中已确认清除（投降/清除共识确认过） */
+  cleared: boolean;
 }
 
-export interface SpawnAssignment {
-  seat: number;
-  /** 该 seat 王城地块的线性 index（randomSpawn=false 时即地图原始王城位置） */
-  spawnIndex: number;
+export interface GameOverMsg {
+  type: 'GAME_OVER';
+  gameId: string;
+  winners: string[];
+  winningTeam: number;
+  forces: ForceResult[];
+  eventId: number;
 }
+
+export interface TimeSyncMsg {
+  type: 'TIME_SYNC';
+  gameId: string;
+  seat: number;
+  stepTimeRemain: number;
+  gameTimeRemain: number;
+  ts: number;
+}
+
+export interface PlayerDisconnectMsg {
+  type: 'PLAYER_DISCONNECT';
+  gameId: string;
+  seat: number;
+  at: number;
+}
+
+export interface PlayerReconnectMsg {
+  type: 'PLAYER_RECONNECT';
+  gameId: string;
+  seat: number;
+}
+
+export interface ReconnectAckMsg {
+  type: 'RECONNECT_ACK';
+  gameId: string;
+  lastEventId: number;
+  /** 本次直发批（≤500）；续批走 GET /api/game/:gameId/events?after= 拉取 */
+  batch: Array<Record<string, unknown>>;
+  nextBatchCursor?: number;
+}
+
+// ---------- 对局：开局（P4：不带 initialBoardState，带随机源） ----------
+// SeatAssignment / SpawnAssignment 定义于 game/types.ts（开局构造同源使用）
 
 export interface GameStartMsg {
   type: 'GAME_START';

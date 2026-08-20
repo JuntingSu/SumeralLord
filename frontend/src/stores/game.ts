@@ -1,0 +1,429 @@
+// 对局状态机（前端规划 §4.2 / §5.1）：前端本地权威。
+// - boardState：reducer 演算结果（权威）；eventQueue：动画队列（与状态解耦）
+// - appliedEventId 游标：严格按 eventId 序应用；跳号（EVENT_GAP）→ 补发拉取后继续
+// - 演算到共识节点立即上报（与动画解耦）；CONSENSUS_CONFIRMED 与本地比对
+// - 回合轮转驱动计时器（规则 v2 §10）；计时归零 → 本地发起超时投降意图
+import { create } from 'zustand';
+import type {
+  ConsensusPayload,
+  GameEvent,
+  GameOverMsg,
+  GameStartMsg,
+  MapFullData,
+  PlayerIntent,
+  RoomServerMsg,
+  RoomTimeSettings,
+  SeatAssignment,
+} from '@dl/shared';
+import { applyIntent, initState } from '@dl/shared';
+import type { GameState } from '@dl/shared';
+import { collectConsensusNodes, sameConsensus } from '../game/consensus';
+import { initialTimer, onTurnChange, tick, type TimerState } from '../game/timer';
+import type { WsStatus } from '../ws/client';
+
+export interface GameTransport {
+  onMessage(handler: (msg: RoomServerMsg) => void): () => void;
+  onStatus(handler: (status: WsStatus) => void): () => void;
+  connect(): Promise<void>;
+  close(): void;
+  submitIntent(clientTempId: string, intent: PlayerIntent): void;
+  submitConsensus(consensusId: string, result: ConsensusPayload): void;
+  sendTimeSync(gameId: string, seat: number, stepTimeRemain: number, gameTimeRemain: number): void;
+  sendReconnect(lastEventId: number, gameId: string): void;
+  /** EVENT_GAP / RECONNECT 续拉（同构接口） */
+  fetchEvents(gameId: string, after: number, limit?: number): Promise<{ events: Array<Record<string, unknown>>; nextCursor: number }>;
+}
+
+let tempIdSeq = 0;
+function nextTempId(): string {
+  tempIdSeq += 1;
+  return `c${Date.now().toString(36)}-${tempIdSeq}`;
+}
+
+export interface FatalError {
+  code: string;
+  message: string;
+}
+
+interface GameStore {
+  /** 对局传输通道（真实 WS 或 Mock；由 attachTransport 注入，不参与渲染） */
+  transport: GameTransport | null;
+  gameId: string | null;
+  roomId: string | null;
+  map: MapFullData | null;
+  seatAssignments: SeatAssignment[] | null;
+  mySeat: number | null;
+  isSpectator: boolean;
+  timeSettings: RoomTimeSettings;
+  fogMode: boolean;
+
+  board: GameState | null;
+  appliedEventId: number;
+  eventQueue: GameEvent[];
+  lastChain: GameEvent[];
+  /** clientTempId → eventId（ACK 关联表） */
+  ackMap: Record<string, number>;
+  /** 本端已提交待 ACK 的意图（clientTempId → intent） */
+  localIntents: Record<string, PlayerIntent>;
+  /** 已上报待确认的共识（consensusId → payload） */
+  pendingConsensus: Record<string, ConsensusPayload>;
+  /** 加点长按当前目标地块（UI 交互状态） */
+  lastPointTile: number | null;
+
+  connection: WsStatus;
+  timer: TimerState;
+  /** TIME_SYNC 校正的对手计时显示 */
+  opponentClocks: Record<number, { stepTimeRemain: number; gameTimeRemain: number }>;
+  /** 断线状态（PLAYER_DISCONNECT 的 seat 集合） */
+  disconnectedSeats: number[];
+
+  gameOver: GameOverMsg | null;
+  fatal: FatalError | null;
+  /** 客户端意图发送回执（用于 UI 禁用反馈） */
+  submitting: boolean;
+
+  startGame(params: { roomId: string; startMsg: GameStartMsg; myUserId: number | null; fogMode: boolean }): void;
+  onServerMessage(msg: RoomServerMsg): void;
+  onStatus(status: WsStatus): void;
+  submitIntent(intent: PlayerIntent): void;
+  /** 超时投降（本地计时归零） */
+  submitTimeoutSurrender(): void;
+  tickClock(): void;
+  consumeNextEvent(): GameEvent | null;
+  clearEventQueue(): void;
+  /** 断线重连后全量重放追平 */
+  reconnectCatchUp(): void;
+  reset(): void;
+}
+
+type ApplyOutcome = 'applied' | 'duplicate' | 'gap' | 'ignored';
+
+/** 严格按 eventId 序应用一条对局流消息（纯逻辑，供 store 与补发共用） */
+/** 严格按 eventId 序应用一条对局流消息（经 set 提交，保证订阅者收到通知） */
+function applyStreamMessage(
+  get: () => GameStore,
+  set: (partial: Partial<GameStore>) => void,
+  eventId: number,
+  intent: PlayerIntent,
+  fromSeat: number,
+  transport: GameTransport | null,
+): ApplyOutcome {
+  const s = get();
+  if (s.gameOver || s.fatal) return 'ignored';
+  if (eventId <= s.appliedEventId) return 'duplicate';
+  if (eventId !== s.appliedEventId + 1) return 'gap';
+  const board = s.board;
+  if (!board) return 'ignored';
+  const r = applyIntent(board, { actor: { kind: 'PLAYER', seat: fromSeat }, intent });
+  if (!r.ok) {
+    // 非法意图：确定性拒绝，游标照常前进（各端一致）
+    set({ appliedEventId: eventId });
+    return 'applied';
+  }
+  // 共识节点：立即上报（与动画解耦）
+  const nodes = collectConsensusNodes(eventId, r.chain);
+  const pendingConsensus = { ...s.pendingConsensus };
+  for (const node of nodes) {
+    pendingConsensus[node.consensusId] = node.payload;
+    transport?.submitConsensus(node.consensusId, node.payload);
+  }
+  // 回合轮转 → 计时器重置（加时 + 步时重置）
+  let timer = s.timer;
+  const endTurn = r.chain.find((e) => e.kind === 'END_TURN');
+  if (endTurn && endTurn.kind === 'END_TURN') {
+    timer = onTurnChange(timer, endTurn.toSeat, s.timeSettings);
+  }
+  set({
+    board: r.state,
+    appliedEventId: eventId,
+    eventQueue: [...s.eventQueue, ...r.chain],
+    lastChain: r.chain,
+    pendingConsensus,
+    timer,
+  });
+  return 'applied';
+}
+
+export const useGame = create<GameStore>((set, get) => {
+  let hasOpenedOnce = false;
+
+  /** EVENT_GAP：补发拉取后按序继续应用（真实后端 GET /api/game/:id/events；Mock 同构） */
+  async function catchUp(): Promise<void> {
+    const s = get();
+    const transport = s.transport;
+    if (!transport || !s.gameId) return;
+    try {
+      const { events, nextCursor } = await transport.fetchEvents(s.gameId, s.appliedEventId);
+      for (const raw of events) {
+        const msg = raw as { eventId?: number; intent?: PlayerIntent; fromSeat?: number };
+        if (typeof msg.eventId !== 'number' || !msg.intent) continue;
+        applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat ?? 0, transport);
+      }
+      if (nextCursor > 0) void catchUp();
+    } catch {
+      // 补发失败：保持游标不动，等待下一条消息再次触发
+    }
+  }
+
+  return {
+    transport: null,
+    gameId: null,
+    roomId: null,
+    map: null,
+    seatAssignments: null,
+    mySeat: null,
+    isSpectator: false,
+    timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
+    fogMode: false,
+
+    board: null,
+    appliedEventId: 0,
+    eventQueue: [],
+    lastChain: [],
+    ackMap: {},
+    localIntents: {},
+    pendingConsensus: {},
+    lastPointTile: null,
+
+    connection: 'connecting',
+    timer: initialTimer({ stepTime: 90, gameTime: 1200, additionalTime: 0 }),
+    opponentClocks: {},
+    disconnectedSeats: [],
+
+    gameOver: null,
+    fatal: null,
+    submitting: false,
+
+    startGame: ({ roomId, startMsg, myUserId, fogMode }) => {
+      const init = initState({
+        map: startMsg.map,
+        seatAssignments: startMsg.seatAssignments,
+        timeSettings: startMsg.timeSettings,
+      });
+      const mySeat = startMsg.seatAssignments.find((a) => a.playerId !== null && a.playerId === myUserId)?.seat ?? null;
+      const isSpectator = myUserId !== null && mySeat === null;
+      set({
+        gameId: startMsg.gameId,
+        roomId,
+        map: startMsg.map,
+        seatAssignments: startMsg.seatAssignments,
+        mySeat,
+        isSpectator,
+        timeSettings: startMsg.timeSettings,
+        fogMode,
+        board: init.state,
+        appliedEventId: 0,
+        eventQueue: [],
+        lastChain: init.chain,
+        ackMap: {},
+        localIntents: {},
+        pendingConsensus: {},
+        lastPointTile: null,
+        timer: initialTimer(startMsg.timeSettings),
+        gameOver: null,
+        fatal: null,
+        disconnectedSeats: [],
+        opponentClocks: {},
+      });
+      // 首个回合的计时基准（initState 已自动完成首势力准备 → 行动）
+      const seat = init.state.currentSeat;
+      if (seat > 0) {
+        set({ timer: onTurnChange(initialTimer(startMsg.timeSettings), seat, startMsg.timeSettings) });
+      }
+    },
+
+    onServerMessage: (msg) => {
+      const s = get();
+      switch (msg.type) {
+        case 'INTENT_ACK': {
+          const intent = s.localIntents[msg.clientTempId];
+          const localIntents = { ...s.localIntents };
+          delete localIntents[msg.clientTempId];
+          const ackMap = { ...s.ackMap, [msg.clientTempId]: msg.eventId };
+          set({ ackMap, localIntents, submitting: false });
+          // 自己的意图：ACK 后按 eventId 序应用（服务器不回环广播）
+          if (intent && s.mySeat !== null) {
+            const outcome = applyStreamMessage(get, set, msg.eventId, intent, s.mySeat, s.transport);
+            if (outcome === 'gap') void catchUp();
+          }
+          return;
+        }
+        case 'INTENT_BROADCAST': {
+          const outcome = applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat, s.transport);
+          if (outcome === 'gap') void catchUp();
+          return;
+        }
+        case 'CONSENSUS_CONFIRMED': {
+          const local = s.pendingConsensus[msg.consensusId];
+          const pendingConsensus = { ...s.pendingConsensus };
+          delete pendingConsensus[msg.consensusId];
+          if (!local) {
+            set({ pendingConsensus });
+            return; // 未上报过该节点（如重放路径）：忽略
+          }
+          if (!sameConsensus(local, msg.confirmed)) {
+            set({
+              pendingConsensus,
+              fatal: { code: 'CONSENSUS_MISMATCH', message: '对局状态异常，本局中止不结算' },
+            });
+            return;
+          }
+          set({ pendingConsensus });
+          return;
+        }
+        case 'GAME_OVER': {
+          set({ gameOver: msg });
+          return;
+        }
+        case 'TIME_SYNC': {
+          set({
+            opponentClocks: {
+              ...s.opponentClocks,
+              [msg.seat]: { stepTimeRemain: msg.stepTimeRemain, gameTimeRemain: msg.gameTimeRemain },
+            },
+          });
+          return;
+        }
+        case 'PLAYER_DISCONNECT': {
+          set({
+            disconnectedSeats: s.disconnectedSeats.includes(msg.seat) ? s.disconnectedSeats : [...s.disconnectedSeats, msg.seat],
+          });
+          return;
+        }
+        case 'PLAYER_RECONNECT': {
+          set({ disconnectedSeats: s.disconnectedSeats.filter((x) => x !== msg.seat) });
+          return;
+        }
+        case 'RECONNECT_ACK': {
+          // 重连重放：batch 按 eventId 序应用（INTENT_BROADCAST 重放、CONFIRMED 清理、GAME_OVER 结算）
+          for (const raw of msg.batch) {
+            const m = raw as {
+              type?: string;
+              eventId?: number;
+              intent?: PlayerIntent;
+              fromSeat?: number;
+              consensusId?: string;
+              confirmed?: ConsensusPayload;
+              type_: 'GAME_OVER' | string;
+            };
+            if (m.type === 'INTENT_BROADCAST' && typeof m.eventId === 'number' && m.intent) {
+              applyStreamMessage(get, set, m.eventId, m.intent, m.fromSeat ?? 0, s.transport);
+            } else if (m.type === 'CONSENSUS_CONFIRMED' && m.consensusId) {
+              const pendingConsensus = { ...get().pendingConsensus };
+              delete pendingConsensus[m.consensusId];
+              set({ pendingConsensus });
+            } else if (m.type === 'GAME_OVER') {
+              set({ gameOver: m as unknown as GameOverMsg });
+            }
+          }
+          if (msg.nextBatchCursor && msg.nextBatchCursor > 0) void catchUp();
+          return;
+        }
+        case 'ERROR': {
+          if (msg.fatal) set({ fatal: { code: msg.code, message: msg.message } });
+          return;
+        }
+        case 'ROOM_DISBANDED': {
+          set({
+            fatal: {
+              code: 'ROOM_DISBANDED',
+              message: msg.reason === 'game_timeout' ? '对局超时，房间已解散' : '房间已解散',
+            },
+          });
+          return;
+        }
+        default:
+          return; // 房间阶段消息由房间 store 处理
+      }
+    },
+
+    onStatus: (status) => {
+      set({ connection: status });
+      if (status === 'open' && hasOpenedOnce) {
+        // 断线重连成功：全量重放追平（RECONNECT → RECONNECT_ACK → 重放）
+        get().reconnectCatchUp();
+      }
+      if (status === 'open') hasOpenedOnce = true;
+    },
+
+    submitIntent: (intent) => {
+      const s = get();
+      if (s.isSpectator || s.gameOver || s.fatal || s.board === null) return;
+      if (s.mySeat === null) return;
+      const clientTempId = nextTempId();
+      set({
+        submitting: true,
+        localIntents: { ...s.localIntents, [clientTempId]: intent },
+      });
+      s.transport?.submitIntent(clientTempId, intent);
+    },
+
+    submitTimeoutSurrender: () => {
+      const s = get();
+      if (s.mySeat === null || s.isSpectator || s.gameOver || s.fatal) return;
+      get().submitIntent({ intentType: 'SURRENDER', seat: s.mySeat, reason: 'timeout' });
+    },
+
+    tickClock: () => {
+      const s = get();
+      const { next, timeout } = tick(s.timer);
+      set({ timer: next });
+      if (timeout) get().submitTimeoutSurrender();
+    },
+
+    consumeNextEvent: () => {
+      const s = get();
+      if (s.eventQueue.length === 0) return null;
+      const [head, ...rest] = s.eventQueue;
+      set({ eventQueue: rest });
+      return head;
+    },
+
+    clearEventQueue: () => set({ eventQueue: [] }),
+
+    reconnectCatchUp: () => {
+      const s = get();
+      if (!s.transport || !s.gameId) return;
+      s.transport.sendReconnect(s.appliedEventId, s.gameId);
+    },
+
+    reset: () => {
+      hasOpenedOnce = false;
+      set({
+        transport: null,
+        gameId: null,
+        roomId: null,
+        map: null,
+        seatAssignments: null,
+        mySeat: null,
+        isSpectator: false,
+        board: null,
+        appliedEventId: 0,
+        eventQueue: [],
+        lastChain: [],
+        ackMap: {},
+        localIntents: {},
+        pendingConsensus: {},
+        lastPointTile: null,
+        gameOver: null,
+        fatal: null,
+        timer: initialTimer({ stepTime: 90, gameTime: 1200, additionalTime: 0 }),
+        opponentClocks: {},
+        disconnectedSeats: [],
+        submitting: false,
+      });
+    },
+  };
+});
+
+/** 注入对局传输通道（Game 页面挂载时调用；返回解绑函数） */
+export function attachTransport(t: GameTransport): () => void {
+  useGame.setState({ transport: t });
+  const offMsg = t.onMessage((msg) => useGame.getState().onServerMessage(msg));
+  const offStatus = t.onStatus((status) => useGame.getState().onStatus(status));
+  return () => {
+    offMsg();
+    offStatus();
+    useGame.setState({ transport: null });
+  };
+}

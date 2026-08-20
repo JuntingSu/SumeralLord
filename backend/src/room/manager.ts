@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { ROOMS } from '@dl/shared';
+import { GAME, ROOMS } from '@dl/shared';
 import type {
   ErrorCode,
   GameStartMsg,
@@ -27,7 +27,7 @@ interface RoomPlayerInternal {
   id: number;
   username: string;
   flag: number;
-  state: 'unready' | 'prepared' | 'spectating';
+  state: 'unready' | 'prepared' | 'spectating' | 'in_game';
   online: boolean;
   joinedAt: number;
 }
@@ -45,12 +45,16 @@ interface Room {
   mapTitle: string;
   mapPlayerNum: number;
   timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
-  status: 'ROOM_OPEN' | 'IN_GAME';
+  status: 'ROOM_OPEN' | 'IN_GAME' | 'GAME_OVER';
   players: Map<number, RoomPlayerInternal>;
   forces: RoomForce[];
   gameId?: string;
   createdAt: number;
   lastActivityAt: number;
+  /** IN_GAME 硬上限计时起点（startGame 时记录） */
+  gameStartedAt?: number;
+  /** GAME_OVER 回落计时起点（finishGame 时记录） */
+  gameOverAt?: number;
 }
 
 export interface RoomUser {
@@ -62,6 +66,10 @@ export interface RoomUser {
 export interface RoomManagerOptions {
   idleMs?: number;
   sweepIntervalMs?: number;
+  /** IN_GAME 对局硬上限（BM6 idleSweeper，超时解散 game_timeout） */
+  gameHardCapMs?: number;
+  /** GAME_OVER 结算展示保留时长，超时回落 ROOM_OPEN */
+  gameOverRetainMs?: number;
   /** 状态变更事件回调（WS 网关广播源） */
   onEvent?: (event: RoomManagerEvent) => void;
 }
@@ -345,6 +353,7 @@ export class RoomManager {
     }
     room.status = 'IN_GAME';
     room.gameId = payload.gameId;
+    room.gameStartedAt = Date.now();
     for (const p of room.players.values()) {
       if (p.state !== 'spectating') p.state = 'in_game';
     }
@@ -372,6 +381,39 @@ export class RoomManager {
 
   gameIdOf(roomId: string): string | undefined {
     return this.rooms.get(roomId)?.gameId;
+  }
+
+  /** VICTORY 确认：房间进入 GAME_OVER（结算展示；5min 未重开由 idleSweeper 回落 ROOM_OPEN） */
+  finishGame(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room || room.status !== 'IN_GAME') return;
+    room.status = 'GAME_OVER';
+    room.gameOverAt = Date.now();
+    this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: this.toRoomData(room) });
+  }
+
+  /** 对局中止（共识分歧/超时）：立即回 ROOM_OPEN、全员 unready，可重开 */
+  abortGame(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    room.status = 'ROOM_OPEN';
+    room.gameId = undefined;
+    for (const p of room.players.values()) {
+      if (p.state !== 'spectating') p.state = 'unready';
+    }
+    this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: this.toRoomData(room) });
+  }
+
+  /** GAME_OVER 回落 ROOM_OPEN（idleSweeper 5min 超时调用）：全员 unready，forces 分配保留 */
+  reopenRoom(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room || room.status !== 'GAME_OVER') return;
+    room.status = 'ROOM_OPEN';
+    room.gameId = undefined;
+    for (const p of room.players.values()) {
+      if (p.state !== 'spectating') p.state = 'unready';
+    }
+    this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: this.toRoomData(room) });
   }
 
   disband(hostUserId: number, roomId: string): void {
@@ -443,10 +485,22 @@ export class RoomManager {
   private sweep(): void {
     const now = Date.now();
     for (const [id, room] of this.rooms) {
-      // IN_GAME 房间的 4h 硬上限在 BM6 断线治理中接入
-      if (room.status === 'ROOM_OPEN' && now - room.lastActivityAt > (this.opts.idleMs ?? ROOMS.IDLE_MS)) {
-        this.emit({ type: 'ROOM_DISBANDED', roomId: id, reason: 'idle_timeout' });
-        this.rooms.delete(id);
+      if (room.status === 'ROOM_OPEN') {
+        if (now - room.lastActivityAt > (this.opts.idleMs ?? ROOMS.IDLE_MS)) {
+          this.emit({ type: 'ROOM_DISBANDED', roomId: id, reason: 'idle_timeout' });
+          this.rooms.delete(id);
+        }
+      } else if (room.status === 'IN_GAME') {
+        // 对局硬上限（P3：僵尸对局治理；参数可配置便于测试加速）
+        if (now - (room.gameStartedAt ?? room.createdAt) > (this.opts.gameHardCapMs ?? GAME.GAME_HARD_CAP_MS)) {
+          this.emit({ type: 'ROOM_DISBANDED', roomId: id, reason: 'game_timeout' });
+          this.rooms.delete(id);
+        }
+      } else if (room.status === 'GAME_OVER') {
+        // 结算展示保留期结束 → 回落 ROOM_OPEN（全员 unready，可再来一局）
+        if (now - (room.gameOverAt ?? now) > (this.opts.gameOverRetainMs ?? 5 * 60 * 1000)) {
+          this.reopenRoom(id);
+        }
       }
     }
   }
