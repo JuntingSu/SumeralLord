@@ -141,9 +141,13 @@ export class RoomManager {
     return room;
   }
 
-  listItems(status?: 'waiting' | 'in_game'): RoomListItem[] {
+  listItems(status?: 'waiting' | 'in_game' | 'game_over'): RoomListItem[] {
     return [...this.rooms.values()]
-      .filter((r) => !status || (r.status === 'ROOM_OPEN' ? 'waiting' : 'in_game') === status)
+      .filter(
+        (r) =>
+          !status ||
+          (r.status === 'ROOM_OPEN' ? 'waiting' : r.status === 'GAME_OVER' ? 'game_over' : 'in_game') === status,
+      )
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
       .map((r) => this.toListItem(r));
   }
@@ -184,14 +188,18 @@ export class RoomManager {
     return this.toRoomData(room);
   }
 
-  /** 准备/取消准备（观战与对局中不可准备） */
+  /** 准备/取消准备（观战与对局中不可准备；未选择势力不可准备） */
   setReady(userId: number, roomId: string, ready: boolean): void {
     const room = this.mustGet(roomId);
     this.touch(room);
     const player = room.players.get(userId);
     if (!player) throw new RoomError('NOT_IN_ROOM', '你不在该房间中');
     if (player.state === 'spectating') throw new RoomError('INVALID_PARAMS', '观战玩家无需准备');
-    if (room.status !== 'ROOM_OPEN') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    if (room.status === 'IN_GAME') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    if (room.status === 'GAME_OVER') throw new RoomError('INVALID_PARAMS', '对局已结束，结算展示中，稍后可再来一局');
+    if (ready && !room.forces.some((f) => f.playerId === userId)) {
+      throw new RoomError('FORCE_NOT_SELECTED', '请先选择势力再准备');
+    }
     player.state = ready ? 'prepared' : 'unready';
     this.emit({ type: 'PLAYER_READY', roomId: room.id, playerId: userId, ready });
   }
@@ -203,7 +211,8 @@ export class RoomManager {
     const player = room.players.get(userId);
     if (!player) throw new RoomError('NOT_IN_ROOM', '你不在该房间中');
     if (player.state === 'spectating') throw new RoomError('INVALID_PARAMS', '观战玩家不能选择势力');
-    if (room.status !== 'ROOM_OPEN') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    if (room.status === 'IN_GAME') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    if (room.status === 'GAME_OVER') throw new RoomError('INVALID_PARAMS', '对局已结束，结算展示中，稍后可再来一局');
 
     if (seat === -1) {
       for (const force of room.forces) {
@@ -211,6 +220,11 @@ export class RoomManager {
           force.playerId = null;
           this.emit({ type: 'FORCE_SELECT', roomId: room.id, seat: force.seat, playerId: null });
         }
+      }
+      // 取消势力后不再是"已选择势力"的玩家：准备状态同步回落（保持不变式）
+      if (player.state === 'prepared') {
+        player.state = 'unready';
+        this.emit({ type: 'PLAYER_READY', roomId: room.id, playerId: userId, ready: false });
       }
       return this.toRoomData(room);
     }
@@ -295,6 +309,10 @@ export class RoomManager {
     room.mapTitle = map.title;
     room.mapPlayerNum = map.player_num;
     room.forces = toRoomForces(map);
+    // 换图视为房间配置变更：已准备玩家回落未准备（观战不变）
+    for (const p of room.players.values()) {
+      if (p.state === 'prepared') p.state = 'unready';
+    }
     const data = this.toRoomData(room);
     this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: data });
     return data;
@@ -389,6 +407,10 @@ export class RoomManager {
     if (!room || room.status !== 'IN_GAME') return;
     room.status = 'GAME_OVER';
     room.gameOverAt = Date.now();
+    // 参战玩家状态同步回落 unready（不再显示"对局中"；forces 分配保留待重开）
+    for (const p of room.players.values()) {
+      if (p.state !== 'spectating') p.state = 'unready';
+    }
     this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: this.toRoomData(room) });
   }
 
@@ -452,7 +474,7 @@ export class RoomManager {
       mapTitle: room.mapTitle,
       playerNum: room.mapPlayerNum,
       timeSettings: room.timeSettings,
-      status: room.status === 'ROOM_OPEN' ? 'waiting' : 'in_game',
+      status: room.status === 'ROOM_OPEN' ? 'waiting' : room.status === 'GAME_OVER' ? 'game_over' : 'in_game',
       players: [...room.players.values()].sort((a, b) => a.joinedAt - b.joinedAt),
       forces: room.forces,
     };
@@ -466,7 +488,7 @@ export class RoomManager {
       currentPlayers: room.players.size - spectators,
       spectatorCount: spectators,
       maxPlayers: room.mapPlayerNum,
-      status: room.status === 'ROOM_OPEN' ? 'waiting' : 'in_game',
+      status: room.status === 'ROOM_OPEN' ? 'waiting' : room.status === 'GAME_OVER' ? 'game_over' : 'in_game',
       hasPassword: room.passwordHash !== null,
       allowSpectate: room.allowSpectate,
     };

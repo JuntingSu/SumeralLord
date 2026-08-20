@@ -115,6 +115,10 @@ export class WsClient implements GameTransport {
     this.sendJson({ type: 'RECONNECT', lastEventId, gameId });
   }
 
+  sendSettlementDismissed(gameId: string): void {
+    this.sendJson({ type: 'SETTLEMENT_DISMISSED', gameId });
+  }
+
   async fetchEvents(
     gameId: string,
     after: number,

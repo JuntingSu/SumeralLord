@@ -203,3 +203,54 @@ describe('§8.1.7 加点事件 / §5 点数', () => {
     expect(r.chain[0]).toMatchObject({ kind: 'ADD_POINT', amount: 2 });
   });
 });
+
+describe('自动切换（补充规则）', () => {
+  it('进入行动阶段无可动兵：代玩家自动切换至加点阶段', () => {
+    // seat1 仅一个兵力1连兵（无移动力）→ 自动切到 ADD_POINT
+    const map = makeMap({ tiles: { 6: [CITY, 1, 1], 12: [CITY, 2, 2] } });
+    const { state, chain } = startGame(map, ASG);
+    expect(state.currentSeat).toBe(1);
+    expect(state.phase).toBe('ADD_POINT');
+    const switches = chain.filter((e) => e.kind === 'SWITCH_PHASE').map((e) => ({ from: e.from, to: e.to }));
+    expect(switches).toContainEqual({ from: 'ACTION', to: 'ADD_POINT' });
+  });
+
+  it('有可动兵时保持行动阶段（不自动切换）', () => {
+    const { state } = startGame(twoPlayerMap(), ASG);
+    expect(state.phase).toBe('ACTION');
+  });
+
+  it('加点用尽：自动切换结束回合；未用尽保持加点阶段', () => {
+    // seat1 连兵 6(str1)+7(str2) → 点数 2；7 可动 → 正常进入行动阶段
+    const map = makeMap({ tiles: { 6: [CITY, 1, 1], 7: [PLAIN, 1, 2], 12: [CITY, 2, 2] } });
+    const { state } = startGame(map, ASG);
+    expect(state.phase).toBe('ACTION');
+    const s1 = act(state, 1, { intentType: 'SWITCH_PHASE' });
+    expect(s1.state.phase).toBe('ADD_POINT');
+    // 加 1 点：点数剩 1，仍处加点阶段
+    const s2 = act(s1.state, 1, { intentType: 'ADD_POINT', coordinate: 7, amount: 1 });
+    expect(s2.ok).toBe(true);
+    if (!s2.ok) return;
+    expect(force(s2.state, 1).points).toBe(1);
+    expect(s2.state.phase).toBe('ADD_POINT');
+    // 再加 1 点：点数归零 → 自动切换结束回合
+    const s3 = act(s2.state, 1, { intentType: 'ADD_POINT', coordinate: 7, amount: 1 });
+    expect(s3.ok).toBe(true);
+    if (!s3.ok) return;
+    expect(force(s3.state, 1).points).toBe(0);
+    expect(s3.state.currentSeat).toBe(2);
+    expect(s3.state.phase).toBe('ACTION'); // seat2 进入其行动阶段
+    expect(chainKinds(s3)).toContain('END_TURN');
+  });
+
+  it('一次性加完所有点数：直接自动结束回合', () => {
+    const map = makeMap({ tiles: { 6: [CITY, 1, 1], 7: [PLAIN, 1, 2], 12: [CITY, 2, 2] } });
+    const { state } = startGame(map, ASG);
+    const s1 = act(state, 1, { intentType: 'SWITCH_PHASE' });
+    const r = act(s1.state, 1, { intentType: 'ADD_POINT', coordinate: 7, amount: 2 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.currentSeat).toBe(2);
+    expect(chainKinds(r)).toContain('END_TURN');
+  });
+});

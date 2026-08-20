@@ -177,15 +177,6 @@ describe('WS 网关（顺序执行）', () => {
     expect(room.players.find((p) => p.username === 'bob')?.online).toBe(true);
   });
 
-  it('准备状态 → PLAYER_READY 广播', async () => {
-    const alice = aliceC;
-    const bob = bobC;
-    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('bob'), payload: { ready: true } });
-    const [a, b] = await Promise.all([alice.waitFor('PLAYER_READY'), bob.waitFor('PLAYER_READY')]);
-    expect(a).toMatchObject({ playerId: users.get('bob')!.id, ready: true });
-    expect(b).toMatchObject({ playerId: users.get('bob')!.id, ready: true });
-  });
-
   it('选势力：先到先得 + 换选清空旧 seat', async () => {
     const alice = aliceC;
     const bob = bobC;
@@ -206,6 +197,15 @@ describe('WS 网关（顺序执行）', () => {
       { type: 'FORCE_SELECT', roomId, seat: 1, playerId: null },
       { type: 'FORCE_SELECT', roomId, seat: 2, playerId: users.get('bob')!.id },
     ]);
+  });
+
+  it('准备状态 → PLAYER_READY 广播（已选势力）', async () => {
+    const alice = aliceC;
+    const bob = bobC;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('bob'), payload: { ready: true } });
+    const [a, b] = await Promise.all([alice.waitFor('PLAYER_READY'), bob.waitFor('PLAYER_READY')]);
+    expect(a).toMatchObject({ playerId: users.get('bob')!.id, ready: true });
+    expect(b).toMatchObject({ playerId: users.get('bob')!.id, ready: true });
   });
 
   it('聊天广播 + 超长拒绝', async () => {

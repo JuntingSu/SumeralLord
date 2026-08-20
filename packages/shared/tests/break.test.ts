@@ -96,6 +96,80 @@ describe('§8.3.2 断连事件（环图）', () => {
     // 11 仍通过 5 连到据点：保持连兵
     expect(soldierAt(r.state, 11)!.isLinked).toBe(true);
   });
+
+  it('环图分支按物理相邻判定：表序相邻但物理分离的节点拆成两个分支', () => {
+    // 7 的邻居表序 [8,6,3,2,13,12] 中 6 与 3 下标相邻，但二者物理不相邻（中间隔 7）
+    const map = makeMap({
+      tiles: {
+        7: [PLAIN, 1, 2],
+        6: [PLAIN, 1, 2],
+        3: [CITY, 1, 2],
+        19: [CITY, 1, 2], // 保据点数，避免据点归零触发势力清除
+        8: [CITY, 2, 6],
+      },
+    });
+    const { state } = startGame(map, ASG);
+    const a = act(state, 1, { intentType: 'SWITCH_PHASE' });
+    const b = act(a.state, 1, { intentType: 'SWITCH_PHASE' });
+    const r = act(b.state, 2, { intentType: 'ATTACK', from: 8, to: 7 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 两个物理分支各发一次判定：3（自身据点，保持）与 6（无锚点 → 断兵）
+    const brk = r.chain.find((e) => e.kind === 'BREAK');
+    expect((brk as { branches: number[] }).branches).toEqual([3, 6]);
+    expect(soldierAt(r.state, 6)).toMatchObject({ isLinked: false, strength: 1 });
+    expect(soldierAt(r.state, 3)!.isLinked).toBe(true);
+  });
+
+  it('kept 表序连续但物理分离：拆分支；跨环边界连续段合并为单分支', () => {
+    // kept={2,13,12}：表序 3,4,5 连续（若按表序会误判为单分支），物理上 {13,12} 与 {2} 分离
+    const map = makeMap({
+      tiles: {
+        7: [CITY, 1, 2],
+        2: [PLAIN, 1, 2],
+        12: [PLAIN, 1, 2],
+        13: [PLAIN, 1, 2],
+        19: [CITY, 1, 2],
+        6: [CITY, 2, 6],
+      },
+    });
+    const { state } = startGame(map, ASG);
+    const a = act(state, 1, { intentType: 'SWITCH_PHASE' });
+    const b = act(a.state, 1, { intentType: 'SWITCH_PHASE' });
+    const r = act(b.state, 2, { intentType: 'ATTACK', from: 6, to: 7 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const brk = r.chain.find((e) => e.kind === 'BREAK');
+    expect((brk as { branches: number[] }).branches).toEqual([2, 12]);
+    // 两个分支均无锚点 → 全部断兵
+    expect(soldierAt(r.state, 2)).toMatchObject({ isLinked: false, strength: 1 });
+    expect(soldierAt(r.state, 12)).toMatchObject({ isLinked: false, strength: 1 });
+    expect(soldierAt(r.state, 13)).toMatchObject({ isLinked: false, strength: 1 });
+  });
+
+  it('边缘地块（邻居少于6）：按实际邻接判定分支', () => {
+    // p=2 位于 row0（上方越界，仅 4 个邻居 {3,1,7,6}）；kept={3,1} 物理分离
+    const map = makeMap({
+      tiles: {
+        2: [PLAIN, 1, 1],
+        3: [CITY, 1, 2],
+        1: [PLAIN, 1, 1],
+        19: [CITY, 1, 2],
+        7: [CITY, 2, 6],
+      },
+    });
+    const { state } = startGame(map, ASG);
+    const a = act(state, 1, { intentType: 'SWITCH_PHASE' });
+    const b = act(a.state, 1, { intentType: 'SWITCH_PHASE' });
+    const r = act(b.state, 2, { intentType: 'ATTACK', from: 7, to: 2 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const brk = r.chain.find((e) => e.kind === 'BREAK');
+    expect((brk as { branches: number[] }).branches).toEqual([1, 3]);
+    // 1 无锚点：断兵 1-1=0 删除；3 自身据点保持
+    expect(soldierAt(r.state, 1)).toBeNull();
+    expect(soldierAt(r.state, 3)!.isLinked).toBe(true);
+  });
 });
 
 describe('§8.4.3 胜利判定 / §8.1.3 投降', () => {

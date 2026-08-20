@@ -30,6 +30,8 @@ export interface GameTransport {
   submitConsensus(consensusId: string, result: ConsensusPayload): void;
   sendTimeSync(gameId: string, seat: number, stepTimeRemain: number, gameTimeRemain: number): void;
   sendReconnect(lastEventId: number, gameId: string): void;
+  /** 结算页关闭上报（对局结束后；全员上报后房间立即回落等待中） */
+  sendSettlementDismissed(gameId: string): void;
   /** EVENT_GAP / RECONNECT 续拉（同构接口） */
   fetchEvents(gameId: string, after: number, limit?: number): Promise<{ events: Array<Record<string, unknown>>; nextCursor: number }>;
 }
@@ -366,9 +368,21 @@ export const useGame = create<GameStore>((set, get) => {
 
     tickClock: () => {
       const s = get();
-      const { next, timeout } = tick(s.timer);
+      const { next, stepTimeout, gameTimeout } = tick(s.timer);
       set({ timer: next });
-      if (timeout) get().submitTimeoutSurrender();
+      if (gameTimeout) {
+        // 局时归零（含步时同时归零）：超时投降
+        get().submitTimeoutSurrender();
+        return;
+      }
+      if (stepTimeout) {
+        // 步时归零（局时未归零）：代玩家跳过本回合（连续切换阶段至回合结束）
+        const phase = s.board?.phase;
+        if (phase === 'ACTION' || phase === 'ADD_POINT') {
+          get().submitIntent({ intentType: 'SWITCH_PHASE' });
+          if (phase === 'ACTION') get().submitIntent({ intentType: 'SWITCH_PHASE' });
+        }
+      }
     },
 
     consumeNextEvent: () => {

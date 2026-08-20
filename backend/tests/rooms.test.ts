@@ -213,7 +213,16 @@ describe('房间生命周期（顺序执行）', () => {
     expect(res.json().data.hostId).toBe(users.get('dave')!.id);
   });
 
-  it('换图 → forces 重置为新地图结构', async () => {
+  it('换图 → forces 重置为新地图结构，已准备玩家全部回落未准备', async () => {
+    // 先选势力再准备（准备前置：必须已选势力）
+    await app.inject({ method: 'POST', url: `/api/rooms/${room2}/select-force`, headers: auth('alice'), payload: { seat: 1 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${room2}/select-force`, headers: auth('dave'), payload: { seat: 2 } });
+    // 全员准备
+    const readyA = await app.inject({ method: 'POST', url: `/api/rooms/${room2}/ready`, headers: auth('alice'), payload: { ready: true } });
+    expect(readyA.statusCode).toBe(200);
+    const readyD = await app.inject({ method: 'POST', url: `/api/rooms/${room2}/ready`, headers: auth('dave'), payload: { ready: true } });
+    expect(readyD.statusCode).toBe(200);
+
     const res = await app.inject({ method: 'POST', url: `/api/rooms/${room2}/change-map`, headers: auth('dave'), payload: { mapId: 'map_quad_ocean' } });
     expect(res.statusCode).toBe(200);
     const room = res.json().data;
@@ -221,6 +230,26 @@ describe('房间生命周期（顺序执行）', () => {
     expect(room.playerNum).toBe(4);
     expect(room.forces).toHaveLength(4);
     expect(room.forces.every((f: { playerId: number | null }) => f.playerId === null)).toBe(true);
+    // 已准备状态被重置
+    expect(room.players.every((p: { state: string }) => p.state === 'unready')).toBe(true);
+  });
+
+  it('未选势力准备 → 403 FORCE_NOT_SELECTED；已准备玩家取消势力 → 状态回落未准备', async () => {
+    // 选势力后准备成功
+    await app.inject({ method: 'POST', url: `/api/rooms/${room2}/select-force`, headers: auth('alice'), payload: { seat: 1 } });
+    const ready = await app.inject({ method: 'POST', url: `/api/rooms/${room2}/ready`, headers: auth('alice'), payload: { ready: true } });
+    expect(ready.statusCode).toBe(200);
+
+    // 已准备玩家取消势力 → 准备状态同步回落
+    const cancel = await app.inject({ method: 'POST', url: `/api/rooms/${room2}/select-force`, headers: auth('alice'), payload: { seat: -1 } });
+    expect(cancel.statusCode).toBe(200);
+    const aliceState = (cancel.json().data.players as Array<{ username: string; state: string }>).find((p) => p.username === 'alice');
+    expect(aliceState?.state).toBe('unready');
+
+    // 未选势力再准备 → 拒绝
+    const reject = await app.inject({ method: 'POST', url: `/api/rooms/${room2}/ready`, headers: auth('alice'), payload: { ready: true } });
+    expect(reject.statusCode).toBe(403);
+    expect(reject.json().code).toBe('FORCE_NOT_SELECTED');
   });
 
   it('清除密码 → 无密码加入成功', async () => {

@@ -62,7 +62,12 @@ export default function Game() {
     const transport = USE_MOCK ? new MockWsServer() : new WsClient(roomId);
     const detach = attachTransport(transport);
     const offAck = transport.onMessage((msg) => {
-      if (msg.type !== 'CONNECT_ACK' || !msg.gameId) return;
+      if (msg.type !== 'CONNECT_ACK') return;
+      if (!msg.gameId) {
+        // 房间无进行中对局（未开局/对局已结束）：回房间页继续（等待中/已结束）
+        navigate(`/room/${roomId}`, { replace: true });
+        return;
+      }
       const s = useGame.getState();
       if (s.board === null) {
         void (async () => {
@@ -428,7 +433,19 @@ export default function Game() {
 
       {/* 结算/中止弹窗 */}
       {(gameOver !== null || fatal !== null) && (
-        <ResultModal gameOver={gameOver} fatal={fatal} board={board} isSpectator={isSpectator} onClose={() => navigate('/lobby')} />
+        <ResultModal
+          gameOver={gameOver}
+          fatal={fatal}
+          board={board}
+          isSpectator={isSpectator}
+          onClose={() => {
+            // 结算页关闭上报：全部参战玩家关闭后，房间立即回落等待中（服务器据此结束结算展示）
+            const s = useGame.getState();
+            if (s.gameOver && s.gameId && !s.isSpectator) s.transport?.sendSettlementDismissed(s.gameId);
+            // 返回房间页（结算展示/等待中），而非大厅
+            navigate(`/room/${roomId}`, { replace: true });
+          }}
+        />
       )}
     </div>
   );

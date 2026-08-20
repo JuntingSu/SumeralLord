@@ -49,6 +49,8 @@ export interface Game {
   clearedSeats: Set<number>;
   /** seat → 参战者状态（开局时从 seatAssignments 构造） */
   participants: Map<number, ParticipantState>;
+  /** 已上报"关闭结算页"的参战玩家（全员上报后房间立即回落 ROOM_OPEN） */
+  dismissedPlayerIds: Set<number>;
   eventIdCounter: number;
   createdAt: number;
   logFile: string;
@@ -110,6 +112,7 @@ export class GameManager {
       participants: new Map(
         input.seatAssignments.map((a) => [a.seat, { playerId: a.playerId, isAI: a.isAI, connected: false }]),
       ),
+      dismissedPlayerIds: new Set(),
       eventIdCounter: 0,
       createdAt: Date.now(),
       logFile: path.join(this.logDir, `${gameId}.jsonl`),

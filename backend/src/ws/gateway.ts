@@ -3,7 +3,14 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { CHAT, WS_CLOSE_CODES } from '@dl/shared';
-import { ChatSendSchema, ConsensusResultSchema, IntentSubmitSchema, ReconnectMsgSchema, TimeSyncMsgSchema } from '@dl/shared';
+import {
+  ChatSendSchema,
+  ConsensusResultSchema,
+  IntentSubmitSchema,
+  ReconnectMsgSchema,
+  SettlementDismissedSchema,
+  TimeSyncMsgSchema,
+} from '@dl/shared';
 import type {
   ChatMsg,
   ConsensusConfirmedMsg,
@@ -18,7 +25,7 @@ import type {
   TimeSyncMsg,
 } from '@dl/shared';
 import type { RoomManager } from '../room/manager.js';
-import type { GameManager } from '../game/manager.js';
+import type { Game, GameManager } from '../game/manager.js';
 import { ConsensusManager, type ConsensusFatalCode } from '../game/consensus.js';
 import { DisconnectWatch } from '../game/disconnectWatch.js';
 import type { TicketService } from '../auth/ticket.js';
@@ -97,14 +104,31 @@ export class WsGateway {
         }
       }
     }
-    if (event.type === 'PLAYER_LEAVE' || event.type === 'ROOM_DISBANDED') {
-      const target = event.type === 'PLAYER_LEAVE' ? event.playerId : null;
+    if (event.type === 'PLAYER_LEAVE') {
+      // 结算展示期离开房间 = 已退出结算页：计入关闭账本，全员关闭后立即回落
+      if (event.playerId !== undefined) {
+        const gameId = this.rooms.gameIdOf(event.roomId);
+        const game = gameId ? this.games.get(gameId) : undefined;
+        if (game && game.status === 'finished') {
+          game.dismissedPlayerIds.add(event.playerId);
+          this.maybeReopenOnAllDismissed(game);
+        }
+      }
+      const target = event.playerId;
       for (const conn of this.conns) {
         if (conn.roomId !== event.roomId) continue;
-        if (event.type === 'ROOM_DISBANDED' || conn.userId === target) {
+        if (conn.userId === target) {
           this.remove(conn);
-          conn.ws.close(1000, event.type === 'ROOM_DISBANDED' ? 'room_disbanded' : 'left_room');
+          conn.ws.close(1000, 'left_room');
         }
+      }
+      return;
+    }
+    if (event.type === 'ROOM_DISBANDED') {
+      for (const conn of this.conns) {
+        if (conn.roomId !== event.roomId) continue;
+        this.remove(conn);
+        conn.ws.close(1000, 'room_disbanded');
       }
     }
   }
@@ -244,6 +268,10 @@ export class WsGateway {
       this.onTimeSync(conn, parsed);
       return;
     }
+    if (msg?.type === 'SETTLEMENT_DISMISSED') {
+      this.onSettlementDismissed(conn, parsed);
+      return;
+    }
     this.send(conn, { type: 'ERROR', code: 'INVALID_PARAMS', message: `未知消息类型: ${msg?.type ?? 'null'}`, fatal: false });
   }
 
@@ -359,6 +387,32 @@ export class WsGateway {
     const msg = TimeSyncMsgSchema.safeParse(parsed);
     if (!msg.success) return; // 结构非法：静默丢弃
     this.broadcast(conn.roomId, msg.data as TimeSyncMsg, conn.userId);
+  }
+
+  /** 结算页关闭上报：仅参战玩家计数；全员关闭后房间立即回落 ROOM_OPEN（保留期兜底） */
+  private onSettlementDismissed(conn: RoomConnection, parsed: unknown): void {
+    const msg = SettlementDismissedSchema.safeParse(parsed);
+    if (!msg.success) return; // 结构非法：静默丢弃
+    const game = this.games.get(msg.data.gameId);
+    if (!game || game.status !== 'finished') return; // 仅对局正常结束后有效
+    const room = this.rooms.get(game.roomId);
+    if (!room || room.status !== 'GAME_OVER') return; // 已回落/中止：忽略迟到上报
+    const seat = this.rooms.seatOf(game.roomId, conn.userId);
+    const participant = game.participants.get(seat);
+    if (!participant || participant.isAI || participant.playerId === null) return; // 观战/AI 不计
+    game.dismissedPlayerIds.add(conn.userId);
+    this.maybeReopenOnAllDismissed(game);
+  }
+
+  /** 全员（本局参战玩家）已关闭结算页/已离开房间 → 立即回落 ROOM_OPEN */
+  private maybeReopenOnAllDismissed(game: Game): void {
+    const required = [...game.participants.values()]
+      .filter((p) => p.playerId !== null)
+      .map((p) => p.playerId!);
+    if (required.every((id) => game.dismissedPlayerIds.has(id))) {
+      this.rooms.reopenRoom(game.roomId);
+      this.log.info({ gameId: game.id, roomId: game.roomId }, '全员已退出结算页，房间回落 ROOM_OPEN');
+    }
   }
 
   /** t=10s：广播 PLAYER_DISCONNECT + 共识期望剔除 + 参与者状态 */

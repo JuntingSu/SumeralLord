@@ -1,8 +1,9 @@
-// 本地计时器（规则 v2 §10）：
+// 本地计时器（规则 v2 §10 + 补充规则）：
 // - 局时：仅在自己回合期间走表（行动阶段开始 → 加点阶段结束）；归零 → 超时投降
-// - 步时：每次轮到该势力重置为 stepTime，行动/加点两阶段共用；归零 → 超时投降
+// - 步时：每次轮到该势力重置；若剩余局时不足一步时，按剩余局时起算；行动/加点两阶段共用；
+//   归零（局时未归零）→ 代玩家跳过本回合
 // - 加时：己方回合结束时加到局时
-// - 同时归零：步时优先
+// - 同时归零：按局时归零处理（超时投降）
 // 计时权威在本地（娱乐定位）；TIME_SYNC 仅校正显示，不走表逻辑。
 import type { RoomTimeSettings } from '@dl/shared';
 
@@ -13,11 +14,19 @@ export interface TimerState {
   gameTimeRemain: number;
 }
 
+export interface TickResult {
+  next: TimerState;
+  /** 步时归零（局时未归零）→ 代玩家跳过本回合 */
+  stepTimeout: boolean;
+  /** 局时归零 → 超时投降（含同时归零，局时优先） */
+  gameTimeout: boolean;
+}
+
 export function initialTimer(settings: RoomTimeSettings): TimerState {
   return { activeSeat: null, stepTimeRemain: settings.stepTime, gameTimeRemain: settings.gameTime };
 }
 
-/** 回合轮转（activeSeat 变化）时重置计时：旧回合结束加时 → 新回合步时重置（§10） */
+/** 回合轮转（activeSeat 变化）时重置计时：旧回合结束加时 → 新回合步时重置（不足一步时按剩余局时起算） */
 export function onTurnChange(prev: TimerState, nextSeat: number, settings: RoomTimeSettings): TimerState {
   let gameTimeRemain = prev.gameTimeRemain;
   if (prev.activeSeat !== null && prev.activeSeat !== nextSeat) {
@@ -26,19 +35,22 @@ export function onTurnChange(prev: TimerState, nextSeat: number, settings: RoomT
   }
   return {
     activeSeat: nextSeat,
-    stepTimeRemain: settings.stepTime,
+    // 局时不足一步时：新回合步时从剩余局时开始倒计时
+    stepTimeRemain: Math.min(settings.stepTime, gameTimeRemain),
     gameTimeRemain,
   };
 }
 
-/** 走表（每秒 tick）：步时与局时同时走；归零触发超时投降（步时优先语义） */
-export function tick(state: TimerState): { next: TimerState; timeout: boolean } {
-  if (state.activeSeat === null) return { next: state, timeout: false };
+/** 走表（每秒 tick）：步时与局时同时走；归零边界各报一次（防止重复触发） */
+export function tick(state: TimerState): TickResult {
+  if (state.activeSeat === null) return { next: state, stepTimeout: false, gameTimeout: false };
   const stepTimeRemain = Math.max(0, state.stepTimeRemain - 1);
   const gameTimeRemain = Math.max(0, state.gameTimeRemain - 1);
   return {
     next: { ...state, stepTimeRemain, gameTimeRemain },
-    timeout: stepTimeRemain <= 0 || gameTimeRemain <= 0,
+    // 仅归零瞬间报一次；同时归零 → 局时优先（stepTimeout 要求局时未归零）
+    stepTimeout: state.stepTimeRemain > 0 && stepTimeRemain === 0 && gameTimeRemain > 0,
+    gameTimeout: state.gameTimeRemain > 0 && gameTimeRemain === 0,
   };
 }
 

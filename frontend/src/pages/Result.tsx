@@ -10,7 +10,7 @@ interface ResultModalProps {
   onClose: () => void;
 }
 
-export default function ResultModal({ gameOver, fatal, board, isSpectator, onClose }: ResultModalProps) {
+export default function ResultModal({ gameOver, fatal, board, onClose }: ResultModalProps) {
   if (fatal) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -22,7 +22,7 @@ export default function ResultModal({ gameOver, fatal, board, isSpectator, onClo
             onClick={onClose}
             className="mt-5 rounded bg-slate-600 px-5 py-2 text-sm font-medium text-white hover:bg-slate-500"
           >
-            返回大厅
+            返回房间
           </button>
         </div>
       </div>
@@ -90,7 +90,7 @@ export default function ResultModal({ gameOver, fatal, board, isSpectator, onClo
           onClick={onClose}
           className="mt-5 w-full rounded bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-500"
         >
-          {isSpectator ? '返回大厅' : '返回大厅'}
+          返回房间
         </button>
       </div>
     </div>

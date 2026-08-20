@@ -24,7 +24,7 @@ import {
   isBlockerOwner,
 } from './constants.js';
 import type { BoardGeometry } from './coord.js';
-import { neighborsOf } from './coord.js';
+import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
 
 // ---------- 内部上下文 ----------
@@ -80,6 +80,14 @@ export function strongholdCountOf(state: GameState, seat: number): number {
 
 function hasAliveHumanForce(state: GameState): boolean {
   return state.forces.some((f) => f.exists && f.alive && !f.isAI);
+}
+
+/** 当前势力是否有具有移动力的兵（行动阶段自动切换判定） */
+function hasMovableSoldier(ctx: Ctx, seat: number): boolean {
+  for (const t of ctx.state.tiles) {
+    if (t.soldier && t.soldier.owner === seat && t.soldier.hasMovement) return true;
+  }
+  return false;
 }
 
 // ---------- 二级事件（§8.2） ----------
@@ -156,49 +164,55 @@ function rejoinEvent(ctx: Ctx, tile: number): void {
 }
 
 /** 断连（§8.3.2）：删除 p 的兵后判断周围连兵环图是否分裂；分裂则对每个分支发起断连判定。
+ *  环图 T 的边 = 物理相邻（规则 8.3.2 环边 12..61）——邻居表序并非环序（表序 i 与 i+1 未必物理相邻），
+ *  故连通分支按 areAdjacent 判定；地图边缘邻居少于 6 时按实际邻接关系判定。
  *  实现澄清：p 位于全接地形（据点）时，即使环图未分裂，剩余网络也可能失去唯一锚点（§4.1 连兵性本质），
  *  故锚点删除对每个连通分支（含单分支）都发断连判定；判定幂等，多余发起无副作用。 */
 function breakEvent(ctx: Ctx, tile: number, owner: number): void {
-  const ring = neighborsOf(tile, ctx.geo);
+  // 环图 T 节点：p 的邻居中有同势力连兵的地块（§8.3.2 第 2 步，与地形无关）
   const kept: number[] = [];
-  for (const n of ring) {
+  for (const n of neighborsOf(tile, ctx.geo)) {
     const s = ctx.state.tiles[n].soldier;
     if (s !== null && sameConnectivityOwner(s.owner, owner) && s.isLinked) kept.push(n);
   }
-  // 环图连通分支：kept 在环序中连续（含首尾相接）即连通
+  // 连通分支：每分支取 index 最小节点为代表，发起断连判定
   let branches: number[] = [];
   if (kept.length > 0) {
-    const runs: number[][] = [];
-    let run: number[] = [kept[0]];
-    for (let i = 1; i < kept.length; i++) {
-      const prevRingPos = ring.indexOf(kept[i - 1]);
-      const curRingPos = ring.indexOf(kept[i]);
-      if (curRingPos === prevRingPos + 1) run.push(kept[i]);
-      else {
-        runs.push(run);
-        run = [kept[i]];
-      }
-    }
-    runs.push(run);
-    // 首尾相接（环回绕）：合并首尾 run
-    if (runs.length > 1) {
-      const firstPos = ring.indexOf(runs[0][0]);
-      const lastPos = ring.indexOf(runs[runs.length - 1][runs[runs.length - 1].length - 1]);
-      if (lastPos + 1 === ring.length && firstPos === 0) {
-        const lastRun = runs.pop()!;
-        runs[0] = [...lastRun, ...runs[0]];
-      }
-    }
-    if (runs.length >= 2) {
-      branches = runs.map((r) => Math.min(...r));
+    const components = connectedComponents(kept, (a, b) => areAdjacent(a, b, ctx.geo));
+    if (components.length >= 2) {
+      branches = components.map((c) => Math.min(...c));
     } else if (isFullLink(ctx.state.tiles[tile].terrain)) {
       // 锚点（据点兵）被删：单分支也可能失去全接连通，发起判定
-      branches = [Math.min(...runs[0])];
+      branches = [Math.min(...components[0])];
     }
     branches.sort((a, b) => a - b);
   }
   ctx.chain.push({ level: 3, kind: 'BREAK', tile, branches });
   for (const q of branches) breakJudgeEvent(ctx, q);
+}
+
+/** 小集合连通分量（节点数 ≤ 6，断连事件环图 T 用；边由 adjacent 判定） */
+function connectedComponents<T>(nodes: T[], adjacent: (a: T, b: T) => boolean): T[][] {
+  const comps: T[][] = [];
+  const visited = new Set<T>();
+  for (const start of nodes) {
+    if (visited.has(start)) continue;
+    const comp: T[] = [];
+    const queue = [start];
+    visited.add(start);
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      comp.push(cur);
+      for (const n of nodes) {
+        if (!visited.has(n) && adjacent(cur, n)) {
+          visited.add(n);
+          queue.push(n);
+        }
+      }
+    }
+    comps.push(comp);
+  }
+  return comps;
 }
 
 /** 断连判定（§8.4.1）：BFS 判断连兵区域是否仍连通到全接地形；未连到则全域断兵-1、归零删兵 */
@@ -470,10 +484,17 @@ function runPreparePhaseContent(ctx: Ctx): void {
   }
   // d. 切入行动阶段
   switchPhaseEventCore(ctx);
+  // 补充规则：进入行动阶段后当前势力无任何可动兵 → 代玩家切换至加点阶段
+  if (ctx.state.phase === 'ACTION' && !hasMovableSoldier(ctx, seat)) {
+    switchPhaseEventCore(ctx);
+  }
   // AI 自动跳过（D1 拍板；D2：computer 1~3 在 M4 一律按 255 休闲处理）
   if (force.isAI) {
-    switchPhaseEventCore(ctx); // ACTION → ADD_POINT
-    switchPhaseEventCore(ctx); // ADD_POINT → END → 结束回合 → 下一势力（递归）
+    // 连续切阶段至本回合结束（可能已由自动切换进入加点阶段；结束后递归下一势力）
+    let guard = 0;
+    while (ctx.state.currentSeat === seat && ctx.state.phase !== 'END' && guard++ < 8) {
+      switchPhaseEventCore(ctx);
+    }
   }
 }
 
@@ -530,6 +551,8 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       ctx.chain.push({ level: 1, kind: 'ADD_POINT', seat: s.currentSeat, coordinate: intent.coordinate, amount: intent.amount });
       updateEvent(ctx, intent.coordinate, { strength: target.strength + intent.amount });
       force.points -= intent.amount;
+      // 补充规则：点数用尽 → 代玩家切换阶段结束回合
+      if (force.points === 0) switchPhaseEventCore(ctx);
       return ok(ctx);
     }
     case 'SWITCH_PHASE': {

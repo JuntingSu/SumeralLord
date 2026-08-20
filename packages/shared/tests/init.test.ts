@@ -117,8 +117,8 @@ describe('§6.4 无主势力删兵', () => {
         { seat: 2, team: 2, computer: 2 },
       ],
       tiles: {
-        6: [CITY, 1, 1],
-        12: [CITY, 2, 1],
+        6: [CITY, 1, 2],
+        12: [CITY, 2, 2],
       },
     });
     const { state } = startGame(map3, assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: null, isAI: true }));

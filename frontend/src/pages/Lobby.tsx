@@ -17,7 +17,7 @@ export default function Lobby() {
   const join = useLobby((s) => s.join);
   const leave = useLobby((s) => s.leave);
 
-  const [pendingRoom, setPendingRoom] = useState<RoomListItem | null>(null);
+  const [pendingRoom, setPendingRoom] = useState<{ room: RoomListItem; asSpectator: boolean } | null>(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -50,6 +50,17 @@ export default function Lobby() {
       setError(err instanceof ApiError ? err.message : '网络错误，请稍后再试');
     }
   }
+
+  /** 加入/观战入口：带密码房间先弹输入框 */
+  const askJoin = (room: RoomListItem, asSpectator: boolean) => {
+    setError(null);
+    if (room.hasPassword) {
+      setPassword('');
+      setPendingRoom({ room, asSpectator });
+    } else {
+      void handleJoin(room, asSpectator);
+    }
+  };
 
   const joinedPlayers = joinedRoom
     ? joinedRoom.players.filter((p) => p.state !== 'spectating').length
@@ -91,7 +102,7 @@ export default function Lobby() {
               <p className="font-medium">
                 已加入房间：{joinedRoom.name}
                 <span className="ml-2 rounded bg-emerald-700 px-2 py-0.5 text-xs">
-                  {joinedRoom.status === 'waiting' ? '等待中' : '对局中'}
+                  {joinedRoom.status === 'waiting' ? '等待中' : joinedRoom.status === 'game_over' ? '已结束' : '对局中'}
                 </span>
               </p>
               <p className="mt-1 text-sm text-slate-400">
@@ -151,6 +162,9 @@ export default function Lobby() {
                     {room.status === 'in_game' && (
                       <span className="ml-2 rounded bg-indigo-700 px-2 py-0.5 text-xs">对局中</span>
                     )}
+                    {room.status === 'game_over' && (
+                      <span className="ml-2 rounded bg-slate-600 px-2 py-0.5 text-xs">已结束</span>
+                    )}
                   </p>
                   <p className="mt-1 text-sm text-slate-400">
                     玩家 {room.currentPlayers}/{room.maxPlayers}
@@ -160,31 +174,35 @@ export default function Lobby() {
                 </div>
                 {joinedRoom ? (
                   <span className="text-sm text-slate-500">已在其他房间</span>
-                ) : room.status === 'in_game' ? (
-                  room.allowSpectate ? (
-                    <button
-                      onClick={() => handleJoin(room, true, room.hasPassword ? password : undefined)}
-                      className="rounded bg-slate-600 px-4 py-1.5 text-sm text-slate-100 hover:bg-slate-500"
-                    >
-                      观战
-                    </button>
-                  ) : (
-                    <span className="text-sm text-slate-500">不可观战</span>
-                  )
                 ) : (
-                  <button
-                    onClick={() => {
-                      if (room.hasPassword) {
-                        setPassword('');
-                        setPendingRoom(room);
-                      } else {
-                        handleJoin(room, false);
-                      }
-                    }}
-                    className="rounded bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500"
-                  >
-                    加入
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {room.allowSpectate && (
+                      <button
+                        onClick={() => askJoin(room, true)}
+                        className="rounded bg-slate-600 px-4 py-1.5 text-sm text-slate-100 hover:bg-slate-500"
+                      >
+                        观战
+                      </button>
+                    )}
+                    {room.status === 'in_game' && !room.allowSpectate ? (
+                      <span className="text-sm text-slate-500">不可观战</span>
+                    ) : room.status === 'in_game' ? (
+                      <button
+                        disabled
+                        title="对局进行中，仅可观战加入"
+                        className="cursor-not-allowed rounded bg-slate-700 px-4 py-1.5 text-sm text-slate-400"
+                      >
+                        进入
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => askJoin(room, false)}
+                        className="rounded bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500"
+                      >
+                        {room.allowSpectate ? '进入' : '加入'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </li>
             ))}
@@ -198,10 +216,12 @@ export default function Lobby() {
             className="w-full max-w-sm rounded-lg bg-slate-800 p-6"
             onSubmit={(e) => {
               e.preventDefault();
-              handleJoin(pendingRoom, false, password);
+              handleJoin(pendingRoom.room, pendingRoom.asSpectator, password);
             }}
           >
-            <h3 className="mb-4 text-lg font-bold">加入「{pendingRoom.name}」</h3>
+            <h3 className="mb-4 text-lg font-bold">
+              {pendingRoom.asSpectator ? '观战加入' : '加入'}「{pendingRoom.room.name}」
+            </h3>
             <label className="mb-1 block text-sm text-slate-300" htmlFor="room-password">
               房间密码
             </label>

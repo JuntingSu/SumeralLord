@@ -146,10 +146,11 @@ async function setupRoom(aName: string, bName: string, aiTakeover = false, rando
   expect(create.statusCode).toBe(200);
   const roomId = create.json().data.roomId as string;
   await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth(bName), payload: {} });
-  await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth(aName), payload: { ready: true } });
-  await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth(bName), payload: { ready: true } });
+  // 先选势力再准备（准备前置：必须已选势力）
   await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth(aName), payload: { seat: 1 } });
   await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth(bName), payload: { seat: 2 } });
+  await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth(aName), payload: { ready: true } });
+  await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth(bName), payload: { ready: true } });
   return roomId;
 }
 
@@ -260,9 +261,11 @@ describe('BM5：全票共识（加速超时 300ms）', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].aborted).toBe(0);
     expect(JSON.parse(rows[0].winners)).toEqual(payload.winners);
-    // 房间状态 → GAME_OVER
+    // 房间状态 → GAME_OVER（对外暴露 game_over，区别于对局中）
     const state = await app.inject({ method: 'GET', url: `/api/rooms/${roomId}`, headers: auth('eve') });
-    expect(state.json().data.status).toBe('in_game'); // GAME_OVER 映射（回落前）
+    expect(state.json().data.status).toBe('game_over');
+    // 参战玩家状态回落 unready（不再显示"对局中"）
+    expect(state.json().data.players.every((p: { state: string }) => p.state === 'unready')).toBe(true);
     a.close();
     b.close();
   });
@@ -431,6 +434,63 @@ describe('BM6：断线治理与重连（加速 50ms/150ms）', () => {
     a.close();
     b.close();
   });
+
+  it('全员关闭结算页 → 房间立即回落 ROOM_OPEN（不等保留期）', async () => {
+    const roomId = await setupRoom('grace', 'henry');
+    const a = await wsConnect(roomId, 'grace');
+    const b = await wsConnect(roomId, 'henry');
+    const gameId = await startGame(roomId, 'grace');
+    await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
+    const payload = { kind: 'VICTORY', winningTeam: 1, winners: [String(users.get('grace')!.id)], losers: [String(users.get('henry')!.id)] };
+    a.send({ type: 'CONSENSUS_RESULT', consensusId: '1:victory:0', result: payload });
+    b.send({ type: 'CONSENSUS_RESULT', consensusId: '1:victory:0', result: payload });
+    await a.waitFor('GAME_OVER');
+
+    // 仅一方关闭结算页 → 仍为 game_over（保留期未到）
+    a.send({ type: 'SETTLEMENT_DISMISSED', gameId });
+    await new Promise((r) => setTimeout(r, 400));
+    let state = await app.inject({ method: 'GET', url: `/api/rooms/${roomId}`, headers: auth('grace') });
+    expect(state.json().data.status).toBe('game_over');
+
+    // 另一方关闭 → 立即回落 waiting（不用等 1s 保留期）；轮询等待服务器处理
+    b.send({ type: 'SETTLEMENT_DISMISSED', gameId });
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      state = await app.inject({ method: 'GET', url: `/api/rooms/${roomId}`, headers: auth('grace') });
+      if (state.json().data.status === 'waiting') break;
+    }
+    expect(state!.json().data.status).toBe('waiting');
+    a.close();
+    b.close();
+  });
+
+  it('结算期玩家离开房间 → 视为已退出结算页，剩余玩家关闭后立即回落', async () => {
+    const roomId = await setupRoom('grace', 'henry');
+    const a = await wsConnect(roomId, 'grace');
+    const b = await wsConnect(roomId, 'henry');
+    const gameId = await startGame(roomId, 'grace');
+    await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
+    const payload = { kind: 'VICTORY', winningTeam: 1, winners: [String(users.get('grace')!.id)], losers: [String(users.get('henry')!.id)] };
+    a.send({ type: 'CONSENSUS_RESULT', consensusId: '1:victory:0', result: payload });
+    b.send({ type: 'CONSENSUS_RESULT', consensusId: '1:victory:0', result: payload });
+    await a.waitFor('GAME_OVER');
+
+    // henry 结算期离开房间（连接被服务端关闭）
+    const leave = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/leave`, headers: auth('henry') });
+    expect(leave.statusCode).toBe(200);
+    await b.waitClose();
+
+    // grace 关闭结算页 → 参战玩家（含已离开者）均已退出 → 立即回落（轮询等待）
+    a.send({ type: 'SETTLEMENT_DISMISSED', gameId });
+    let state: { json: () => { data: { status: string } } };
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      state = await app.inject({ method: 'GET', url: `/api/rooms/${roomId}`, headers: auth('grace') });
+      if (state.json().data.status === 'waiting') break;
+    }
+    expect(state!.json().data.status).toBe('waiting');
+    a.close();
+  });
 });
 
 describe('BM4：AI 接管与无主势力混编开局', () => {
@@ -451,8 +511,9 @@ describe('BM4：AI 接管与无主势力混编开局', () => {
     });
     expect(create.statusCode).toBe(200);
     const rId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${rId}/select-force`, headers: auth('ivy'), payload: { seat: 1 } });
     await app.inject({ method: 'POST', url: `/api/rooms/${rId}/ready`, headers: auth('ivy'), payload: { ready: true } });
-    // ivy 不选势力（无主）——开始游戏应成功
+    // ivy 只占 seat1（seat2 无主）——开始游戏应成功
     const res = await app.inject({ method: 'POST', url: `/api/rooms/${rId}/start`, headers: auth('ivy'), payload: {} });
     expect(res.statusCode).toBe(200);
   });
@@ -475,14 +536,16 @@ describe('BM4：AI 接管与无主势力混编开局', () => {
     });
     expect(create.statusCode).toBe(200);
     const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('ivy'), payload: { seat: 1 } });
     await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('ivy'), payload: { ready: true } });
     const c = await wsConnect(roomId, 'ivy');
     const res = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/start`, headers: auth('ivy'), payload: {} });
     expect(res.statusCode).toBe(200);
     const gs = await c.waitFor('GAME_START');
-    // ivy 未选势力 → 两个 seat 均为 AI 接管
+    // ivy 选 seat1 → seat1 归 ivy；未分配的 seat2 由 AI 接管
     const assignments = gs.seatAssignments as Array<{ seat: number; playerId: number | null; isAI: boolean }>;
-    expect(assignments.every((a) => a.playerId === null && a.isAI === true)).toBe(true);
+    expect(assignments.find((a) => a.seat === 1)).toMatchObject({ playerId: users.get('ivy')!.id, isAI: false });
+    expect(assignments.find((a) => a.seat === 2)).toMatchObject({ playerId: null, isAI: true });
     c.close();
   });
 });

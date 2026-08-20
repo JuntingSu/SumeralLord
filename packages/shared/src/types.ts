@@ -153,7 +153,8 @@ export interface RoomData {
   mapTitle: string;
   playerNum: number; // maxPlayers，来自地图
   timeSettings: RoomTimeSettings;
-  status: 'waiting' | 'in_game';
+  /** game_over：对局已结束，结算展示保留期（超时由 idleSweeper 回落 waiting） */
+  status: 'waiting' | 'in_game' | 'game_over';
   players: RoomPlayer[];
   forces: RoomForce[];
 }
@@ -164,7 +165,7 @@ export interface RoomListItem {
   currentPlayers: number; // 非观战人数
   spectatorCount: number;
   maxPlayers: number;
-  status: 'waiting' | 'in_game';
+  status: 'waiting' | 'in_game' | 'game_over';
   hasPassword: boolean;
   allowSpectate: boolean;
 }

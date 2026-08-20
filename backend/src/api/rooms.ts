@@ -29,6 +29,7 @@ const HTTP_BY_CODE: Record<string, number> = {
   NOT_IN_ROOM: 400,
   ALREADY_IN_ROOM: 409,
   FORCE_TAKEN: 409,
+  FORCE_NOT_SELECTED: 403,
   INVALID_PARAMS: 400,
 };
 
@@ -62,7 +63,7 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
   }
 
   app.get('/api/rooms', async (request, reply) => {
-    const query = request.query as { status?: 'waiting' | 'in_game' };
+    const query = request.query as { status?: 'waiting' | 'in_game' | 'game_over' };
     return ok(reply, app.rooms.listItems(query.status));
   });
 

@@ -99,7 +99,8 @@ export type RoomClientMsg =
   | z.infer<typeof IntentSubmitSchema>
   | z.infer<typeof ConsensusResultSchema>
   | z.infer<typeof ReconnectMsgSchema>
-  | z.infer<typeof TimeSyncMsgSchema>;
+  | z.infer<typeof TimeSyncMsgSchema>
+  | z.infer<typeof SettlementDismissedSchema>;
 
 // ---------- WS 房间阶段（BM3）：服务器 → 客户端 ----------
 
@@ -281,6 +282,13 @@ export const TimeSyncMsgSchema = z.object({
   gameTimeRemain: z.number().int().nonnegative(),
   ts: z.number().int(),
 });
+
+/** 结算页已关闭（对局结束后客户端上报；全部参战玩家关闭后房间立即回落 ROOM_OPEN，不等保留期） */
+export const SettlementDismissedSchema = z.object({
+  type: z.literal('SETTLEMENT_DISMISSED'),
+  gameId: z.string().min(1),
+});
+export type SettlementDismissedMsg = z.infer<typeof SettlementDismissedSchema>;
 
 // ---------- WS 服务器 → 客户端（结构声明，供前端类型使用） ----------
 

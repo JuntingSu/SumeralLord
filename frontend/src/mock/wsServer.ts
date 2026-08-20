@@ -163,6 +163,10 @@ export class MockWsServer implements GameTransport {
     this.emit({ type: 'RECONNECT_ACK', gameId: this.gameId, lastEventId: this.eventId, batch });
   }
 
+  sendSettlementDismissed(): void {
+    // Mock 单端模拟：无需服务器回落
+  }
+
   /** 补发拉取（EVENT_GAP 同构接口；真实模式走 GET /api/game/:id/events） */
   async fetchEvents(
     _gameId: string,

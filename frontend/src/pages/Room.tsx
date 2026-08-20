@@ -79,6 +79,12 @@ export default function Room() {
     wsRef.current = client;
     const offStatus = client.onStatus((s) => useRoom.getState().setConnection(s));
     const offMessage = client.onMessage((msg) => {
+      if (msg.type === 'CONNECT_ACK' && msg.gameId) {
+        // 对局进行中：跳转对局页重连（Game 页经 meta 恢复 board + 事件重放追平），
+        // 覆盖"对局中离开回大厅再进房间"与"观战加入进行中对局"两条路径
+        navigate(`/game/${roomId}`, { replace: true });
+        return;
+      }
       if (msg.type === 'PLAYER_LEAVE' && msg.playerId === me?.id) {
         useRoom.getState().setNotice('你已被移出房间');
       }
@@ -93,8 +99,8 @@ export default function Room() {
         navigate(`/game/${roomId}`, { replace: true });
         return;
       }
-      if (msg.type === 'ROOM_UPDATE' && msg.room.status === 'waiting' && useGame.getState().board !== null) {
-        // 对局中止/回落：回房间页继续
+      if (msg.type === 'ROOM_UPDATE' && msg.room.status !== 'in_game' && useGame.getState().board !== null) {
+        // 对局中止/结束/回落：回房间页继续（重置对局状态机）
         useGame.getState().reset();
       }
       useRoom.getState().applyServer(msg);
@@ -153,6 +159,7 @@ export default function Room() {
   const players = room.players.filter((p) => p.state !== 'spectating');
   const allReady = players.length > 0 && players.every((p) => p.state === 'prepared');
   const canStart = isHost && allReady;
+  const myForceSelected = room.forces.some((f) => f.playerId === me.id);
 
   const guard = async (fn: () => Promise<unknown>): Promise<void> => {
     setError(null);
@@ -209,7 +216,7 @@ export default function Room() {
           </Link>
           <h1 className="text-lg font-bold">{room.name}</h1>
           <span className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
-            {room.status === 'waiting' ? '等待中' : '对局中'}
+            {room.status === 'waiting' ? '等待中' : room.status === 'game_over' ? '已结束' : '对局中'}
           </span>
           <span
             className={`flex items-center gap-1 text-xs ${connection === 'open' ? 'text-emerald-400' : 'text-amber-400'}`}
@@ -342,7 +349,15 @@ export default function Room() {
             {!isSpectator && (
               <button
                 onClick={() => guard(() => setReady(room.id, myPlayer?.state !== 'prepared'))}
-                className={`rounded px-5 py-2 font-medium ${
+                disabled={room.status === 'game_over' || !myForceSelected}
+                title={
+                  room.status === 'game_over'
+                    ? '对局已结束，结算展示中，稍后可再来一局'
+                    : !myForceSelected
+                      ? '请先选择势力再准备'
+                      : undefined
+                }
+                className={`rounded px-5 py-2 font-medium disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 ${
                   myPlayer?.state === 'prepared'
                     ? 'bg-slate-600 text-slate-100 hover:bg-slate-500'
                     : 'bg-emerald-600 text-white hover:bg-emerald-500'
@@ -355,7 +370,13 @@ export default function Room() {
               <button
                 onClick={() => guard(() => startRoomGame(room.id))}
                 disabled={!canStart}
-                title={canStart ? '开始游戏（未分配势力将按设置删除或由 AI 接管）' : '等待所有玩家准备'}
+                title={
+                  room.status === 'game_over'
+                    ? '对局已结束，结算展示中，稍后可再来一局'
+                    : canStart
+                      ? '开始游戏（未分配势力将按设置删除或由 AI 接管）'
+                      : '等待所有玩家准备'
+                }
                 className={`rounded px-5 py-2 font-medium ${
                   canStart ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'cursor-not-allowed bg-slate-700 text-slate-400'
                 }`}
