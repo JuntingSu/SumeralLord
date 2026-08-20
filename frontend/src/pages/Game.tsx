@@ -14,6 +14,7 @@ import { MockWsServer } from '../mock/wsServer';
 import { fetchGameMeta } from '../api/game';
 import { computeFog, type FogLevel } from '../game/fog';
 import { formatClock } from '../game/timer';
+import { EventAnimator } from '../canvas/animator';
 import BoardCanvas from '../components/BoardCanvas';
 import ResultModal from './Result';
 
@@ -52,6 +53,40 @@ export default function Game() {
     accumulated: 0,
     lastSend: 0,
   });
+
+  // ---------- 动画播放器（M5.1）：驱动 eventQueue 逐链演出；board 权威不变 ----------
+  const animatorRef = useRef<EventAnimator | null>(null);
+  if (animatorRef.current === null) {
+    animatorRef.current = new EventAnimator(
+      () => useGame.getState().eventQueue,
+      () => useGame.getState().popChain(),
+    );
+  }
+  const [animPaused, setAnimPaused] = useState(false);
+  const [animSpeed, setAnimSpeed] = useState(1);
+  /** 演出中（粗粒度同步，仅变化时 setState；操作守卫用 ref 实时判断） */
+  const [animating, setAnimating] = useState(false);
+  useEffect(() => {
+    const iv = window.setInterval(() => {
+      const playing = animatorRef.current?.isPlaying ?? false;
+      setAnimating((prev) => (prev === playing ? prev : playing));
+    }, 200);
+    return () => window.clearInterval(iv);
+  }, []);
+  const setPlaySpeed = (v: number) => {
+    animatorRef.current?.setSpeed(v);
+    setAnimSpeed(v);
+  };
+  const togglePause = () => {
+    const next = !animPaused;
+    animatorRef.current?.setPaused(next);
+    setAnimPaused(next);
+  };
+  const stepEvent = () => animatorRef.current?.step();
+  const fastForward = () => {
+    animatorRef.current?.reset();
+    useGame.getState().clearEventQueue();
+  };
 
   // ---------- 传输通道 + 初始化（挂载时一次） ----------
   // 初始化路径：
@@ -95,6 +130,7 @@ export default function Game() {
       offAck();
       detach();
       transport.close();
+      animatorRef.current?.reset();
       useGame.getState().reset();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,6 +180,7 @@ export default function Game() {
       const s = useGame.getState();
       const b = s.board;
       if (!b || s.isSpectator || s.gameOver || s.fatal) return;
+      if (animatorRef.current?.isPlaying) return; // 演出中禁操作（可快进跳过）
       if (b.currentSeat !== s.mySeat) return;
       if (b.phase !== 'ACTION') return;
       const soldier = b.tiles[tile].soldier;
@@ -193,6 +230,7 @@ export default function Game() {
       const s = useGame.getState();
       const b = s.board;
       if (!b || s.isSpectator || s.gameOver || s.fatal) return;
+      if (animatorRef.current?.isPlaying) return; // 演出中禁操作
       if (b.currentSeat !== s.mySeat || b.phase !== 'ADD_POINT') return;
       const soldier = b.tiles[tile].soldier;
       if (!soldier || soldier.owner !== s.mySeat || !soldier.isLinked) return;
@@ -232,11 +270,13 @@ export default function Game() {
   const handleSwitchPhase = () => {
     const s = useGame.getState();
     if (!s.board) return;
+    if (animatorRef.current?.isPlaying) return;
     if (s.board.currentSeat !== s.mySeat) return;
     s.submitIntent({ intentType: 'SWITCH_PHASE' });
     setSelected(null);
   };
   const handleSurrender = () => {
+    if (animatorRef.current?.isPlaying) return;
     if (!window.confirm('确定投降？')) return;
     const s = useGame.getState();
     if (s.mySeat === null) return;
@@ -357,31 +397,59 @@ export default function Game() {
               else handleTileClick(tile);
             }}
             onTilePointerUp={stopAddPoint}
+            animatorRef={animatorRef}
             className="h-full w-full"
           />
-          {/* 底部提示条 */}
+          {/* 底部提示条 + 演出控制 */}
           <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-slate-900/80 px-4 py-2 text-xs text-slate-300">
             <span>
-              {isSpectator
-                ? '观战中，无法影响对局'
-                : myTurn
-                  ? phase === 'ACTION'
-                    ? hovered !== null && board.tiles[hovered]?.soldier && board.tiles[hovered]!.soldier!.owner !== mySeat
-                      ? '目标有敌军：点击发起进攻'
-                      : '点击己方有移动力的兵，再点击目标地块'
-                    : phase === 'ADD_POINT'
-                      ? '长按己方连兵加点（每 0.15 秒 1 点，自动聚合）'
-                      : '准备阶段…'
-                  : `等待 ${currentForce?.name ?? ''} 行动…`}
+              {animating
+                ? '演出中…'
+                : isSpectator
+                  ? '观战中，无法影响对局'
+                  : myTurn
+                    ? phase === 'ACTION'
+                      ? hovered !== null && board.tiles[hovered]?.soldier && board.tiles[hovered]!.soldier!.owner !== mySeat
+                        ? '目标有敌军：点击发起进攻'
+                        : '点击己方有移动力的兵，再点击目标地块'
+                      : phase === 'ADD_POINT'
+                        ? '长按己方连兵加点（每 0.15 秒 1 点，自动聚合）'
+                        : '准备阶段…'
+                    : `等待 ${currentForce?.name ?? ''} 行动…`}
             </span>
-            {eventQueue.length > 0 && (
-              <button
-                onClick={() => useGame.getState().clearEventQueue()}
-                className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
-              >
-                快进（{eventQueue.length} 事件）
-              </button>
-            )}
+            <span className="flex items-center gap-2">
+              {eventQueue.length > 0 && (
+                <>
+                  <button
+                    onClick={togglePause}
+                    className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
+                  >
+                    {animPaused ? '继续' : '暂停'}
+                  </button>
+                  <button
+                    onClick={stepEvent}
+                    className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
+                  >
+                    单步
+                  </button>
+                  {[1, 2, 4].map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setPlaySpeed(v)}
+                      className={`rounded px-2 py-0.5 hover:bg-slate-600 ${animSpeed === v ? 'bg-slate-600 text-amber-300' : 'bg-slate-700 text-slate-400'}`}
+                    >
+                      {v}x
+                    </button>
+                  ))}
+                  <button
+                    onClick={fastForward}
+                    className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
+                  >
+                    快进（{eventQueue.length} 事件）
+                  </button>
+                </>
+              )}
+            </span>
           </div>
         </section>
 

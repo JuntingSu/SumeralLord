@@ -14,11 +14,13 @@ import type {
   RoomServerMsg,
   RoomTimeSettings,
   SeatAssignment,
+  SoldierState,
 } from '@dl/shared';
 import { applyIntent, initState } from '@dl/shared';
 import type { GameState } from '@dl/shared';
 import { collectConsensusNodes, sameConsensus } from '../game/consensus';
 import { initialTimer, onTurnChange, tick, type TimerState } from '../game/timer';
+import type { EventQueueItem } from '../canvas/animator';
 import type { WsStatus } from '../ws/client';
 
 export interface GameTransport {
@@ -61,7 +63,8 @@ interface GameStore {
 
   board: GameState | null;
   appliedEventId: number;
-  eventQueue: GameEvent[];
+  /** 动画队列：事件链 + 链应用前兵表快照（M5.1 动画插值用；board 权威不变） */
+  eventQueue: EventQueueItem[];
   lastChain: GameEvent[];
   /** clientTempId → eventId（ACK 关联表） */
   ackMap: Record<string, number>;
@@ -91,7 +94,9 @@ interface GameStore {
   /** 超时投降（本地计时归零） */
   submitTimeoutSurrender(): void;
   tickClock(): void;
-  consumeNextEvent(): GameEvent | null;
+  /** 动画播放器弹出已播完的链 */
+  popChain(): void;
+  /** 快进：清空动画队列（动画播放器另调 reset） */
   clearEventQueue(): void;
   /** 断线重连后全量重放追平 */
   reconnectCatchUp(): void;
@@ -135,10 +140,12 @@ function applyStreamMessage(
   if (endTurn && endTurn.kind === 'END_TURN') {
     timer = onTurnChange(timer, endTurn.toSeat, s.timeSettings);
   }
+  // 链应用前兵表快照（动画插值起点；board 权威不变）
+  const beforeTiles: Array<SoldierState | null> = board.tiles.map((t) => (t.soldier ? { ...t.soldier } : null));
   set({
     board: r.state,
     appliedEventId: eventId,
-    eventQueue: [...s.eventQueue, ...r.chain],
+    eventQueue: [...s.eventQueue, { chain: r.chain, beforeTiles }],
     lastChain: r.chain,
     pendingConsensus,
     timer,
@@ -385,12 +392,10 @@ export const useGame = create<GameStore>((set, get) => {
       }
     },
 
-    consumeNextEvent: () => {
+    popChain: () => {
       const s = get();
-      if (s.eventQueue.length === 0) return null;
-      const [head, ...rest] = s.eventQueue;
-      set({ eventQueue: rest });
-      return head;
+      if (s.eventQueue.length === 0) return;
+      set({ eventQueue: s.eventQueue.slice(1) });
     },
 
     clearEventQueue: () => set({ eventQueue: [] }),

@@ -1,11 +1,13 @@
-// 双层 Canvas 棋盘（前端规划 §1.3）：底层静态层（地形+旗帜+兵力数字，dirty 重绘）、
-// 上层动态层（hover/选中/光圈/迷雾，每帧）。尖顶六边形 odd-r（0 基奇数行右移），index 0 左下。
-// 断兵视觉：过渡期用 globalCompositeOperation 擦边实现 2px 镂空（正式 hollow sprite 后补）。
-import { useEffect, useRef, useCallback } from 'react';
+// 双层 Canvas 棋盘（前端规划 §1.3，M5.1 动画版）：底层静态层（地形+迷雾+据点圆点，dirty 重绘）、
+// 上层动态层（兵+动画中间帧+hover/选中/光圈/高亮，每帧）。
+// 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
+// 断兵视觉：过渡期用 globalCompositeOperation 擦边实现 2px 镂空（正式 hollow sprite 后补，M5.2）。
+import { useEffect, useMemo, useRef, useCallback } from 'react';
 import { TERRAIN, TILE_OWNER } from '@dl/shared';
-import type { GameState, Phase } from '@dl/shared';
+import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
 import type { FogLevel } from '../game/fog';
+import type { EventAnimator } from '../canvas/animator';
 
 const TERRAIN_COLORS: Record<number, string> = {
   [TERRAIN.PLAIN]: '#7cb342',
@@ -17,6 +19,14 @@ const TERRAIN_COLORS: Record<number, string> = {
 const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#8e44ad', '#d35400'];
 const FOG_COLOR = 'rgba(10, 14, 20, 0.92)';
 const EXPLORED_DIM = 'rgba(10, 14, 20, 0.45)';
+
+type FlashKind = 'clear' | 'break' | 'rejoin' | 'victory';
+const FLASH_COLORS: Record<FlashKind, string> = {
+  clear: 'rgba(230, 57, 70, 0.85)',
+  break: 'rgba(230, 57, 70, 0.85)',
+  rejoin: 'rgba(42, 157, 143, 0.9)',
+  victory: 'rgba(233, 196, 106, 0.95)',
+};
 
 const SQRT3 = Math.sqrt(3);
 
@@ -34,6 +44,8 @@ interface BoardCanvasProps {
   /** 地块按下（加点长按入口；行动阶段点击由 onTileClick 处理） */
   onTilePointerDown?: (tile: number) => void;
   onTilePointerUp?: () => void;
+  /** M5.1：动画播放器实例（Game 页注入；null = 无动画直渲 board） */
+  animatorRef?: React.MutableRefObject<EventAnimator | null> | null;
   className?: string;
 }
 
@@ -95,6 +107,7 @@ export default function BoardCanvas({
   onTileHover,
   onTilePointerDown,
   onTilePointerUp,
+  animatorRef,
   className,
 }: BoardCanvasProps) {
   const staticRef = useRef<HTMLCanvasElement>(null);
@@ -105,6 +118,25 @@ export default function BoardCanvas({
   const spritesRef = useRef<Record<string, HTMLImageElement | null>>({});
 
   const geoRef = useRef({ rows: board.rows, columns: board.columns, cylindrical: board.cylindrical });
+
+  /** owner → 旗帜编号（预计算；野生 0 无 sprite 走色块兜底，阻挡/未知用 8） */
+  const flagOf = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const f of board.forces) map.set(f.seat, f.flag);
+    return (owner: number): number => map.get(owner) ?? (owner === TILE_OWNER.WILD ? 0 : 8);
+  }, [board.forces]);
+
+  /** 空闲时（无动画）渲染的权威兵表 */
+  const boardSoldiers = useMemo<Array<SoldierState | null>>(
+    () => board.tiles.map((t) => t.soldier),
+    [board.tiles],
+  );
+
+  /** 胜利常显：胜方 seat 集合（对局结束后金色高亮） */
+  const victorySeats = useMemo(() => {
+    if (!board.finished || board.winningTeam === null) return [];
+    return board.forces.filter((f) => f.exists && f.team === board.winningTeam).map((f) => f.seat);
+  }, [board.finished, board.winningTeam, board.forces]);
 
   const tileAtPointer = useCallback(
     (clientX: number, clientY: number): number | null => {
@@ -142,7 +174,7 @@ export default function BoardCanvas({
     [],
   );
 
-  // 静态层绘制（dirty 重绘）
+  // 静态层绘制（dirty 重绘）：地形 + 迷雾遮罩 + 据点归属圆点（兵在 overlay 层）
   useEffect(() => {
     const canvas = staticRef.current;
     if (!canvas) return;
@@ -196,7 +228,7 @@ export default function BoardCanvas({
       }
     }
 
-    // 3. 据点归属圆点（中立/无主据点也标）——先画地形上的标记再画兵
+    // 3. 据点归属圆点（中立/无主据点也标）
     for (let i = 0; i < board.tiles.length; i++) {
       const t = board.tiles[i];
       if (t.terrain !== TERRAIN.CITY) continue;
@@ -211,15 +243,33 @@ export default function BoardCanvas({
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+  }, [board, fogEnabled, fogLevels]);
 
-    // 4. 旗帜 + 兵力数字（迷雾 explored 不画兵；hidden 不画）
-    for (let i = 0; i < board.tiles.length; i++) {
-      const soldier = board.tiles[i].soldier;
-      if (!soldier) continue;
-      if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
-      const { cx, cy } = centerOf(i, columns, size, offX, offY, totalH);
-      const force = board.forces.find((f) => f.seat === soldier.owner);
-      const flagNum = force ? force.flag : soldier.owner === TILE_OWNER.WILD ? 0 : 8;
+  // 旗帜 sprite 预加载
+  useEffect(() => {
+    const load = (n: number) => {
+      if (spritesRef.current[String(n)] !== undefined) return;
+      const img = new Image();
+      img.src = `/static/flags/flag_${n}.png`;
+      spritesRef.current[String(n)] = img;
+    };
+    for (let n = 1; n <= 9; n++) load(n);
+  }, []);
+
+  /** 画单个兵（旗帜 + 断兵镂空 + 兵力数字 + 闪光描边；alpha 控制淡入淡出） */
+  const drawSoldier = useCallback(
+    (
+      ctx: CanvasRenderingContext2D,
+      cx: number,
+      cy: number,
+      size: number,
+      soldier: SoldierState,
+      flagNum: number,
+      alpha: number,
+      flash: FlashKind | null,
+    ) => {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       const flag = spritesRef.current[String(flagNum)];
       const flagW = size * 1.1;
       const flagH = size * 1.24;
@@ -241,24 +291,23 @@ export default function BoardCanvas({
       ctx.lineWidth = 2.5;
       ctx.strokeText(String(soldier.strength), cx, cy + size * 0.52);
       ctx.fillText(String(soldier.strength), cx, cy + size * 0.52);
-    }
-  }, [board, fogEnabled, fogLevels]);
+      ctx.restore();
+      // 闪光描边（不受兵透明度影响）
+      if (flash) {
+        hexPath(ctx, cx, cy, size * 0.85);
+        ctx.strokeStyle = FLASH_COLORS[flash];
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    },
+    [],
+  );
 
-  // 旗帜 sprite 预加载
-  useEffect(() => {
-    const load = (n: number) => {
-      if (spritesRef.current[String(n)] !== undefined) return;
-      const img = new Image();
-      img.src = `/static/flags/flag_${n}.png`;
-      spritesRef.current[String(n)] = img;
-    };
-    for (let n = 1; n <= 9; n++) load(n);
-  }, []);
-
-  // 动态层：hover / 选中 / 行动阶段反击着色 / 加点阶段连兵高亮，每帧
+  // 动态层：动画帧兵表 + hover / 选中 / 高亮，每帧
   useEffect(() => {
     let raf = 0;
     const draw = () => {
+      const now = performance.now();
       const canvas = overlayRef.current;
       const ctx = canvas?.getContext('2d');
       if (canvas && ctx) {
@@ -280,9 +329,15 @@ export default function BoardCanvas({
         const offX = (cssW - totalWUnits * size) / 2;
         const offY = (cssH - totalH) / 2;
 
+        // 动画帧（M5.1）：播放中画动画态+中间帧，空闲画权威 board
+        const af = animatorRef?.current?.frame(now) ?? null;
+        const ev = af?.event ?? null;
+        const progress = af?.progress ?? 0;
+        const showTiles = af ? af.tiles : boardSoldiers;
+
         const isMyTurn = mySeat !== null && board.currentSeat === mySeat && !isSpectator;
 
-        // 行动阶段：选中兵 → 周围地块反击状态着色 + 可选目标高亮
+        // 行动阶段：选中兵 → 周围地块反击状态着色 + 可选目标高亮（兵之下）
         if (selected !== null && phase === 'ACTION' && isMyTurn) {
           const sel = board.tiles[selected].soldier;
           if (sel && sel.owner === mySeat) {
@@ -305,7 +360,8 @@ export default function BoardCanvas({
             }
           }
         }
-        // 加点阶段：己方连兵白色数字高亮
+        // 加点阶段：己方连兵白色数字高亮（兵之上）
+        const addPointHighlights = new Set<number>();
         if (phase === 'ADD_POINT' && isMyTurn) {
           const force = board.forces.find((f) => f.seat === mySeat);
           if (force && force.points > 0) {
@@ -313,18 +369,64 @@ export default function BoardCanvas({
               const s = board.tiles[i].soldier;
               if (!s || s.owner !== mySeat || !s.isLinked) continue;
               if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
-              const c = centerOf(i, columns, size, offX, offY, totalH);
-              ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillStyle = '#ffffff';
-              ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-              ctx.lineWidth = 2;
-              ctx.strokeText(String(s.strength), c.cx, c.cy + size * 0.52);
-              ctx.fillText(String(s.strength), c.cx, c.cy + size * 0.52);
+              addPointHighlights.add(i);
             }
           }
         }
+
+        // 兵主循环（动画中间帧在循环内特判）
+        for (let i = 0; i < board.tiles.length; i++) {
+          if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
+          const soldier = showTiles[i];
+          if (!soldier) continue;
+          const c = centerOf(i, columns, size, offX, offY, totalH);
+          // MOVE：起点兵沿 from→to 插值滑动
+          if (ev?.kind === 'MOVE' && ev.from === i) {
+            const tc = centerOf(ev.to, columns, size, offX, offY, totalH);
+            drawSoldier(ctx, c.cx + (tc.cx - c.cx) * progress, c.cy + (tc.cy - c.cy) * progress, size, soldier, flagOf(soldier.owner), 1, null);
+            continue;
+          }
+          // DESPAWN：淡出
+          if (ev?.kind === 'DESPAWN' && ev.tile === i) {
+            drawSoldier(ctx, c.cx, c.cy, size, soldier, flagOf(soldier.owner), 1 - progress, null);
+            continue;
+          }
+          // 闪光判定
+          let flash: FlashKind | null = null;
+          if (af && af.clearingSeats.includes(soldier.owner)) flash = 'clear';
+          else if (af && af.breakTiles.includes(i)) flash = 'break';
+          else if (ev?.kind === 'REJOIN' && ev.tile === i) flash = 'rejoin';
+          else if (victorySeats.includes(soldier.owner)) flash = 'victory';
+          drawSoldier(ctx, c.cx, c.cy, size, soldier, flagOf(soldier.owner), 1, flash);
+        }
+        // SPAWN：目标地块淡入（起点 30% 保证移动连续性）
+        if (ev?.kind === 'SPAWN') {
+          if (!(fogEnabled && fogLevels && fogLevels[ev.tile] !== 'visible')) {
+            const c = centerOf(ev.tile, columns, size, offX, offY, totalH);
+            drawSoldier(ctx, c.cx, c.cy, size, ev.soldier, flagOf(ev.soldier.owner), 0.3 + 0.7 * progress, null);
+          }
+        }
+        // ATTACK：目标地块红闪（进攻演出）
+        if (ev?.kind === 'ATTACK') {
+          const c = centerOf(ev.to, columns, size, offX, offY, totalH);
+          hexPath(ctx, c.cx, c.cy, size);
+          ctx.fillStyle = `rgba(230, 57, 70, ${0.25 * Math.sin(progress * Math.PI)})`;
+          ctx.fill();
+        }
+
+        // 加点阶段连兵白字高亮
+        for (const i of addPointHighlights) {
+          const c = centerOf(i, columns, size, offX, offY, totalH);
+          ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+          ctx.lineWidth = 2;
+          ctx.strokeText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52);
+          ctx.fillText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52);
+        }
+
         // 选中光圈
         if (selected !== null) {
           const c = centerOf(selected, columns, size, offX, offY, totalH);
@@ -347,7 +449,7 @@ export default function BoardCanvas({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [board, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels]);
+  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier]);
 
   return (
     <div className={className} style={{ position: 'relative', overflow: 'hidden' }}>
