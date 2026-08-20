@@ -115,8 +115,9 @@ cd backend && node scripts/e2e-player.mjs <roomId>  # 脚本"第二玩家"
 
 ## 5. 质量基线（当前状态）
 
-- 后端测试：85 个用例全绿（auth 17 + maps 6 + rooms 25 + ws 12 + game 17 + consensus 25）。
+- 后端测试：90 个用例全绿（auth 17 + maps 6 + rooms 25 + ws 12 + game 17 + consensus 25 + log 5）。
 - shared 测试：81 个用例全绿（含 ai.test.ts 14 个 AI 策略层用例）。
+- 前端测试：animator.test.ts 13 个用例全绿（`npm run test -w frontend`）。
 - 前端：tsc 严格 + vite build 零错误。
 - 文档：三份规划 + vip update 备忘 + M4/M5 流程文档保持同步；新增接口/错误码要回写《前端接口需求声明.md》。
-- 已交付里程碑：M1~M3、**M4（对局核心闭环：后端 BM4~BM6 完整落地 + 前端对局界面）**、M5 的 AI 策略层（D3 拍板：难度 1~3 与 255 统一跳过 + 战场信息接口预留，`packages/shared/src/game/ai.ts`）。下一步：M5 主线——事件链动画播放器（M5.1）→ 棋盘拖拽缩放与 hollow sprite（M5.2）→ 对局内聊天（M5.3）→ 历史回放（M5.4，后端 BM7a）→ 战绩查询（M5.5，后端 BM7b）→ 收尾验收（M5.7）。详见《数字领主-M5开发流程设计.md》。
+- 已交付里程碑：M1~M4、**M5 全部（动画播放器与演出控制 / 棋盘拖拽缩放与 hollow sprite / 对局内聊天 / 历史回放 BM7a / 战绩查询 BM7b / AI 难度 1~3 策略层）**。下一步：M6 移动端适配（touch 点击合成、双指缩放）或 BM7c+（快照重连/AI 势力/部署运维）。详见《数字领主-M5开发流程设计.md》。

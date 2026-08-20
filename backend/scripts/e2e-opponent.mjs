@@ -48,8 +48,6 @@ const MY_SEAT = 2;
 let board = null; // B 端权威 boardState（与 A 端同源 reducer）
 let appliedEventId = 0;
 let pendingIntent = null; // clientTempId → intent（ACK 时应用）
-let actedThisTurn = 0; // 本回合已行动轮次（行动阶段 1 次 + 切阶段）
-let lastActedTurn = -1;
 
 function applyStream(eventId, intent, fromSeat) {
   if (!board) return;
@@ -65,6 +63,7 @@ function applyStream(eventId, intent, fromSeat) {
     return;
   }
   board = r.state;
+  reportConsensus(eventId, r.chain);
   maybeAct();
 }
 
@@ -74,33 +73,47 @@ function sendIntent(intent, tag) {
   ws.send(JSON.stringify({ type: 'INTENT_SUBMIT', clientTempId, intent }));
 }
 
-/** 轮到自己且行动阶段/加点阶段：自动行动 */
+/** 从事件链提取共识节点并按服务器格式上报（与前端 game/consensus.ts 同构，避免 CONSENSUS_TIMEOUT） */
+function reportConsensus(triggerEventId, chain) {
+  for (const ev of chain) {
+    if (ev.kind === 'FORCE_CLEAR') {
+      ws.send(JSON.stringify({
+        type: 'CONSENSUS_RESULT',
+        fromSeat: MY_SEAT,
+        consensusId: `${triggerEventId}:force_clear:${ev.seat}`,
+        result: { kind: 'FORCE_CLEAR', seat: ev.seat, reason: ev.reason },
+      }));
+      log(`共识上报: ${triggerEventId}:force_clear:${ev.seat}`);
+    } else if (ev.kind === 'VICTORY') {
+      ws.send(JSON.stringify({
+        type: 'CONSENSUS_RESULT',
+        fromSeat: MY_SEAT,
+        consensusId: `${triggerEventId}:victory:0`,
+        result: { kind: 'VICTORY', winningTeam: ev.winningTeam, winners: ev.winners, losers: ev.losers },
+      }));
+      log(`共识上报: ${triggerEventId}:victory:0`);
+    }
+  }
+}
+
+/** 轮到自己且行动阶段/加点阶段：自动行动（无条件推进回合：行动或直切阶段） */
 function maybeAct() {
   if (!board || board.finished) return;
   if (board.currentSeat !== MY_SEAT) return;
-  if (board.turn === lastActedTurn && actedThisTurn >= 3) return;
-  if (board.turn !== lastActedTurn) {
-    lastActedTurn = board.turn;
-    actedThisTurn = 0;
-  }
-  if (board.phase === 'ACTION' && actedThisTurn === 0) {
+  if (board.phase === 'ACTION') {
     const actions = listAiActions(board, MY_SEAT);
     if (actions.length === 0) {
       log('无合法行动，直接切阶段');
       sendIntent({ intentType: 'SWITCH_PHASE' }, 's1');
-      actedThisTurn = 1;
       return;
     }
     const pick = attackFirst ? actions.find((a) => a.kind === 'ATTACK') ?? actions[0] : actions[0];
     log(`行动: ${pick.kind} from=${pick.from} to=${pick.to}`);
     sendIntent({ intentType: pick.kind, from: pick.from, to: pick.to }, 'a');
-    actedThisTurn = 1;
     return;
   }
-  if (board.phase === 'ADD_POINT' && actedThisTurn === 1) {
+  if (board.phase === 'ADD_POINT') {
     sendIntent({ intentType: 'SWITCH_PHASE' }, 's2');
-    actedThisTurn = 2;
-    return;
   }
 }
 
