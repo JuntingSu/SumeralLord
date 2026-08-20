@@ -30,7 +30,7 @@ export interface ForceState {
   playerId: number | null;
   /** AI 接管（isAI = aiTakeover && playerId===null） */
   isAI: boolean;
-  /** 地图 player_list[].computer；M4 一律按 255=休闲跳过处理（D2 拍板） */
+  /** 地图 player_list[].computer；难度 1~3 与 255 由 AI 策略层决策（M5 起，当前统一跳过，D3 拍板） */
   computer: number;
   exists: boolean;
   alive: boolean;

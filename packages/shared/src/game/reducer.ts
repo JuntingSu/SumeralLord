@@ -26,6 +26,7 @@ import {
 import type { BoardGeometry } from './coord.js';
 import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
+import { planAiTurn } from './ai.js';
 
 // ---------- 内部上下文 ----------
 
@@ -461,7 +462,7 @@ function endTurnEvent(ctx: Ctx): void {
   runPreparePhaseContent(ctx);
 }
 
-/** 准备阶段内容（§6.1）：点数发放 → 反击刷新 → 移动力发放 → 切入行动阶段；AI(255) 轮到即自动跳过（D1） */
+/** 准备阶段内容（§6.1）：点数发放 → 反击刷新 → 移动力发放 → 切入行动阶段；AI 轮到即自动跳过（D1；D3：难度 1~3 同 255） */
 function runPreparePhaseContent(ctx: Ctx): void {
   const seat = ctx.state.currentSeat;
   const force = forceOf(ctx.state, seat);
@@ -488,13 +489,18 @@ function runPreparePhaseContent(ctx: Ctx): void {
   if (ctx.state.phase === 'ACTION' && !hasMovableSoldier(ctx, seat)) {
     switchPhaseEventCore(ctx);
   }
-  // AI 自动跳过（D1 拍板；D2：computer 1~3 在 M4 一律按 255 休闲处理）
+  // AI 回合处理（D1/D3 拍板）：由策略层决策。v1 难度 1~3/255 统一跳过——
+  // 等效连续切阶段至本回合结束（可能已由自动切换进入加点阶段；结束后递归下一势力）。
+  // 未来难度策略返回 intents 计划时在此按序演算（策略意图不入流，重放仍是派生行为）。
   if (force.isAI) {
-    // 连续切阶段至本回合结束（可能已由自动切换进入加点阶段；结束后递归下一势力）
-    let guard = 0;
-    while (ctx.state.currentSeat === seat && ctx.state.phase !== 'END' && guard++ < 8) {
-      switchPhaseEventCore(ctx);
+    const plan = planAiTurn(ctx.state, seat);
+    if (plan.kind === 'skip') {
+      let guard = 0;
+      while (ctx.state.currentSeat === seat && ctx.state.phase !== 'END' && guard++ < 8) {
+        switchPhaseEventCore(ctx);
+      }
     }
+    // plan.kind === 'intents'：难度策略接入点（预留，未来按序应用策略意图）
   }
 }
 

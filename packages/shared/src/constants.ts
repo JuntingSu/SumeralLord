@@ -98,7 +98,7 @@ export const GAME = {
   EVENTS_PAGE_LIMIT: 500,
 } as const;
 
-/** AI 难度档位（取值同地图 player_list[].computer）。255=休闲：reducer 内建轮到即跳过（D1 拍板）；1~3 在 M4 按 255 处理，难度行为顺延 M5+（D2 拍板） */
+/** AI 难度档位（取值同地图 player_list[].computer）。255=休闲：reducer 内建轮到即跳过（D1 拍板）；1~3 在 M5 起由 AI 策略层决策（v1 统一按 255 跳过，D3 拍板） */
 export const AI_LEVEL = {
   EASY: 1,
   MEDIUM: 2,
