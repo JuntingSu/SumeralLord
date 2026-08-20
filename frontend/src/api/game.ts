@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { GameStartMsg } from '@dl/shared';
+import type { GameStartMsg, GameLogResult } from '@dl/shared';
 
 export interface GameStateInfo {
   gameId: string;
@@ -31,4 +31,9 @@ export function fetchGameEvents(
   return api<{ events: Array<Record<string, unknown>>; nextCursor: number }>(
     `/api/game/${gameId}/events?after=${after}&limit=${limit}`,
   );
+}
+
+/** 对局日志（BM7a 回放）：GAME_START 首行 + 对局流分页；start=null 表示旧对局不可回放 */
+export function fetchGameLog(gameId: string, after = 0, limit = 500): Promise<GameLogResult> {
+  return api<GameLogResult>(`/api/game/${gameId}/log?after=${after}&limit=${limit}`);
 }

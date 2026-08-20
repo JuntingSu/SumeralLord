@@ -513,6 +513,7 @@ export default function Game() {
           fatal={fatal}
           board={board}
           isSpectator={isSpectator}
+          gameId={gameId}
           onClose={() => {
             // 结算页关闭上报：全部参战玩家关闭后，房间立即回落等待中（服务器据此结束结算展示）
             const s = useGame.getState();

@@ -183,3 +183,27 @@ export interface JoinRoomResult {
 export interface MapListResult {
   mapList: MapMeta[];
 }
+
+/** 对局记录（BM7a/BM7b：战绩与回放列表；match_history 行） */
+export interface MatchRecord {
+  gameId: string;
+  roomId: string;
+  startedAt: number;
+  finishedAt: number;
+  /** 胜方 playerId 字符串数组（共识中止时为空） */
+  winners: string[];
+  winningTeam: number;
+  /** 参战者快照 [{ seat, playerId, isAI }] */
+  participants: Array<{ seat: number; playerId: number | null; isAI: boolean }>;
+  /** 共识中止（不结算） */
+  aborted: boolean;
+}
+
+/** 对局日志（BM7a 回放数据源：GAME_START 首行 + 对局流分页） */
+export interface GameLogResult {
+  /** 开局负载（旧对局 JSONL 无 GAME_START 首行时为 null → 不可回放） */
+  start: import('./protocol.js').GameStartMsg | null;
+  events: Array<Record<string, unknown>>;
+  /** 0 = 无更多 */
+  nextCursor: number;
+}

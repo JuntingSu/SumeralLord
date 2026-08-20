@@ -130,6 +130,8 @@ export class GameManager {
       timeSettings: input.timeSettings,
       reducerVersion: input.reducerVersion,
     };
+    // BM7a：GAME_START 持久化为 JSONL 首行（回放数据源；对局结束后内存释放仍可重建）
+    appendFileSync(game.logFile, JSON.stringify(startMsg) + '\n');
     return { game, startMsg };
   }
 
@@ -172,6 +174,43 @@ export class GameManager {
     const last = paged.length > 0 ? Number(paged[paged.length - 1].eventId) : 0;
     const hasMore = events.length > limit;
     return { events: paged, nextCursor: hasMore ? last : 0 };
+  }
+
+  /** 读对局日志（BM7a 回放）：首行 GAME_START + 从 after 起的对局流分页（内存无关，日志文件即数据源） */
+  readLog(gameId: string, after: number, limit: number): { start: GameStartMsg | null; events: Array<Record<string, unknown>>; nextCursor: number } {
+    const file = path.join(this.logDir, `${gameId}.jsonl`);
+    let lines: string[] = [];
+    try {
+      lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    } catch {
+      return { start: null, events: [], nextCursor: 0 };
+    }
+    // 首行 = GAME_START（BM7a 起落盘）；旧日志首行是对局流消息 → start=null（不可回放）
+    let start: GameStartMsg | null = null;
+    if (lines.length > 0) {
+      try {
+        const first = JSON.parse(lines[0]) as Record<string, unknown>;
+        if (first?.type === 'GAME_START') {
+          start = first as unknown as GameStartMsg;
+          lines = lines.slice(1);
+        }
+      } catch {
+        // 首行坏 → 按旧日志处理
+      }
+    }
+    const events: Array<Record<string, unknown>> = [];
+    for (const line of lines) {
+      try {
+        const msg = JSON.parse(line) as Record<string, unknown>;
+        if (typeof msg.eventId === 'number' && msg.eventId > after) events.push(msg);
+      } catch {
+        // 坏行跳过
+      }
+    }
+    events.sort((a, b) => Number(a.eventId) - Number(b.eventId));
+    const paged = events.slice(0, limit);
+    const last = paged.length > 0 ? Number(paged[paged.length - 1].eventId) : 0;
+    return { start, events: paged, nextCursor: events.length > limit ? last : 0 };
   }
 
   markFinished(game: Game): void {

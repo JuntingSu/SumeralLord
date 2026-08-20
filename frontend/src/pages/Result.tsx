@@ -1,4 +1,6 @@
 // 对局结束弹窗（M4 范围）：VICTORY 结算（GAME_OVER）与共识中止（fatal ERROR）两种形态。
+// M5.4：结算后可跳转历史回放。
+import { Link } from 'react-router-dom';
 import type { GameOverMsg, GameState } from '@dl/shared';
 import type { FatalError } from '../stores/game';
 
@@ -7,10 +9,12 @@ interface ResultModalProps {
   fatal: FatalError | null;
   board: GameState;
   isSpectator: boolean;
+  /** 对局 id（回放入口，M5.4） */
+  gameId: string | null;
   onClose: () => void;
 }
 
-export default function ResultModal({ gameOver, fatal, board, onClose }: ResultModalProps) {
+export default function ResultModal({ gameOver, fatal, board, gameId, onClose }: ResultModalProps) {
   if (fatal) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -92,6 +96,14 @@ export default function ResultModal({ gameOver, fatal, board, onClose }: ResultM
         >
           返回房间
         </button>
+        {gameId && (
+          <Link
+            to={`/replay/${gameId}`}
+            className="mt-2 block w-full rounded border border-slate-600 px-4 py-2 text-center text-sm text-slate-300 hover:bg-slate-700"
+          >
+            查看回放
+          </Link>
+        )}
       </div>
     </div>
   );
