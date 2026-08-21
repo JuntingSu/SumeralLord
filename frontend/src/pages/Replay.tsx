@@ -206,7 +206,11 @@ export default function Replay() {
       </header>
 
       <main className="relative flex-1 overflow-hidden px-6 py-4">
-        <BoardCanvas board={board} mySeat={null} isSpectator fogEnabled={false} fogLevels={null} phase={board.phase} selected={null} onTileClick={() => undefined} onTileHover={() => undefined} animatorRef={animatorRef} className="h-full w-full" />
+        {/* absolute inset-0：高度确定（相对 padding box），BoardCanvas 的 h-full 百分比才有效
+            （block 父级 flex-grow 拉伸的高度对百分比子元素无效，canvas 会塌陷为 0） */}
+        <div className="absolute inset-0">
+          <BoardCanvas board={board} mySeat={null} isSpectator fogEnabled={false} fogLevels={null} phase={board.phase} selected={null} onTileClick={() => undefined} onTileHover={() => undefined} animatorRef={animatorRef} className="h-full w-full" />
+        </div>
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-4 bg-slate-900/80 px-4 py-2 text-xs text-slate-300">
           <span className="flex items-center gap-2">
             <button onClick={handlePause} className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600">
