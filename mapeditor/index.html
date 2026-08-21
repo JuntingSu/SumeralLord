@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数字领主 · 地图编辑器</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div class="brand">🗺 数字领主 · 地图编辑器</div>
+  <div class="grp">
+    <button id="btn-new" title="新建地图">新建</button>
+    <button id="btn-open" title="从本地 JSON 文件打开">打开</button>
+    <input type="file" id="file-open" accept=".json,application/json" hidden>
+    <select id="server-map-select" title="从服务器地图库加载"><option value="">— 从服务器加载 —</option></select>
+    <button id="btn-refresh-server" title="刷新服务器地图列表">刷新</button>
+  </div>
+  <div class="grp">
+    <label class="server">服务器
+      <input id="server-url" size="22" placeholder="http://127.0.0.1:3000">
+    </label>
+    <button id="btn-save" title="保存到服务器 maps-uncensored 审查队列">💾 保存到服务器</button>
+    <button id="btn-export" title="导出为 JSON 文件下载">📥 导出 JSON</button>
+  </div>
+  <div id="status" class="status">就绪</div>
+</header>
+
+<main>
+  <aside id="left">
+    <section class="panel">
+      <h3>工具</h3>
+      <div class="tools">
+        <button data-tool="paint">✏️ 画笔</button>
+        <button data-tool="city">🏰 出生点</button>
+        <button data-tool="select">▭ 框选</button>
+        <button data-tool="paste">📋 粘贴</button>
+        <button data-tool="pan">✋ 平移</button>
+      </div>
+      <div class="ops">
+        <button id="btn-copy" title="复制选中区域到剪贴板（切到粘贴工具放置）">📋 复制选区</button>
+        <button id="btn-undo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
+        <button id="btn-redo" title="重做 (Ctrl+Y)">↪ 重做</button>
+      </div>
+      <p id="paste-hint" class="hint" style="display:none">点击格子放置剪贴板区域；越界部分自动跳过。</p>
+    </section>
+
+    <section class="panel" id="brush-panel">
+      <h3>画笔</h3>
+      <div id="brush-mode" class="seg">
+        <button data-mode="all">全部</button>
+        <button data-mode="terrain">仅地形</button>
+        <button data-mode="strength">仅兵力</button>
+      </div>
+      <div class="sub" id="terrain-palette"><h4>地形</h4><div class="palette"></div></div>
+      <div class="sub" id="owner-palette"><h4>归属</h4><div class="palette"></div></div>
+      <div class="sub" id="strength-row">
+        <h4>兵力 <span id="strength-val" class="val">5</span></h4>
+        <input id="strength-input" type="range" min="0" max="255" value="5">
+      </div>
+      <div class="sub" id="city-seat-row" style="display:none">
+        <h4>势力</h4>
+        <select id="city-seat"></select>
+        <p class="hint">点击格子放置/移动该势力出生据点（原出生点自动还原为无主平原）。</p>
+      </div>
+      <p class="hint">山地/虚空不可驻兵；无主格兵力强制为 0；野生/阻挡可驻兵（中立兵）。</p>
+    </section>
+
+    <section class="panel">
+      <h3>尺寸</h3>
+      <div class="resize">
+        <button data-dir="top" data-d="1">上 +1</button>
+        <button data-dir="top" data-d="-1">上 -1</button>
+        <button data-dir="bottom" data-d="1">下 +1</button>
+        <button data-dir="bottom" data-d="-1">下 -1</button>
+        <button data-dir="left" data-d="1">左 +1</button>
+        <button data-dir="left" data-d="-1">左 -1</button>
+        <button data-dir="right" data-d="1">右 +1</button>
+        <button data-dir="right" data-d="-1">右 -1</button>
+      </div>
+      <p class="hint">新增格默认为平原无主。</p>
+    </section>
+
+    <section class="panel">
+      <h3>随机生成</h3>
+      <div class="frow"><label>行</label><input id="gen-row" type="number" min="3" max="30" value="9"></div>
+      <div class="frow"><label>列</label><input id="gen-col" type="number" min="3" max="40" value="11"></div>
+      <div class="frow"><label>势力</label><input id="gen-players" type="number" min="1" max="8" value="2"></div>
+      <div class="frow"><label>模式</label>
+        <select id="gen-mode">
+          <option value="plain">均衡</option>
+          <option value="random">破碎</option>
+          <option value="river">河谷</option>
+          <option value="pvp">对局</option>
+        </select>
+      </div>
+      <button id="btn-generate" class="wide">🎲 生成随机地图</button>
+    </section>
+  </aside>
+
+  <section id="canvas-wrap">
+    <canvas id="board"></canvas>
+    <div id="tooltip" hidden></div>
+  </section>
+
+  <aside id="right">
+    <div class="tabs">
+      <button data-tab="info" class="active">地图信息</button>
+      <button data-tab="players">势力</button>
+      <button data-tab="validate">校验</button>
+    </div>
+    <div class="tab-page" id="tab-info">
+      <div class="frow"><label>id（文件名）</label><input id="f-id" placeholder="map_xxx"></div>
+      <div class="frow"><label>标题</label><input id="f-title"></div>
+      <div class="frow"><label>作者</label><input id="f-author"></div>
+      <div class="frow"><label>时间戳 <button id="btn-now" class="mini" title="更新为当前时间">现在</button></label><input id="f-timestamp"></div>
+      <div class="frow"><label>描述</label><textarea id="f-desc" rows="3"></textarea></div>
+      <div class="frow"><label>标签（逗号分隔）</label><input id="f-tags" placeholder="2人, 1v1"></div>
+      <div class="frow"><label>总时长(秒)</label><input id="f-total" type="number" min="0"></div>
+      <div class="frow"><label>回合时长(秒)</label><input id="f-round" type="number" min="0"></div>
+      <div class="frow"><label>加时(秒)</label><input id="f-bonus" type="number" min="0"></div>
+      <label class="chk"><input id="f-random" type="checkbox"> 随机出生（random_spawn）</label>
+      <label class="chk"><input id="f-cyl" type="checkbox"> 滚筒地图（左右连通）</label>
+      <label class="chk"><input id="f-fog" type="checkbox"> 迷雾模式</label>
+      <div class="frow"><label>尺寸</label><span id="f-size"></span></div>
+    </div>
+    <div class="tab-page" id="tab-players" hidden>
+      <button id="btn-add-player" class="wide">＋ 新增势力</button>
+      <div id="player-list"></div>
+      <p class="hint">出生点 🏰 由「据点地形 + 归属座次 + 兵力>0」表达；⚠ 表示该势力暂无出生据点。</p>
+    </div>
+    <div class="tab-page" id="tab-validate" hidden>
+      <div id="validate-summary" class="v-ok">—</div>
+      <ul id="validate-list"></ul>
+    </div>
+  </aside>
+</main>
+
+<dialog id="dlg-new">
+  <h3>新建地图</h3>
+  <div class="frow"><label>行数</label><input id="new-row" type="number" min="2" max="64" value="7"></div>
+  <div class="frow"><label>列数</label><input id="new-col" type="number" min="2" max="64" value="10"></div>
+  <div class="frow"><label>势力数</label><input id="new-players" type="number" min="1" max="8" value="2"></div>
+  <div class="dlg-btns">
+    <button id="dlg-new-cancel">取消</button>
+    <button id="dlg-new-ok" class="primary">创建</button>
+  </div>
+</dialog>
+
+<script src="js/constants.js"></script>
+<script src="js/mapdata.js"></script>
+<script src="js/render.js"></script>
+<script src="js/validate.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/io.js"></script>
+<script src="js/players.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

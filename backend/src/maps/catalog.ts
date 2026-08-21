@@ -33,6 +33,57 @@ function stripJsonComments(raw: string): string {
   return out;
 }
 
+/** 地图结构校验（目录加载与保存接口共用）：返回 true 表示通过 */
+export function validateMapData(raw: unknown): boolean {
+  if (raw === null || typeof raw !== 'object') return false;
+  const m = raw as Record<string, unknown>;
+  if (
+    typeof m.title !== 'string' ||
+    typeof m.row !== 'number' ||
+    typeof m.column !== 'number' ||
+    typeof m.player_num !== 'number' ||
+    !Array.isArray(m.player_list) ||
+    (m.player_list as unknown[]).length === 0 ||
+    m.player_num !== (m.player_list as unknown[]).length ||
+    !Array.isArray(m.battlefield) ||
+    (m.battlefield as unknown[]).length !== m.row * m.column
+  ) {
+    return false;
+  }
+  const seats = new Set<number>();
+  for (const p of m.player_list as Record<string, unknown>[]) {
+    if (
+      typeof p.name !== 'string' ||
+      typeof p.team !== 'number' ||
+      typeof p.computer !== 'number' ||
+      typeof p.seat !== 'number' ||
+      typeof p.flag !== 'number' ||
+      p.seat < 1 ||
+      p.seat > 127
+    ) {
+      return false;
+    }
+    seats.add(p.seat);
+  }
+  if (seats.size !== (m.player_list as unknown[]).length) return false;
+  const terrainValues = new Set<number>([TERRAIN.PLAIN, TERRAIN.CITY, TERRAIN.OCEAN, TERRAIN.MOUNTAIN, TERRAIN.VOID]);
+  for (const entry of m.battlefield as unknown[]) {
+    const tile = entry as unknown[];
+    if (!Array.isArray(tile) || tile.length !== 3 || !tile.every((v) => typeof v === 'number' && Number.isInteger(v))) {
+      return false;
+    }
+    const [terrain, owner, strength] = tile as [number, number, number];
+    if (
+      !terrainValues.has(terrain) ||
+      !(owner === TILE_OWNER.EMPTY || owner === TILE_OWNER.BLOCKER || owner === TILE_OWNER.WILD || (owner >= 1 && owner <= 127)) ||
+      strength < 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** 启动时从 static/maps/*.json 加载地图目录（内存缓存，v1 不支持热更新）。id 由文件名派生。 */
 export class MapCatalog {
   private readonly maps = new Map<string, MapFullData>();
@@ -47,7 +98,7 @@ export class MapCatalog {
     for (const file of files) {
       try {
         const raw: unknown = JSON.parse(stripJsonComments(readFileSync(path.join(dir, file), 'utf8')));
-        if (this.isValid(raw)) {
+        if (validateMapData(raw)) {
           const map = raw as MapFullData;
           map.id = path.basename(file, '.json');
           this.maps.set(map.id, map);
@@ -59,56 +110,6 @@ export class MapCatalog {
       }
     }
     return this.maps.size;
-  }
-
-  private isValid(raw: unknown): boolean {
-    if (raw === null || typeof raw !== 'object') return false;
-    const m = raw as Record<string, unknown>;
-    if (
-      typeof m.title !== 'string' ||
-      typeof m.row !== 'number' ||
-      typeof m.column !== 'number' ||
-      typeof m.player_num !== 'number' ||
-      !Array.isArray(m.player_list) ||
-      (m.player_list as unknown[]).length === 0 ||
-      m.player_num !== (m.player_list as unknown[]).length ||
-      !Array.isArray(m.battlefield) ||
-      (m.battlefield as unknown[]).length !== m.row * m.column
-    ) {
-      return false;
-    }
-    const seats = new Set<number>();
-    for (const p of m.player_list as Record<string, unknown>[]) {
-      if (
-        typeof p.name !== 'string' ||
-        typeof p.team !== 'number' ||
-        typeof p.computer !== 'number' ||
-        typeof p.seat !== 'number' ||
-        typeof p.flag !== 'number' ||
-        p.seat < 1 ||
-        p.seat > 127
-      ) {
-        return false;
-      }
-      seats.add(p.seat);
-    }
-    if (seats.size !== (m.player_list as unknown[]).length) return false;
-    const terrainValues = new Set<number>([TERRAIN.PLAIN, TERRAIN.CITY, TERRAIN.OCEAN, TERRAIN.MOUNTAIN, TERRAIN.VOID]);
-    for (const entry of m.battlefield as unknown[]) {
-      const tile = entry as unknown[];
-      if (!Array.isArray(tile) || tile.length !== 3 || !tile.every((v) => typeof v === 'number' && Number.isInteger(v))) {
-        return false;
-      }
-      const [terrain, owner, strength] = tile as [number, number, number];
-      if (
-        !terrainValues.has(terrain) ||
-        !(owner === TILE_OWNER.EMPTY || owner === TILE_OWNER.BLOCKER || owner === TILE_OWNER.WILD || (owner >= 1 && owner <= 127)) ||
-        strength < 0
-      ) {
-        return false;
-      }
-    }
-    return true;
   }
 
   list(search?: string): MapMeta[] {

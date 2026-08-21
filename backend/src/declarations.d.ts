@@ -13,6 +13,8 @@ declare module 'fastify' {
     rooms: RoomManager;
     maps: MapCatalog;
     games: GameManager;
+    /** 地图编辑器保存目录（maps-uncensored 审查队列，审查后移入 maps） */
+    mapsUncensoredDir: string;
   }
 
   interface FastifyRequest {
