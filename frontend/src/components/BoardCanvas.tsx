@@ -34,6 +34,12 @@ const SQRT3 = Math.sqrt(3);
 const DRAG_THRESHOLD = 4;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 4;
+/** 地块间隔：绘制六边形半径相对布局边长的缩小比例（≈4% 边长），仅对局内棋盘生效 */
+const TILE_GAP = 0.04;
+/** 旗帜图片内六边形外接圆半径（与 backend/scripts/gen-flags.mjs 的 R=100 耦合，改动需同步） */
+const FLAG_IMG_HEX_R = 100;
+/** 连兵旗帜覆盖放大系数：略大于地块本体以盖住抗锯齿接缝，不侵占间隔 */
+const FLAG_COVER = 1.02;
 
 interface BoardCanvasProps {
   board: GameState;
@@ -134,12 +140,20 @@ export default function BoardCanvas({
   const dragRef = useRef<DragState | null>(null);
   const spritesRef = useRef<Record<string, SpriteEntry>>({});
 
-  // M5.2：视图变换（缩放/平移）；state 驱动静态层重绘，viewRef 供 rAF 层与拾取实时读取
-  const [view, setView] = useState<View>({ scale: 1, offX: 0, offY: 0 });
-  const viewRef = useRef<View>(view);
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
+  // M5.2：视图变换（缩放/平移）。viewRef 为实时权威值（拖拽/滚轮直接改，rAF 层与拾取每帧读取）；
+  // view state 仅是 viewRef 的 rAF 节流镜像，用于触发静态层重绘。
+  // 注：逐事件 setState 在浏览器输入管线中提交不可靠（同一手势只有首个事件生效），故用 ref+rAF 同步。
+  const viewRef = useRef<View>({ scale: 1, offX: 0, offY: 0 });
+  const [view, setView] = useState<View>(viewRef.current);
+  const viewSyncRaf = useRef(0);
+  const syncView = () => {
+    if (viewSyncRaf.current) return;
+    viewSyncRaf.current = requestAnimationFrame(() => {
+      viewSyncRaf.current = 0;
+      setView({ ...viewRef.current });
+    });
+  };
+  useEffect(() => () => cancelAnimationFrame(viewSyncRaf.current), []);
 
   const geoRef = useRef({ rows: board.rows, columns: board.columns, cylindrical: board.cylindrical });
 
@@ -208,11 +222,11 @@ export default function BoardCanvas({
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      setView((v) => {
-        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
-        const k = scale / v.scale;
-        return { scale, offX: px - (px - v.offX) * k, offY: py - (py - v.offY) * k };
-      });
+      const v = viewRef.current;
+      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
+      const k = scale / v.scale;
+      viewRef.current = { scale, offX: px - (px - v.offX) * k, offY: py - (py - v.offY) * k };
+      syncView();
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
@@ -242,13 +256,15 @@ export default function BoardCanvas({
     const totalH = totalHUnits * size;
     const offX = (cssW - totalW) / 2;
     const offY = (cssH - totalH) / 2;
+    // 地块间隔：绘制半径缩小，相邻地块之间留缝（布局/拾取仍用 size）
+    const ts = size * (1 - TILE_GAP);
     // M5.2：视图变换
     const tx = (c: { cx: number; cy: number }) => ({ cx: view.offX + c.cx * view.scale, cy: view.offY + c.cy * view.scale });
 
     // 1. 地形底色
     for (let i = 0; i < board.tiles.length; i++) {
       const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-      hexPath(ctx, c.cx, c.cy, size * view.scale);
+      hexPath(ctx, c.cx, c.cy, ts * view.scale);
       ctx.fillStyle = TERRAIN_COLORS[board.tiles[i].terrain] ?? '#9e9e9e';
       ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,0.25)';
@@ -262,11 +278,11 @@ export default function BoardCanvas({
         const c = tx(centerOf(i, columns, size, offX, offY, totalH));
         const level = fogLevels[i];
         if (level === 'hidden') {
-          hexPath(ctx, c.cx, c.cy, size * view.scale);
+          hexPath(ctx, c.cx, c.cy, ts * view.scale);
           ctx.fillStyle = FOG_COLOR;
           ctx.fill();
         } else if (level === 'explored') {
-          hexPath(ctx, c.cx, c.cy, size * view.scale);
+          hexPath(ctx, c.cx, c.cy, ts * view.scale);
           ctx.fillStyle = EXPLORED_DIM;
           ctx.fill();
         }
@@ -303,7 +319,7 @@ export default function BoardCanvas({
     for (let n = 1; n <= 9; n++) load(n);
   }, []);
 
-  /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；断兵用 hollow sprite，未加载时擦边回退） */
+  /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；hollow=true 用镂空 sprite 露出地形，未加载时擦边回退） */
   const drawSoldier = useCallback(
     (
       ctx: CanvasRenderingContext2D,
@@ -314,37 +330,40 @@ export default function BoardCanvas({
       flagNum: number,
       alpha: number,
       flash: FlashKind | null,
+      hollow: boolean,
     ) => {
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       const entry = spritesRef.current[String(flagNum)];
-      const img = soldier.isLinked ? entry?.solid : entry?.hollow;
-      const flagW = size * 1.1;
-      const flagH = size * 1.24;
+      const img = hollow ? entry?.hollow : entry?.solid;
+      // 旗帜按图片内六边形（FLAG_IMG_HEX_R）等比放大到地块本体（含小幅覆盖），中心对准地块中心
+      const scale = (size * (1 - TILE_GAP) * FLAG_COVER) / FLAG_IMG_HEX_R;
       if (img && img.complete && img.naturalWidth > 0) {
-        ctx.drawImage(img, cx - flagW / 2, cy - flagH / 2 - size * 0.12, flagW, flagH);
+        const flagW = img.naturalWidth * scale;
+        const flagH = img.naturalHeight * scale;
+        ctx.drawImage(img, cx - flagW / 2, cy - flagH / 2, flagW, flagH);
       } else {
         // 兜底：旗帜色块
         ctx.fillStyle = SEAT_COLORS[(soldier.owner - 1) % SEAT_COLORS.length] ?? '#888';
         ctx.fillRect(cx - size * 0.22, cy - size * 0.3, size * 0.44, size * 0.6);
       }
-      // 断兵：hollow sprite 未就绪时用擦边过渡方案
-      if (!soldier.isLinked && (!entry?.hollow || !entry.hollow.complete || entry.hollow.naturalWidth === 0)) {
-        punchHollow(ctx, cx, cy, size * 0.52);
+      // hollow sprite 未就绪时用擦边过渡方案（沿地块边缘擦出环带）
+      if (hollow && (!entry?.hollow || !entry.hollow.complete || entry.hollow.naturalWidth === 0)) {
+        punchHollow(ctx, cx, cy, size * (1 - TILE_GAP));
       }
-      // 兵力数字
+      // 兵力数字：地块正中心（旗帜上方）
       ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#111';
       ctx.strokeStyle = 'rgba(255,255,255,0.9)';
       ctx.lineWidth = 2.5;
-      ctx.strokeText(String(soldier.strength), cx, cy + size * 0.52);
-      ctx.fillText(String(soldier.strength), cx, cy + size * 0.52);
+      ctx.strokeText(String(soldier.strength), cx, cy);
+      ctx.fillText(String(soldier.strength), cx, cy);
       ctx.restore();
       // 闪光描边（不受兵透明度影响）
       if (flash) {
-        hexPath(ctx, cx, cy, size * 0.85);
+        hexPath(ctx, cx, cy, size * (1 - TILE_GAP) * 0.92);
         ctx.strokeStyle = FLASH_COLORS[flash];
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -378,6 +397,7 @@ export default function BoardCanvas({
         const totalH = totalHUnits * size;
         const offX = (cssW - totalWUnits * size) / 2;
         const offY = (cssH - totalH) / 2;
+        const ts = size * (1 - TILE_GAP);
         const v = viewRef.current;
         const tx = (c: { cx: number; cy: number }) => ({ cx: v.offX + c.cx * v.scale, cy: v.offY + c.cy * v.scale });
 
@@ -397,7 +417,7 @@ export default function BoardCanvas({
             for (const n of neighborsOf(selected, geo)) {
               const t = board.tiles[n];
               const c = tx(centerOf(n, columns, size, offX, offY, totalH));
-              hexPath(ctx, c.cx, c.cy, size * v.scale);
+              hexPath(ctx, c.cx, c.cy, ts * v.scale);
               if (!t.soldier) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
                 ctx.fill();
@@ -431,6 +451,8 @@ export default function BoardCanvas({
           if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
           const soldier = showTiles[i];
           if (!soldier) continue;
+          // 据点特殊化：据点的连兵也按断兵（镂空）渲染，露出据点地形
+          const hollow = !soldier.isLinked || board.tiles[i].terrain === TERRAIN.CITY;
           const c = tx(centerOf(i, columns, size, offX, offY, totalH));
           // MOVE：起点兵沿 from→to 插值滑动
           if (ev?.kind === 'MOVE' && ev.from === i) {
@@ -444,12 +466,13 @@ export default function BoardCanvas({
               flagOf(soldier.owner),
               1,
               null,
+              hollow,
             );
             continue;
           }
           // DESPAWN：淡出
           if (ev?.kind === 'DESPAWN' && ev.tile === i) {
-            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null);
+            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null, hollow);
             continue;
           }
           // 闪光判定
@@ -458,19 +481,29 @@ export default function BoardCanvas({
           else if (af && af.breakTiles.includes(i)) flash = 'break';
           else if (ev?.kind === 'REJOIN' && ev.tile === i) flash = 'rejoin';
           else if (victorySeats.includes(soldier.owner)) flash = 'victory';
-          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash);
+          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash, hollow);
         }
         // SPAWN：目标地块淡入（起点 30% 保证移动连续性）
         if (ev?.kind === 'SPAWN') {
           if (!(fogEnabled && fogLevels && fogLevels[ev.tile] !== 'visible')) {
             const c = tx(centerOf(ev.tile, columns, size, offX, offY, totalH));
-            drawSoldier(ctx, c.cx, c.cy, size * v.scale, ev.soldier, flagOf(ev.soldier.owner), 0.3 + 0.7 * progress, null);
+            drawSoldier(
+              ctx,
+              c.cx,
+              c.cy,
+              size * v.scale,
+              ev.soldier,
+              flagOf(ev.soldier.owner),
+              0.3 + 0.7 * progress,
+              null,
+              !ev.soldier.isLinked || board.tiles[ev.tile].terrain === TERRAIN.CITY,
+            );
           }
         }
         // ATTACK：目标地块红闪（进攻演出）
         if (ev?.kind === 'ATTACK') {
           const c = tx(centerOf(ev.to, columns, size, offX, offY, totalH));
-          hexPath(ctx, c.cx, c.cy, size * v.scale);
+          hexPath(ctx, c.cx, c.cy, ts * v.scale);
           ctx.fillStyle = `rgba(230, 57, 70, ${0.25 * Math.sin(progress * Math.PI)})`;
           ctx.fill();
         }
@@ -484,8 +517,8 @@ export default function BoardCanvas({
           ctx.fillStyle = '#ffffff';
           ctx.strokeStyle = 'rgba(0,0,0,0.7)';
           ctx.lineWidth = 2;
-          ctx.strokeText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52 * v.scale);
-          ctx.fillText(String(board.tiles[i].soldier!.strength), c.cx, c.cy + size * 0.52 * v.scale);
+          ctx.strokeText(String(board.tiles[i].soldier!.strength), c.cx, c.cy);
+          ctx.fillText(String(board.tiles[i].soldier!.strength), c.cx, c.cy);
         }
 
         // 选中光圈
@@ -500,7 +533,7 @@ export default function BoardCanvas({
         // hover 描边
         if (hoverRef.current !== null && hoverRef.current !== selected) {
           const c = tx(centerOf(hoverRef.current, columns, size, offX, offY, totalH));
-          hexPath(ctx, c.cx, c.cy, size * v.scale);
+          hexPath(ctx, c.cx, c.cy, ts * v.scale);
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
           ctx.lineWidth = 1.5;
           ctx.stroke();
@@ -535,7 +568,10 @@ export default function BoardCanvas({
                 d.moved = true;
                 onTilePointerUp?.();
               }
-              setView((v) => ({ ...v, offX: v.offX + (e.clientX - d.x), offY: v.offY + (e.clientY - d.y) }));
+              // 直接改 viewRef（rAF 层立即跟随），rAF 节流同步 state 触发静态层重绘
+              const v = viewRef.current;
+              viewRef.current = { ...v, offX: v.offX + (e.clientX - d.x), offY: v.offY + (e.clientY - d.y) };
+              syncView();
             }
             d.x = e.clientX;
             d.y = e.clientY;
@@ -548,13 +584,18 @@ export default function BoardCanvas({
         }}
         onPointerUp={() => {
           dragRef.current = null;
+          syncView();
           onTilePointerUp?.();
         }}
         onPointerCancel={() => {
           dragRef.current = null;
+          syncView();
           onTilePointerUp?.();
         }}
-        onDoubleClick={() => setView({ scale: 1, offX: 0, offY: 0 })}
+        onDoubleClick={() => {
+          viewRef.current = { scale: 1, offX: 0, offY: 0 };
+          syncView();
+        }}
         onPointerLeave={() => {
           hoverRef.current = null;
           onTileHover(null);
