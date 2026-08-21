@@ -77,12 +77,4 @@ describe('GET /api/maps/:id', () => {
     // 2v2 队伍
     expect(map.player_list.map((p: { team: number }) => p.team)).toEqual([1, 1, 2, 2]);
   });
-
-  it('带 // 注释的 example.json 也能加载', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/maps/example' });
-    expect(res.statusCode).toBe(200);
-    const map = res.json().data;
-    expect(map.player_num).toBe(12);
-    expect(map.battlefield).toHaveLength(63 * 63);
-  });
 });

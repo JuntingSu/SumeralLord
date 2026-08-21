@@ -253,4 +253,44 @@ describe('自动切换（补充规则）', () => {
     expect(r.state.currentSeat).toBe(2);
     expect(chainKinds(r)).toContain('END_TURN');
   });
+
+  it('玩家事件结算后：全部兵不可行动 → 代玩家自动切换至加点阶段', () => {
+    // seat1 仅据点 6 连兵 str2；移动 6→7 后两处均为兵力 1 连兵（带移动力标志但不可行动）→ 自动切换
+    const map = makeMap({ tiles: { 6: [CITY, 1, 2], 7: [PLAIN, 128, 0], 14: [CITY, 2, 2] } });
+    const { state } = startGame(map, ASG);
+    expect(state.phase).toBe('ACTION');
+    const r = act(state, 1, { intentType: 'MOVE', from: 6, to: 7 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(soldierAt(r.state, 6)).toMatchObject({ owner: 1, strength: 1, hasMovement: true });
+    expect(soldierAt(r.state, 7)).toMatchObject({ owner: 1, strength: 1, hasMovement: true });
+    expect(r.state.currentSeat).toBe(1);
+    expect(r.state.phase).toBe('ADD_POINT');
+    expect(chainKinds(r)).toContain('SWITCH_PHASE');
+  });
+
+  it('玩家事件结算后：最后可动兵行动力耗尽 → 代玩家自动切换至加点阶段', () => {
+    // seat1 仅据点 6 连兵 str3；移动 6→11 接触失活（邻接 seat2 据点 12），原 6 变兵力 1 连兵不可行动
+    const map = makeMap({ tiles: { 6: [CITY, 1, 3], 11: [PLAIN, 128, 0], 12: [CITY, 2, 1] } });
+    const { state } = startGame(map, ASG);
+    const r = act(state, 1, { intentType: 'MOVE', from: 6, to: 11 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(soldierAt(r.state, 11)!.hasMovement).toBe(false);
+    expect(r.state.currentSeat).toBe(1);
+    expect(r.state.phase).toBe('ADD_POINT');
+  });
+
+  it('玩家事件结算后仍有可行动兵 → 保持行动阶段（不自动切换）', () => {
+    // seat1 仅据点 6 连兵 str3；移动 6→7 后 7 为兵力 2 连兵仍可行动 → 不自动切换
+    const map = makeMap({ tiles: { 6: [CITY, 1, 3], 7: [PLAIN, 128, 0], 14: [CITY, 2, 2] } });
+    const { state } = startGame(map, ASG);
+    const r = act(state, 1, { intentType: 'MOVE', from: 6, to: 7 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(soldierAt(r.state, 7)).toMatchObject({ owner: 1, strength: 2, hasMovement: true });
+    expect(r.state.currentSeat).toBe(1);
+    expect(r.state.phase).toBe('ACTION');
+    expect(chainKinds(r)).not.toContain('SWITCH_PHASE');
+  });
 });

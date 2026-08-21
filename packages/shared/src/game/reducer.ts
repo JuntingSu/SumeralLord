@@ -83,12 +83,21 @@ function hasAliveHumanForce(state: GameState): boolean {
   return state.forces.some((f) => f.exists && f.alive && !f.isAI);
 }
 
-/** 当前势力是否有具有移动力的兵（行动阶段自动切换判定） */
+/** 当前势力是否有可行动的兵（行动阶段自动切换判定；与意图层可行动判定一致：兵力 1 连兵不可行动） */
 function hasMovableSoldier(ctx: Ctx, seat: number): boolean {
   for (const t of ctx.state.tiles) {
-    if (t.soldier && t.soldier.owner === seat && t.soldier.hasMovement) return true;
+    const s = t.soldier;
+    if (s && s.owner === seat && s.hasMovement && !(s.isLinked && s.strength === 1)) return true;
   }
   return false;
+}
+
+/** 行动阶段自动跳过（补充规则）：当前势力无任何可行动兵 → 代玩家发起一次跳过阶段事件（ACTION → ADD_POINT）。
+ *  触发时机：每次玩家事件链结算后判断一次；回合初进入行动阶段同样复用本判定。 */
+function autoSkipActionPhase(ctx: Ctx, seat: number): void {
+  if (ctx.state.phase !== 'ACTION' || ctx.state.currentSeat !== seat) return;
+  if (hasMovableSoldier(ctx, seat)) return;
+  switchPhaseEventCore(ctx);
 }
 
 // ---------- 二级事件（§8.2） ----------
@@ -485,10 +494,8 @@ function runPreparePhaseContent(ctx: Ctx): void {
   }
   // d. 切入行动阶段
   switchPhaseEventCore(ctx);
-  // 补充规则：进入行动阶段后当前势力无任何可动兵 → 代玩家切换至加点阶段
-  if (ctx.state.phase === 'ACTION' && !hasMovableSoldier(ctx, seat)) {
-    switchPhaseEventCore(ctx);
-  }
+  // 补充规则：进入行动阶段后当前势力无任何可行动兵 → 代玩家切换至加点阶段（复用统一判定）
+  autoSkipActionPhase(ctx, seat);
   // AI 回合处理（D1/D3 拍板）：由策略层决策。v1 难度 1~3/255 统一跳过——
   // 等效连续切阶段至本回合结束（可能已由自动切换进入加点阶段；结束后递归下一势力）。
   // 未来难度策略返回 intents 计划时在此按序演算（策略意图不入流，重放仍是派生行为）。
@@ -542,6 +549,8 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       if (!target && isAttack) return reject(state, illegal);
       if (hexDistance(intent.from, intent.to, ctx.geo) > maxDist) return reject(state, illegal);
       const executed = isAttack ? attackEventCore(ctx, intent.from, intent.to) : moveEventCore(ctx, intent.from, intent.to);
+      // 事件链结算后统一判定：当前势力无任何可行动兵 → 代玩家自动跳过行动阶段
+      if (executed) autoSkipActionPhase(ctx, actor.seat);
       return executed ? ok(ctx) : reject(state, illegal);
     }
     case 'ADD_POINT': {
@@ -559,12 +568,16 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       force.points -= intent.amount;
       // 补充规则：点数用尽 → 代玩家切换阶段结束回合
       if (force.points === 0) switchPhaseEventCore(ctx);
+      // 事件链结算后统一判定（点数未用尽时保持加点阶段，行动阶段判定在此为空操作）
+      autoSkipActionPhase(ctx, actor.seat);
       return ok(ctx);
     }
     case 'SWITCH_PHASE': {
       if (!actorIsCurrent) return reject(state, 'NOT_YOUR_TURN');
       if (s.phase !== 'ACTION' && s.phase !== 'ADD_POINT') return reject(state, 'WRONG_PHASE');
       switchPhaseEventCore(ctx);
+      // 事件链结算后统一判定（本事件必然离开行动阶段，此处为空操作）
+      autoSkipActionPhase(ctx, actor.seat);
       return ok(ctx);
     }
     case 'SURRENDER': {
