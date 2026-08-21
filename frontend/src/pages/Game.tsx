@@ -5,7 +5,8 @@
 // - 观战：全图无迷雾、无操作按钮、灰禁提示
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { GameEvent, PlayerIntent, RoomServerMsg } from '@dl/shared';
+import { applyIntent } from '@dl/shared';
+import type { GameEvent, GameState, PlayerIntent, RoomServerMsg } from '@dl/shared';
 import { useAuth } from '../stores/auth';
 import { useGame, attachTransport } from '../stores/game';
 import { useRoom } from '../stores/room';
@@ -208,7 +209,7 @@ export default function Game() {
         return; // 同队兵目标：无效
       }
       s.submitIntent(intent);
-      setSelected(null);
+      setSelected(nextSelectedTile(b, intent));
     },
     [selected],
   );
@@ -525,6 +526,19 @@ export default function Game() {
       )}
     </div>
   );
+}
+
+/** MOVE/ATTACK 提交后的自动续选（交互优化）：用与权威 reducer 同源的 applyIntent 本地模拟演算，
+ *  目标地块的新兵仍有移动力 → 自动选中该地块，便于连续操作同一兵（无需每次重新点兵）。 */
+function nextSelectedTile(board: GameState, intent: PlayerIntent): number | null {
+  if (intent.intentType !== 'MOVE' && intent.intentType !== 'ATTACK') return null;
+  const r = applyIntent(board, { actor: { kind: 'PLAYER', seat: board.currentSeat }, intent });
+  if (!r.ok) return null;
+  const s = r.state.tiles[intent.to].soldier;
+  if (!s || s.owner !== board.currentSeat) return null;
+  if (!s.hasMovement) return null;
+  if (s.isLinked && s.strength === 1) return null; // 兵力 1 连兵不可行动（与 reducer 判定一致）
+  return intent.to;
 }
 
 function seatColor(seat: number | undefined): string {
