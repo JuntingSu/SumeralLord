@@ -16,6 +16,33 @@ const MapData = (() => {
     return [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0];
   }
 
+  /** 随机地图 id：map_ + 8 位随机小写字母数字（保存文件名 map_xxx.json） */
+  function randomId() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let s = '';
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const arr = crypto.getRandomValues(new Uint8Array(8));
+      for (const b of arr) s += chars[b % chars.length];
+    } else {
+      for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return 'map_' + s;
+  }
+
+  /** 当前登录用户名（主程序 localStorage 的 dl_user；未登录/非浏览器环境返回 ''） */
+  function loggedInUsername() {
+    try {
+      if (typeof localStorage === 'undefined') return '';
+      const u = JSON.parse(localStorage.getItem('dl_user') || 'null');
+      return u && typeof u.username === 'string' ? u.username : '';
+    } catch { return ''; }
+  }
+
+  /** 作者默认值：登录用户名；未登录回退 'Unknown' */
+  function defaultAuthor() {
+    return loggedInUsername() || 'Unknown';
+  }
+
   /** 新建默认地图：全平原无主 + 每势力一座出生据点（环形分布） */
   function createDefaultMap(row, column, playerNum) {
     const map = {
@@ -130,6 +157,36 @@ const MapData = (() => {
     return map.player_list[map.player_list.length - 1];
   }
 
+  /**
+   * 调整势力座次：把 seat=fromSeat 的势力移到 toSeat，中间势力顺移，
+   * 战场归属同步重映射（seat 即归属标识）。toSeat 越界自动夹紧到 1..n。
+   */
+  function movePlayerSeat(map, fromSeat, toSeat) {
+    const n = map.player_list.length;
+    if (n < 2) return;
+    toSeat = Math.max(1, Math.min(n, toSeat));
+    if (fromSeat === toSeat) return;
+    const moved = map.player_list.find((p) => p.seat === fromSeat);
+    if (!moved) return;
+    const dir = fromSeat < toSeat ? 1 : -1; // +1 座次上移，-1 座次下移
+    for (const p of map.player_list) {
+      if (p.seat === fromSeat) continue;
+      if (dir === 1 && p.seat > fromSeat && p.seat <= toSeat) p.seat -= 1;
+      else if (dir === -1 && p.seat < fromSeat && p.seat >= toSeat) p.seat += 1;
+    }
+    moved.seat = toSeat;
+    for (let i = 0; i < map.battlefield.length; i++) {
+      const o = map.battlefield[i][1];
+      if (o < 1 || o > 127) continue;
+      let ns = o;
+      if (o === fromSeat) ns = toSeat;
+      else if (dir === 1 && o > fromSeat && o <= toSeat) ns = o - 1;
+      else if (dir === -1 && o < fromSeat && o >= toSeat) ns = o + 1;
+      if (ns !== o) map.battlefield[i][1] = ns;
+    }
+    return map;
+  }
+
   /** 序列化（剔除 id 字段——地图文件内不含 id，id 由文件名派生） */
   function serialize(map) {
     const copy = JSON.parse(JSON.stringify(map));
@@ -139,7 +196,7 @@ const MapData = (() => {
 
   return {
     nowTimestamp, newEmptyTile, createDefaultMap, resizeMap,
-    removePlayer, addPlayer, serialize,
-    toGrid, fromGrid,
+    removePlayer, addPlayer, movePlayerSeat, serialize,
+    toGrid, fromGrid, randomId, loggedInUsername, defaultAuthor,
   };
 })();

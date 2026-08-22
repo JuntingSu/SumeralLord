@@ -14,8 +14,11 @@
     <button id="btn-new" title="新建地图">新建</button>
     <button id="btn-open" title="从本地 JSON 文件打开">打开</button>
     <input type="file" id="file-open" accept=".json,application/json" hidden>
-    <select id="server-map-select" title="从服务器地图库加载"><option value="">— 从服务器加载 —</option></select>
-    <button id="btn-refresh-server" title="刷新服务器地图列表">刷新</button>
+    <div id="server-search-wrap">
+      <input id="server-map-search" size="20" placeholder="搜索服务器地图" title="按标题/作者/简介/标签搜索">
+      <button id="btn-server-search" title="按标题/作者/简介/标签搜索服务器地图">🔍</button>
+      <div id="server-map-results" hidden></div>
+    </div>
   </div>
   <div class="grp">
     <label class="server" id="server-field">服务器
@@ -32,12 +35,10 @@
     <section class="panel">
       <h3>工具</h3>
       <div class="tools">
-        <button data-tool="paint">✏️ 画笔</button>
-        <button data-tool="pan">✋ 平移</button>
-      </div>
-      <div class="ops">
+        <button data-tool="paint">✏️ 涂刷</button>
+        <button data-tool="pan">✋ 拖动</button>
         <button id="btn-undo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
-        <button id="btn-redo" title="重做 (Ctrl+Y)">↪ 重做</button>
+        <button id="btn-redo" title="重做 (Ctrl+Y)">↪ 前进</button>
       </div>
     </section>
 
@@ -51,25 +52,13 @@
       <div class="sub" id="terrain-palette"><h4>地形</h4><div class="palette"></div></div>
       <div class="sub" id="owner-palette"><h4>归属</h4><div class="palette"></div></div>
       <div class="sub" id="strength-row">
-        <h4>兵力 <span id="strength-val" class="val">5</span></h4>
-        <input id="strength-input" type="range" min="0" max="255" value="5">
+        <h4>兵力</h4>
+        <div class="strength-controls">
+          <input id="strength-input" type="range" min="0" max="255" value="5">
+          <input id="strength-number" type="number" min="0" max="255" value="5" title="直接输入兵力数值（0-255）">
+        </div>
       </div>
       <p class="hint">山地/虚空不可驻兵；无主格兵力强制为 0；野生/阻挡可驻兵（中立兵）。</p>
-    </section>
-
-    <section class="panel">
-      <h3>尺寸</h3>
-      <div class="resize">
-        <button data-dir="top" data-d="1">上 +1</button>
-        <button data-dir="top" data-d="-1">上 -1</button>
-        <button data-dir="bottom" data-d="1">下 +1</button>
-        <button data-dir="bottom" data-d="-1">下 -1</button>
-        <button data-dir="left" data-d="1">左 +1</button>
-        <button data-dir="left" data-d="-1">左 -1</button>
-        <button data-dir="right" data-d="1">右 +1</button>
-        <button data-dir="right" data-d="-1">右 -1</button>
-      </div>
-      <p class="hint">新增格默认为平原无主。</p>
     </section>
 
     <section class="panel">
@@ -92,7 +81,41 @@
   <section id="canvas-wrap">
     <canvas id="board"></canvas>
     <div id="tooltip" hidden></div>
+    <div class="resize-float" id="resize-top">
+      <button data-dir="top" data-d="1">上+1</button>
+      <button data-dir="top" data-d="5">上+5</button>
+      <button data-dir="top" data-d="10">上+10</button>
+      <button data-dir="top" data-d="-1">上-1</button>
+      <button data-dir="top" data-d="-2">上-2</button>
+      <button data-dir="top" data-d="-5">上-5</button>
+    </div>
+    <div class="resize-float" id="resize-bottom">
+      <button data-dir="bottom" data-d="1">下+1</button>
+      <button data-dir="bottom" data-d="5">下+5</button>
+      <button data-dir="bottom" data-d="10">下+10</button>
+      <button data-dir="bottom" data-d="-1">下-1</button>
+      <button data-dir="bottom" data-d="-2">下-2</button>
+      <button data-dir="bottom" data-d="-5">下-5</button>
+    </div>
+    <div class="resize-float" id="resize-left">
+      <button data-dir="left" data-d="1">左+1</button>
+      <button data-dir="left" data-d="5">左+5</button>
+      <button data-dir="left" data-d="10">左+10</button>
+      <button data-dir="left" data-d="-1">左-1</button>
+      <button data-dir="left" data-d="-2">左-2</button>
+      <button data-dir="left" data-d="-5">左-5</button>
+    </div>
+    <div class="resize-float" id="resize-right">
+      <button data-dir="right" data-d="1">右+1</button>
+      <button data-dir="right" data-d="5">右+5</button>
+      <button data-dir="right" data-d="10">右+10</button>
+      <button data-dir="right" data-d="-1">右-1</button>
+      <button data-dir="right" data-d="-2">右-2</button>
+      <button data-dir="right" data-d="-5">右-5</button>
+    </div>
   </section>
+
+  <div id="right-resizer" title="拖动调整右侧面板宽度"></div>
 
   <aside id="right">
     <div class="tabs">
@@ -101,7 +124,6 @@
       <button data-tab="validate">校验</button>
     </div>
     <div class="tab-page" id="tab-info">
-      <div class="frow"><label>id（文件名）</label><input id="f-id" placeholder="map_xxx"></div>
       <div class="frow"><label>标题</label><input id="f-title"></div>
       <div class="frow"><label>作者</label><input id="f-author"></div>
       <div class="frow"><label>时间戳</label><input id="f-timestamp" disabled title="时间戳不可修改"></div>
@@ -110,15 +132,15 @@
       <div class="frow"><label>总时长(秒)</label><input id="f-total" type="number" min="0"></div>
       <div class="frow"><label>回合时长(秒)</label><input id="f-round" type="number" min="0"></div>
       <div class="frow"><label>加时(秒)</label><input id="f-bonus" type="number" min="0"></div>
-      <label class="chk"><input id="f-random" type="checkbox"> 随机出生（random_spawn）</label>
-      <label class="chk"><input id="f-cyl" type="checkbox"> 滚筒地图（左右连通）</label>
+      <label class="chk"><input id="f-random" type="checkbox"> 随机出生</label>
+      <label class="chk"><input id="f-cyl" type="checkbox"> 滚筒地图</label>
       <label class="chk"><input id="f-fog" type="checkbox"> 迷雾模式</label>
       <div class="frow"><label>尺寸</label><span id="f-size"></span></div>
     </div>
     <div class="tab-page" id="tab-players" hidden>
       <button id="btn-add-player" class="wide">＋ 新增势力</button>
       <div id="player-list"></div>
-      <p class="hint">列表按座次自动排序；座次由系统分配、不可修改。据点格由「地形=据点 + 归属=该势力座次 + 兵力>0」表达，直接用画笔涂色即可。</p>
+      <p class="hint">列表按座次自动排序；拖动「⇕」手柄可把势力调整到任意座次。据点格由「地形=据点 + 归属=该势力座次 + 兵力>0」表达，直接用画笔涂色即可。</p>
     </div>
     <div class="tab-page" id="tab-validate" hidden>
       <div id="validate-summary" class="v-ok">—</div>

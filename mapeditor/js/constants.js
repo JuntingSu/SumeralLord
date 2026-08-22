@@ -48,6 +48,19 @@ const MapConst = (() => {
   const DEFAULT_STRENGTH = 5;
   const DEFAULT_SERVER = 'http://127.0.0.1:3000';
 
+  /** 有图片的旗帜编号（static/flags/flag_N.png 实心 + flag_N_hollow.png 镂空；45753/45754 为新增自定义旗） */
+  const FLAG_IMAGE_NUMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 45753, 45754];
+
+  /** 旗帜实心文件 URL；无对应文件的旗号返回 ''（回退纯色） */
+  function flagImage(flag) {
+    return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}.png` : '';
+  }
+
+  /** 旗帜镂空文件 URL（断兵视觉，露出下方地形）；无对应文件的旗号返回 '' */
+  function flagImageHollow(flag) {
+    return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}_hollow.png` : '';
+  }
+
   /** 旗帜编号 → 颜色（黄金角 HSL，确定性；同参考编辑器 flag-colors.js） */
   function flagColor(flag) {
     const special = {
@@ -71,6 +84,6 @@ const MapConst = (() => {
     TERRAIN, TERRAIN_LABELS, TERRAIN_COLORS, TERRAIN_ORDER,
     TILE_OWNER, OWNER_LABELS, OWNER_COLORS, OWNER_ORDER,
     AI_LEVELS, AI_LABELS, SEAT_COLORS, NO_SOLDIER_TERRAIN,
-    DEFAULT_STRENGTH, DEFAULT_SERVER, flagColor, seatColor,
+    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage, flagImageHollow, seatColor,
   };
 })();

@@ -27,6 +27,7 @@
   }
   new ResizeObserver(fitCanvas).observe(wrap);
   window.addEventListener('resize', fitCanvas);
+  window.addEventListener('load', fitCanvas);
 
   function seatName(map, seat) {
     const p = map.player_list.find((x) => x.seat === seat);
@@ -309,11 +310,18 @@
     );
     // 兵力
     $('strength-input').value = s.brush.strength;
-    $('strength-val').textContent = s.brush.strength;
+    $('strength-number').value = s.brush.strength;
   }
   $('strength-input').addEventListener('input', (e) => {
-    Editor.setBrush({ strength: Number(e.target.value) });
-    $('strength-val').textContent = e.target.value;
+    const v = Math.max(0, Math.min(255, Math.round(Number(e.target.value) || 0)));
+    Editor.setBrush({ strength: v });
+    $('strength-number').value = v;
+  });
+  $('strength-number').addEventListener('change', (e) => {
+    const v = Math.max(0, Math.min(255, Math.round(Number(e.target.value) || 0)));
+    Editor.setBrush({ strength: v });
+    $('strength-input').value = v;
+    $('strength-number').value = v;
   });
 
   // ==================== 文件操作 ====================
@@ -343,7 +351,9 @@
     const column = Math.max(2, Math.min(64, Math.round(Number($('new-col').value) || 10)));
     const players = Math.max(1, Math.min(8, Math.round(Number($('new-players').value) || 2)));
     $('dlg-new').close();
-    Editor.setMap(MapData.createDefaultMap(row, column, players), `map_new_${Date.now() % 100000}`);
+    const m = MapData.createDefaultMap(row, column, players);
+    m.author = MapData.defaultAuthor();
+    Editor.setMap(m, MapData.randomId());
     statusMsg(`已新建 ${row}×${column}、${players} 势力地图`);
   });
 
@@ -361,8 +371,7 @@
         statusMsg(`打开失败：${res.error}`, 'error');
         return;
       }
-      const id = (file.name || 'map').replace(/\.json$/i, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-      Editor.setMap(res.map, id);
+      Editor.setMap(res.map, MapData.randomId());
       statusMsg(`已打开 ${file.name}`);
     };
     reader.readAsText(file);
@@ -405,29 +414,37 @@
     }
   });
 
-  async function refreshServerList() {
-    const sel = $('server-map-select');
-    sel.innerHTML = '<option value="">— 从服务器加载 —</option>';
+  async function searchServerMaps() {
+    const box = $('server-map-results');
+    box.innerHTML = '';
+    const q = $('server-map-search').value.trim();
     try {
-      const list = await IO.loadServerMapList(serverUrl());
-      for (const m of list) {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = `${m.id}（${m.title} · ${m.playerNum}人）`;
-        sel.appendChild(opt);
+      const list = await IO.loadServerMapList(serverUrl(), q);
+      if (!list.length) {
+        box.innerHTML = '<div class="none">无匹配地图</div>';
+        box.hidden = false;
+        return;
       }
-      if (list.length) statusMsg(`服务器共 ${list.length} 张地图`);
-      else statusMsg('服务器上暂无地图');
+      for (const m of list) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = `${m.title}（${m.author || '?'} · ${m.playerNum}人）`;
+        b.title = m.id;
+        b.addEventListener('click', () => {
+          box.hidden = true;
+          loadServerMapById(m.id);
+        });
+        box.appendChild(b);
+      }
+      box.hidden = false;
+      statusMsg(`找到 ${list.length} 张匹配地图`);
     } catch (e) {
-      statusMsg(`加载地图列表失败：${e.message}`, 'error');
+      statusMsg(`搜索地图失败：${e.message}`, 'error');
+      box.hidden = true;
     }
   }
-  $('btn-refresh-server').addEventListener('click', refreshServerList);
-  $('server-map-select').addEventListener('change', async () => {
-    const sel = $('server-map-select');
-    const id = sel.value;
-    if (!id) return;
-    sel.value = '';
+
+  async function loadServerMapById(id) {
     try {
       const map = await IO.loadServerMap(serverUrl(), id);
       Editor.setMap(map, map.id);
@@ -435,12 +452,49 @@
     } catch (e) {
       statusMsg(`加载地图失败：${e.message}`, 'error');
     }
+  }
+  $('btn-server-search').addEventListener('click', searchServerMaps);
+  $('server-map-search').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') searchServerMaps();
+    else if (e.key === 'Escape') $('server-map-results').hidden = true;
+  });
+  // 点击搜索框外关闭下拉结果
+  document.addEventListener('click', (e) => {
+    const box = $('server-map-results');
+    if (!box.hidden && !e.target.closest('#server-search-wrap')) box.hidden = true;
+  });
+
+  // ==================== 右侧面板宽度拖拽 ====================
+  let rightResize = null;
+  const rightPanel = $('right');
+  const rightResizer = $('right-resizer');
+  rightResizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    rightResize = { startX: e.clientX, startW: rightPanel.getBoundingClientRect().width };
+    rightResizer.classList.add('active');
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!rightResize) return;
+    const w = Math.max(240, Math.min(560, rightResize.startW + (rightResize.startX - e.clientX)));
+    rightPanel.style.width = w + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!rightResize) return;
+    rightResize = null;
+    rightResizer.classList.remove('active');
+  });
+
+  // 点击势力行外关闭旗帜选择弹层
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.p-flag-wrap')) {
+      document.querySelectorAll('.p-flag-pop').forEach((p) => { p.hidden = true; });
+    }
   });
 
   // ==================== 撤销/重做 / 尺寸 / 生成 ====================
   $('btn-undo').addEventListener('click', () => Editor.undo());
   $('btn-redo').addEventListener('click', () => Editor.redo());
-  document.querySelectorAll('.resize button').forEach((btn) => {
+  document.querySelectorAll('[data-dir]').forEach((btn) => {
     btn.addEventListener('click', () => {
       Editor.resize({ [btn.dataset.dir]: Number(btn.dataset.d) });
     });
@@ -472,10 +526,6 @@
   bindCommit('f-random', (m, el) => { m.random_spawn = el.checked; });
   bindCommit('f-cyl', (m, el) => { m.cylindrical_map = el.checked; });
   bindCommit('f-fog', (m, el) => { m.fog_mode = el.checked; });
-  $('f-id').addEventListener('change', (e) => {
-    Editor.updateId(e.target.value.trim() || 'map_new');
-    statusMsg('id（文件名）已更新');
-  });
 
   function syncInfo() {
     const s = Editor.getState();
@@ -484,7 +534,6 @@
     const set = (el, val) => {
       if (el !== focused && el.value !== String(val)) el.value = val;
     };
-    set($('f-id'), s.id);
     set($('f-title'), s.map.title);
     set($('f-author'), s.map.author);
     set($('f-timestamp'), s.map.timestamp);
@@ -500,14 +549,39 @@
   }
 
   // ==================== 势力面板 ====================
+  // 座次拖动：按住「⇕」手柄上下拖动，把该势力移到任意座次（一次拖动只记一次撤销）
+  let seatDrag = null;
+  function onSeatDragMove(e) {
+    if (!seatDrag) return;
+    const s = Editor.getState();
+    if (!s.map) return;
+    const n = s.map.player_list.length;
+    const delta = Math.round((e.clientY - seatDrag.startY) / 26);
+    const target = Math.max(1, Math.min(n, seatDrag.baseSeat + delta));
+    if (target !== seatDrag.lastTarget) {
+      if (!seatDrag.pushed) {
+        Editor.pushUndo();
+        seatDrag.pushed = true;
+      }
+      seatDrag.lastTarget = target;
+      Editor.moveSeat(seatDrag.seat, target);
+      seatDrag.seat = target;
+    }
+  }
+  function onSeatDragEnd() {
+    seatDrag = null;
+  }
+  window.addEventListener('mousemove', onSeatDragMove);
+  window.addEventListener('mouseup', onSeatDragEnd);
+
   function syncPlayers() {
     const s = Editor.getState();
     Players.render($('player-list'), s.map, {
       onPlayerField: (fn) => Editor.commit(fn),
-      onRemove: (seat) => {
-        const p = s.map?.player_list.find((x) => x.seat === seat);
-        if (p && !window.confirm(`删除势力「${p.name}」(seat=${seat})？其战场格子将归无主，更高座次整体 -1。`)) return;
-        Editor.removePlayer(seat);
+      onRemove: (seat) => Editor.removePlayer(seat),
+      onSeatDragStart: (seat, event) => {
+        event.preventDefault();
+        seatDrag = { seat, baseSeat: seat, startY: event.clientY, lastTarget: seat, pushed: false };
       },
     });
   }
@@ -591,21 +665,30 @@
   });
 
   // ==================== 启动 ====================
-  // 优先从 samples 加载一张官方地图作为起始画布（fetch 失败则用内置默认图）
-  const starter = 'samples/map_duo_plain.json';
-  fetch(starter)
-    .then((r) => (r.ok ? r.text() : Promise.reject(new Error('no sample'))))
-    .then((text) => {
-      const res = IO.parseMapJson(text);
-      if (res.ok) {
-        Editor.setMap(res.map, 'map_duo_plain');
-        statusMsg('已加载示例地图，可开始编辑');
+  // 旗帜精灵预载（加载完成触发重绘，避免首次绘制显示兜底色块）
+  HexRender.setSpriteWatcher(() => {
+    const s = Editor.getState();
+    if (s.map && cssW) render();
+  });
+  HexRender.preloadAllFlags();
+
+  // 起始画布：从服务器地图库（backend/static/maps）加载；未连接服务器则建默认图
+  (async () => {
+    try {
+      const list = await IO.loadServerMapList(serverUrl());
+      const preferred = list.find((m) => m.id === 'map_duo_plain') || list[0];
+      if (preferred) {
+        const map = await IO.loadServerMap(serverUrl(), preferred.id);
+        Editor.setMap(map, map.id);
+        statusMsg(`已加载服务器地图 ${map.title}`);
         return;
       }
-      throw new Error(res.error);
-    })
-    .catch(() => {
-      Editor.setMap(MapData.createDefaultMap(7, 10, 2), 'map_new');
-      statusMsg('已创建默认地图（未找到示例文件）');
-    });
+      throw new Error('服务器地图库为空');
+    } catch (e) {
+      const fb = MapData.createDefaultMap(7, 10, 2);
+      fb.author = MapData.defaultAuthor();
+      Editor.setMap(fb, MapData.randomId());
+      statusMsg('已创建默认地图（未连接服务器）');
+    }
+  })();
 })();

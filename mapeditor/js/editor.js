@@ -129,7 +129,8 @@ const Editor = (() => {
 
   function generateMap(opts) {
     const map = Generator.generate(opts);
-    setMap(map, 'map_random');
+    map.author = MapData.defaultAuthor();
+    setMap(map, MapData.randomId());
   }
 
   function addPlayer() {
@@ -148,17 +149,20 @@ const Editor = (() => {
     refreshUI();
   }
 
+  /** 调整势力座次（供拖动手柄使用；调用方负责先 pushUndo 一次） */
+  function moveSeat(seat, target) {
+    if (!state.map) return;
+    MapData.movePlayerSeat(state.map, seat, target);
+    refreshCanvas();
+    refreshUI();
+  }
+
   /** 信息/势力字段提交：记录一次撤销后执行 fn(map) */
   function commit(fn) {
     if (!state.map) return;
     pushUndo();
     fn(state.map);
     refreshCanvas();
-    refreshUI();
-  }
-
-  function updateId(id) {
-    state.id = id || 'map_new';
     refreshUI();
   }
 
@@ -175,8 +179,8 @@ const Editor = (() => {
 
   return {
     state, getState, onCanvas, onUI, setMap, undo, redo,
-    paintStart, paintDrag, paintEnd,
-    setHover, setView, resize, generateMap, addPlayer, removePlayer,
-    commit, updateId, setTool, setBrush,
+    pushUndo, paintStart, paintDrag, paintEnd,
+    setHover, setView, resize, generateMap, addPlayer, removePlayer, moveSeat,
+    commit, setTool, setBrush,
   };
 })();

@@ -71,8 +71,10 @@ const IO = (() => {
     return { ok: resp.ok && result.success, status: resp.status, result };
   }
 
-  async function loadServerMapList(baseUrl) {
-    const resp = await fetch(`${base(baseUrl)}/api/maps`);
+  /** 加载服务器地图列表；search 非空时按标题/作者/简介/tags 匹配（复用后端 /api/maps?search=） */
+  async function loadServerMapList(baseUrl, search) {
+    const q = search ? `?search=${encodeURIComponent(search)}` : '';
+    const resp = await fetch(`${base(baseUrl)}/api/maps${q}`);
     const result = await resp.json().catch(() => ({}));
     if (!resp.ok || !result.success) throw new Error(result.message || '加载地图列表失败');
     return result.data?.mapList || [];

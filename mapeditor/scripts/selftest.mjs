@@ -82,5 +82,26 @@ const m6 = MapData.createDefaultMap(7, 10, 2);
 const m7 = { ...m6, id: 'should_not_appear' };
 report('serialize 剔除 id', !('id' in MapData.serialize(m7)), JSON.stringify(Object.keys(MapData.serialize(m7)).slice(0, 3)));
 
+// 7. 座次调整（movePlayerSeat 战场归属重映射）
+const m8 = MapData.createDefaultMap(6, 6, 3);
+const city1 = m8.battlefield.findIndex(([t, o]) => t === 1 && o === 1);
+const city2 = m8.battlefield.findIndex(([t, o]) => t === 1 && o === 2);
+const city3 = m8.battlefield.findIndex(([t, o]) => t === 1 && o === 3);
+MapData.movePlayerSeat(m8, 3, 1);
+report('moveSeat 3→1 座次重排', JSON.stringify(m8.player_list.map((p) => p.seat)) === '[2,3,1]', JSON.stringify(m8.player_list.map((p) => p.seat)));
+report('moveSeat 3→1 战场归属重映射', m8.battlefield[city3][1] === 1 && m8.battlefield[city1][1] === 2 && m8.battlefield[city2][1] === 3, `${m8.battlefield[city3][1]},${m8.battlefield[city1][1]},${m8.battlefield[city2][1]}`);
+report('moveSeat 3→1 后仍通过校验', valid(m8) === null, valid(m8) || '');
+const m9 = MapData.createDefaultMap(6, 6, 3);
+const c1 = m9.battlefield.findIndex(([t, o]) => t === 1 && o === 1);
+const c2 = m9.battlefield.findIndex(([t, o]) => t === 1 && o === 2);
+const c3 = m9.battlefield.findIndex(([t, o]) => t === 1 && o === 3);
+MapData.movePlayerSeat(m9, 1, 3);
+report('moveSeat 1→3 座次重排', JSON.stringify(m9.player_list.map((p) => p.seat)) === '[3,1,2]', JSON.stringify(m9.player_list.map((p) => p.seat)));
+report('moveSeat 1→3 战场归属重映射', m9.battlefield[c1][1] === 3 && m9.battlefield[c2][1] === 1 && m9.battlefield[c3][1] === 2, `${m9.battlefield[c1][1]},${m9.battlefield[c2][1]},${m9.battlefield[c3][1]}`);
+report('moveSeat 1→3 后仍通过校验', valid(m9) === null, valid(m9) || '');
+
+// 8. 随机 id 与作者默认值
+report('randomId 格式 map_xxx', /^map_[a-z0-9]{8}$/.test(MapData.randomId()), MapData.randomId());
+
 console.log(`\n${pass} 通过 / ${fail} 失败`);
 process.exit(fail ? 1 : 0);

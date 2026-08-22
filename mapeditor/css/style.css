@@ -1,5 +1,6 @@
 /* 数字领主 · 地图编辑器 — 深色主题 */
 * { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 
 :root {
   --bg: #1e2128;
@@ -39,6 +40,27 @@ body {
 #topbar .brand .back:hover { text-decoration: underline; }
 #topbar .grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #topbar .grp .server { color: var(--dim); display: flex; align-items: center; gap: 4px; }
+#server-search-wrap { position: relative; display: flex; align-items: center; gap: 4px; }
+#server-map-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#server-map-results button { text-align: left; padding: 5px 7px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#server-map-results button:hover { background: var(--panel); border-color: var(--accent); }
+#server-map-results .none { color: var(--dim); padding: 6px 8px; font-size: 12px; }
 #status.status { flex: 1; min-width: 180px; text-align: right; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #status.status.ok { color: var(--ok); }
 #status.status.error { color: var(--err); font-weight: 700; }
@@ -67,6 +89,34 @@ main { flex: 1; display: flex; min-height: 0; }
 #canvas-wrap { flex: 1; position: relative; min-width: 0; background: #16181d; }
 #board { display: block; }
 
+/* 浮动尺寸按钮：覆盖在地图显示区四边（不单独占位） */
+.resize-float {
+  position: absolute;
+  display: flex;
+  gap: 4px;
+  z-index: 5;
+  background: rgba(38, 42, 51, 0.82);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+#resize-top { top: 8px; left: 50%; transform: translateX(-50%); flex-direction: row; }
+#resize-bottom { bottom: 8px; left: 50%; transform: translateX(-50%); flex-direction: row; }
+#resize-left { left: 8px; top: 50%; transform: translateY(-50%); flex-direction: column; }
+#resize-right { right: 8px; top: 50%; transform: translateY(-50%); flex-direction: column; }
+.resize-float button { padding: 2px 6px; font-size: 11px; white-space: nowrap; }
+
+/* 右侧面板拖拽分隔条 */
+#right-resizer {
+  width: 5px;
+  flex: none;
+  cursor: col-resize;
+  background: var(--border);
+  align-self: stretch;
+}
+#right-resizer:hover, #right-resizer.active { background: var(--accent); }
+
 /* ---------- 面板 ---------- */
 .panel {
   background: var(--panel2);
@@ -78,8 +128,8 @@ main { flex: 1; display: flex; min-height: 0; }
 .panel h4 { font-size: 12px; color: var(--dim); margin: 6px 0 4px; font-weight: 600; }
 .panel .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
 
-.tools { display: flex; flex-wrap: wrap; gap: 4px; }
-.ops { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tools { display: flex; flex-wrap: nowrap; gap: 4px; }
+.tools button { flex: 1; padding: 5px 2px; }
 
 button {
   background: var(--panel2);
@@ -130,11 +180,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 
 .val { color: var(--accent); font-weight: 700; }
 
-#strength-input { width: 100%; }
+#strength-input { flex: 1; min-width: 0; }
+.strength-controls { display: flex; align-items: center; gap: 6px; }
+#strength-number { width: 58px; flex: none; }
 
-/* 尺寸按钮 */
-.resize { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.resize button { padding: 4px 2px; }
+/* 尺寸按钮（旧面板规则已移除，见上方 .resize-float） */
 
 .frow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .frow label { width: 84px; flex: none; color: var(--dim); }
@@ -153,6 +203,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 #player-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .prow {
   display: flex;
+  flex-wrap: wrap; /* 面板宽度不足时势力数据自动换行 */
   align-items: center;
   gap: 5px;
   background: var(--panel2);
@@ -171,13 +222,52 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   border-radius: 4px;
   padding: 1px 4px;
 }
-.prow .swatch { width: 16px; height: 16px; border-radius: 4px; flex: none; border: 1px solid rgba(255,255,255,0.35); }
+.prow .p-drag {
+  flex: none;
+  cursor: grab;
+  user-select: none;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+.prow .p-drag:active { cursor: grabbing; }
+.prow .swatch { width: 16px; height: 16px; border-radius: 4px; flex: none; border: 1px solid rgba(255,255,255,0.35); background-size: contain; background-position: center; background-repeat: no-repeat; }
 .prow .p-name { flex: 1.5; min-width: 70px; padding: 4px 7px; font-size: 13px; }
 .prow .p-num { display: flex; align-items: center; gap: 2px; color: var(--dim); font-size: 11px; }
 .prow .p-num input { width: 34px; }
 .prow .p-ai { width: 52px; }
-.prow .p-flag { width: 40px; }
 .prow button { padding: 1px 6px; font-size: 11px; }
+
+/* 旗帜选择器：按钮 + 预览 + 弹出选项网格 */
+.p-flag-wrap { position: relative; flex: none; }
+.p-flag-btn { display: flex; align-items: center; gap: 3px; }
+.fprev {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.p-flag-btn .fprev { width: 14px; height: 14px; }
+.p-flag-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 4px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+.p-flag-pop button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 5px; font-size: 11px; }
+.p-flag-pop button:hover { border-color: var(--accent); }
+.p-flag-pop button.sel { border-color: var(--accent); background: rgba(77, 163, 255, 0.18); }
 
 /* 校验 */
 #validate-summary { padding: 8px; border-radius: 5px; margin-bottom: 8px; font-weight: 700; }
