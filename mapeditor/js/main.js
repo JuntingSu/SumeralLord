@@ -317,10 +317,21 @@
   });
 
   // ==================== 文件操作 ====================
-  function serverUrl() {
-    return ($('server-url').value.trim() || MapConst.DEFAULT_SERVER);
+  // embed=1：从主程序大厅进入——服务器即当前来源（同源相对路径），隐藏服务器输入框
+  const EMBEDDED = new URLSearchParams(window.location.search).get('embed') === '1';
+  if (EMBEDDED) {
+    $('server-field').style.display = 'none';
+    const back = $('btn-back-lobby');
+    if (back) back.style.display = '';
   }
-  $('server-url').value = localStorage.getItem('dl-mapeditor-server') || MapConst.DEFAULT_SERVER;
+
+  function serverUrl() {
+    if (EMBEDDED) return ''; // 同源：相对路径直接打到当前服务器
+    return $('server-url').value.trim() || MapConst.DEFAULT_SERVER;
+  }
+  if (!EMBEDDED) {
+    $('server-url').value = localStorage.getItem('dl-mapeditor-server') || MapConst.DEFAULT_SERVER;
+  }
   $('server-url').addEventListener('change', (e) => {
     localStorage.setItem('dl-mapeditor-server', e.target.value.trim());
   });

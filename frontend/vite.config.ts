@@ -10,15 +10,17 @@ export default defineConfig({
       '@dl/shared': fileURLToPath(new URL('../packages/shared/src/index.ts', import.meta.url)),
     },
   },
-  // reducerVersion 注入（与后端 config.reducerVersion 对齐；生产构建时改为包版本+git sha）
   define: {
     __DL_REDUCER_VERSION__: JSON.stringify(process.env.DL_REDUCER_VERSION ?? 'dev-0.1.0'),
   },
   server: {
+    host: '0.0.0.0',      // 允许公网访问（浏览器要能连进来）
+    port: 4097,           // 前端监听端口
     proxy: {
-      '/api': 'http://localhost:3000',
-      '/static': 'http://localhost:3000',
-      '/ws': { target: 'http://localhost:3000', ws: true },
+      '/api':      'http://localhost:4096',
+      '/static':   'http://localhost:4096',
+      '/mapeditor': 'http://localhost:4096',
+      '/ws':       { target: 'http://localhost:4096', ws: true },
     },
   },
 });

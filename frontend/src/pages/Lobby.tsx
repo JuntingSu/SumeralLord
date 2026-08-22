@@ -69,7 +69,16 @@ export default function Lobby() {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <header className="flex items-center justify-between border-b border-slate-700 px-6 py-4">
-        <h1 className="text-xl font-bold">数字领主 · 大厅</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold">数字领主 · 大厅</h1>
+          <a
+            href="/mapeditor/?embed=1"
+            title="打开独立地图编辑器（服务器与当前大厅一致）"
+            className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
+          >
+            🗺 地图编辑器
+          </a>
+        </div>
         {user && (
           <div className="flex items-center gap-3">
             <img

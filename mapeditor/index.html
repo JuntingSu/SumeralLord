@@ -9,7 +9,7 @@
 <body>
 
 <header id="topbar">
-  <div class="brand">🗺 数字领主 · 地图编辑器</div>
+  <div class="brand">🗺 数字领主 · 地图编辑器 <a id="btn-back-lobby" href="/lobby" style="display:none" class="back">← 返回大厅</a></div>
   <div class="grp">
     <button id="btn-new" title="新建地图">新建</button>
     <button id="btn-open" title="从本地 JSON 文件打开">打开</button>
@@ -18,7 +18,7 @@
     <button id="btn-refresh-server" title="刷新服务器地图列表">刷新</button>
   </div>
   <div class="grp">
-    <label class="server">服务器
+    <label class="server" id="server-field">服务器
       <input id="server-url" size="22" placeholder="http://127.0.0.1:3000">
     </label>
     <button id="btn-save" title="保存到服务器 maps-uncensored 审查队列">💾 保存到服务器</button>

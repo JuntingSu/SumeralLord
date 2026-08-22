@@ -35,6 +35,8 @@ body {
   flex-wrap: wrap;
 }
 #topbar .brand { font-weight: 700; font-size: 15px; white-space: nowrap; }
+#topbar .brand .back { margin-left: 10px; font-weight: 400; font-size: 13px; color: var(--accent, #4ea1ff); text-decoration: none; }
+#topbar .brand .back:hover { text-decoration: underline; }
 #topbar .grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #topbar .grp .server { color: var(--dim); display: flex; align-items: center; gap: 4px; }
 #status.status { flex: 1; min-width: 180px; text-align: right; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

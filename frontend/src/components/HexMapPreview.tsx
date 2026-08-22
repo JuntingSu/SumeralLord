@@ -103,12 +103,16 @@ export default function HexMapPreview({ battlefield, column, row, height = 260, 
 
     draw();
 
-    // 画布或窗口尺寸变化时按新尺寸重绘，避免位图与 CSS 尺寸不一致被拉伸
-    const observer = new ResizeObserver(draw);
-    observer.observe(canvas);
+    // 画布或窗口尺寸变化时按新尺寸重绘，避免位图与 CSS 尺寸不一致被拉伸。
+    // ResizeObserver 缺失（旧浏览器）时降级为仅监听窗口 resize，避免挂载即抛错导致白屏。
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(draw);
+      observer.observe(canvas);
+    }
     window.addEventListener('resize', draw);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', draw);
     };
   }, [battlefield, column, row, height]);

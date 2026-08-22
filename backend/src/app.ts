@@ -55,6 +55,14 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     maps.loadFromDir(path.join(staticRoot, 'maps'));
   }
 
+  // 独立地图编辑器（repo 根目录 mapeditor/）：作为主程序子页面托管，
+  // 使编辑器与主程序同源（同端口），可从大厅直接进入。
+  // 二次注册需 decorateReply:false，避免 sendFile 装饰器重复声明。
+  const mapeditorRoot = path.join(__dirname, '../../mapeditor');
+  if (existsSync(mapeditorRoot)) {
+    await app.register(fastifyStatic, { root: mapeditorRoot, prefix: '/mapeditor/', decorateReply: false });
+  }
+
   app.get('/api/health', async (_request, reply) => ok(reply, { status: 'ok' }));
 
   await app.register(authRoutes, {

@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const num = (v: string | undefined, d: number) => (v === undefined ? d : Number(v));
 
 export const config = {
-  port: Number(process.env.PORT ?? 3000),
+  port: Number(process.env.PORT ?? 4096),
   host: process.env.HOST ?? '127.0.0.1',
   jwtSecret: process.env.JWT_SECRET ?? 'dev-secret-do-not-use-in-prod',
   isProd: process.env.NODE_ENV === 'production',
