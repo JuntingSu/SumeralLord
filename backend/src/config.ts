@@ -22,6 +22,8 @@ export const config = {
   gameHardCapMs: num(process.env.DL_GAME_HARD_CAP_MS, GAME.GAME_HARD_CAP_MS),
   /** GAME_OVER 结算展示保留时长，超时回落 ROOM_OPEN */
   gameOverRetainMs: num(process.env.DL_GAME_OVER_RETAIN_MS, 5 * 60 * 1000),
+  /** 地图目录元数据刷新间隔（完整地图按需读盘，仅小字段周期重扫） */
+  mapsReloadMs: num(process.env.DL_MAPS_RELOAD_MS, 5000),
 };
 
 if (config.isProd && config.jwtSecret === 'dev-secret-do-not-use-in-prod') {

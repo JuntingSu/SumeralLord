@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -76,5 +76,77 @@ describe('GET /api/maps/:id', () => {
     }
     // 2v2 队伍
     expect(map.player_list.map((p: { team: number }) => p.team)).toEqual([1, 1, 2, 2]);
+  });
+});
+
+describe('地图目录热加载（元数据缓存 + 完整地图按需读取）', () => {
+  let app: FastifyInstance;
+  let dir: string;
+  let mapsDir: string;
+
+  const makeMap = (title: string): string =>
+    JSON.stringify({
+      title,
+      author: 'test',
+      description: '测试地图',
+      row: 2,
+      column: 3,
+      player_num: 1,
+      player_list: [{ name: 'A', team: 1, computer: 0, seat: 1, flag: 0 }],
+      battlefield: Array.from({ length: 6 }, () => [0, 0, 0]),
+    });
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const listIds = async (): Promise<string[]> => {
+    const res = await app.inject({ method: 'GET', url: '/api/maps' });
+    expect(res.statusCode).toBe(200);
+    return (res.json().data.mapList as Array<{ id: string }>).map((m) => m.id);
+  };
+
+  beforeAll(async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'dl-maps-hot-'));
+    mapsDir = path.join(dir, 'maps');
+    mkdirSync(mapsDir, { recursive: true });
+    writeFileSync(path.join(mapsDir, 'map_base.json'), makeMap('基础图'));
+    app = await buildApp({ dbPath: path.join(dir, 'test.db'), logger: false, staticRoot: dir, mapsReloadMs: 50 });
+  });
+
+  afterAll(async () => {
+    await app.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('新增地图在刷新间隔后出现在列表，无需重启', async () => {
+    writeFileSync(path.join(mapsDir, 'map_new.json'), makeMap('新图'));
+    await sleep(150);
+    expect(await listIds()).toContain('map_new');
+  });
+
+  it('完整地图按需可从磁盘读取', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/maps/map_new' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.title).toBe('新图');
+  });
+
+  it('get 每次返回新对象（完整地图不缓存）', () => {
+    const a = app.maps.get('map_new');
+    const b = app.maps.get('map_new');
+    expect(a).not.toBeNull();
+    expect(a).not.toBe(b);
+  });
+
+  it('删除地图后从列表消失', async () => {
+    rmSync(path.join(mapsDir, 'map_new.json'));
+    await sleep(150);
+    expect(await listIds()).not.toContain('map_new');
+  });
+
+  it('列表返回 row/column 元数据', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/maps' });
+    const base = (res.json().data.mapList as Array<{ id: string; row: number; column: number }>).find(
+      (m) => m.id === 'map_base',
+    );
+    expect(base?.row).toBe(2);
+    expect(base?.column).toBe(3);
   });
 });

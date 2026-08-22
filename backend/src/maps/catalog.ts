@@ -84,43 +84,60 @@ export function validateMapData(raw: unknown): boolean {
   return true;
 }
 
-/** 启动时从 static/maps/*.json 加载地图目录（内存缓存，v1 不支持热更新）。id 由文件名派生。 */
+/**
+ * 地图目录：只缓存元数据（小字段），完整地图数据按需从磁盘读取。
+ * 支持 3000 张量级：内存占用可忽略；目录变更通过定时 refresh 反映，无需重启。
+ * id 由文件名派生。
+ */
 export class MapCatalog {
-  private readonly maps = new Map<string, MapFullData>();
+  private dir = '';
+  private meta = new Map<string, MapMeta>();
+  private timer: NodeJS.Timeout | null = null;
 
   loadFromDir(dir: string): number {
+    this.dir = dir;
+    return this.refresh();
+  }
+
+  /** 重扫目录重建元数据缓存（整体替换，删除的文件也会从缓存消失）。 */
+  refresh(): number {
+    const next = new Map<string, MapMeta>();
     let files: string[] = [];
     try {
-      files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+      files = readdirSync(this.dir).filter((f) => f.endsWith('.json')).sort();
     } catch {
+      this.meta.clear();
       return 0;
     }
     for (const file of files) {
       try {
-        const raw: unknown = JSON.parse(stripJsonComments(readFileSync(path.join(dir, file), 'utf8')));
-        if (validateMapData(raw)) {
-          const map = raw as MapFullData;
-          map.id = path.basename(file, '.json');
-          this.maps.set(map.id, map);
-        } else {
+        const raw: unknown = JSON.parse(stripJsonComments(readFileSync(path.join(this.dir, file), 'utf8')));
+        if (!validateMapData(raw)) {
           console.warn(`[maps] ${file} 结构非法，已跳过`);
+          continue;
         }
+        const m = raw as MapFullData;
+        const id = path.basename(file, '.json');
+        next.set(id, {
+          id,
+          title: m.title,
+          author: m.author,
+          description: m.description,
+          playerNum: m.player_num,
+          row: m.row,
+          column: m.column,
+          tags: m.tags,
+        });
       } catch (err) {
         console.warn(`[maps] ${file} 解析失败:`, err);
       }
     }
-    return this.maps.size;
+    this.meta = next;
+    return this.meta.size;
   }
 
   list(search?: string): MapMeta[] {
-    const all: MapMeta[] = [...this.maps.values()].map((m) => ({
-      id: m.id,
-      title: m.title,
-      author: m.author,
-      description: m.description,
-      playerNum: m.player_num,
-      tags: m.tags,
-    }));
+    const all = [...this.meta.values()];
     if (!search) return all;
     const q = search.toLowerCase();
     return all.filter((m) =>
@@ -128,7 +145,39 @@ export class MapCatalog {
     );
   }
 
+  /** 完整地图按需从磁盘读取，不缓存；缺失/损坏返回 null。id 白名单防路径穿越。 */
   get(id: string): MapFullData | null {
-    return this.maps.get(id) ?? null;
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) return null;
+    try {
+      const raw: unknown = JSON.parse(stripJsonComments(readFileSync(path.join(this.dir, `${id}.json`), 'utf8')));
+      if (!validateMapData(raw)) return null;
+      const map = raw as MapFullData;
+      map.id = id;
+      return map;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 周期重扫目录，使新增/删除的地图无需重启即可反映（防重入）。 */
+  startAutoReload(intervalMs: number): void {
+    this.stopAutoReload();
+    this.timer = setInterval(() => {
+      try {
+        this.refresh();
+      } catch (err) {
+        console.warn('[maps] 自动重载失败:', err);
+      }
+    }, intervalMs);
+    this.timer.unref?.();
+  }
+
+  stopAutoReload(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  dispose(): void {
+    this.stopAutoReload();
   }
 }

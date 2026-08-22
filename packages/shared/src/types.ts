@@ -102,6 +102,8 @@ export interface MapMeta {
   author: string;
   description: string;
   playerNum: number;
+  row: number;
+  column: number;
   tags: string[];
 }
 

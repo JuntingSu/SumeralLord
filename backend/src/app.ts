@@ -7,6 +7,7 @@ import fastifyStatic from '@fastify/static';
 import { openDb } from './db/client.js';
 import { TicketService } from './auth/ticket.js';
 import { MapCatalog } from './maps/catalog.js';
+import { config } from './config.js';
 import { RoomManager } from './room/manager.js';
 import { GameManager } from './game/manager.js';
 import { WsGateway } from './ws/gateway.js';
@@ -26,6 +27,7 @@ export interface BuildAppOptions {
   staticRoot?: string;
   authRate?: { registerPerMin?: number; loginPerMin?: number };
   roomOpts?: { idleMs?: number; sweepIntervalMs?: number; gameHardCapMs?: number; gameOverRetainMs?: number };
+  mapsReloadMs?: number;
 }
 
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -53,6 +55,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   if (existsSync(staticRoot)) {
     await app.register(fastifyStatic, { root: staticRoot, prefix: '/static/' });
     maps.loadFromDir(path.join(staticRoot, 'maps'));
+    maps.startAutoReload(opts.mapsReloadMs ?? config.mapsReloadMs);
   }
 
   // 独立地图编辑器（repo 根目录 mapeditor/）：作为主程序子页面托管，
@@ -81,6 +84,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     tickets.dispose();
     rooms.dispose();
     games.dispose();
+    maps.dispose();
     sqlite.close();
   });
 
