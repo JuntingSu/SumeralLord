@@ -152,21 +152,30 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .prow {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: 5px;
-  padding: 4px 5px;
+  padding: 4px 6px;
+}
+.prow .p-seat {
+  flex: none;
+  min-width: 22px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 .prow .swatch { width: 16px; height: 16px; border-radius: 4px; flex: none; border: 1px solid rgba(255,255,255,0.35); }
-.prow .p-name { flex: 1; min-width: 0; }
+.prow .p-name { flex: 1.5; min-width: 70px; padding: 4px 7px; font-size: 13px; }
 .prow .p-num { display: flex; align-items: center; gap: 2px; color: var(--dim); font-size: 11px; }
 .prow .p-num input { width: 34px; }
-.prow .p-ai { width: 56px; }
+.prow .p-ai { width: 52px; }
 .prow .p-flag { width: 40px; }
-.prow .p-birth { flex: none; font-size: 12px; }
-.prow .p-birth.warn { color: var(--warn); }
-.prow button { padding: 1px 5px; font-size: 11px; }
+.prow button { padding: 1px 6px; font-size: 11px; }
 
 /* 校验 */
 #validate-summary { padding: 8px; border-radius: 5px; margin-bottom: 8px; font-weight: 700; }

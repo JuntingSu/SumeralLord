@@ -33,17 +33,12 @@
       <h3>工具</h3>
       <div class="tools">
         <button data-tool="paint">✏️ 画笔</button>
-        <button data-tool="city">🏰 出生点</button>
-        <button data-tool="select">▭ 框选</button>
-        <button data-tool="paste">📋 粘贴</button>
         <button data-tool="pan">✋ 平移</button>
       </div>
       <div class="ops">
-        <button id="btn-copy" title="复制选中区域到剪贴板（切到粘贴工具放置）">📋 复制选区</button>
         <button id="btn-undo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
         <button id="btn-redo" title="重做 (Ctrl+Y)">↪ 重做</button>
       </div>
-      <p id="paste-hint" class="hint" style="display:none">点击格子放置剪贴板区域；越界部分自动跳过。</p>
     </section>
 
     <section class="panel" id="brush-panel">
@@ -58,11 +53,6 @@
       <div class="sub" id="strength-row">
         <h4>兵力 <span id="strength-val" class="val">5</span></h4>
         <input id="strength-input" type="range" min="0" max="255" value="5">
-      </div>
-      <div class="sub" id="city-seat-row" style="display:none">
-        <h4>势力</h4>
-        <select id="city-seat"></select>
-        <p class="hint">点击格子放置/移动该势力出生据点（原出生点自动还原为无主平原）。</p>
       </div>
       <p class="hint">山地/虚空不可驻兵；无主格兵力强制为 0；野生/阻挡可驻兵（中立兵）。</p>
     </section>
@@ -114,7 +104,7 @@
       <div class="frow"><label>id（文件名）</label><input id="f-id" placeholder="map_xxx"></div>
       <div class="frow"><label>标题</label><input id="f-title"></div>
       <div class="frow"><label>作者</label><input id="f-author"></div>
-      <div class="frow"><label>时间戳 <button id="btn-now" class="mini" title="更新为当前时间">现在</button></label><input id="f-timestamp"></div>
+      <div class="frow"><label>时间戳</label><input id="f-timestamp" disabled title="时间戳不可修改"></div>
       <div class="frow"><label>描述</label><textarea id="f-desc" rows="3"></textarea></div>
       <div class="frow"><label>标签（逗号分隔）</label><input id="f-tags" placeholder="2人, 1v1"></div>
       <div class="frow"><label>总时长(秒)</label><input id="f-total" type="number" min="0"></div>
@@ -128,7 +118,7 @@
     <div class="tab-page" id="tab-players" hidden>
       <button id="btn-add-player" class="wide">＋ 新增势力</button>
       <div id="player-list"></div>
-      <p class="hint">出生点 🏰 由「据点地形 + 归属座次 + 兵力>0」表达；⚠ 表示该势力暂无出生据点。</p>
+      <p class="hint">列表按座次自动排序；座次由系统分配、不可修改。据点格由「地形=据点 + 归属=该势力座次 + 兵力>0」表达，直接用画笔涂色即可。</p>
     </div>
     <div class="tab-page" id="tab-validate" hidden>
       <div id="validate-summary" class="v-ok">—</div>

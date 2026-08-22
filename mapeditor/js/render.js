@@ -57,13 +57,12 @@ const HexRender = (() => {
   }
 
   /**
-   * 绘制。view: {zoom, panX, panY}；opts 可选：
-   *   selected, hover, selection:{r0,c0,r1,c1}, ghost:{indices, cells}
+   * 绘制。view: {zoom, panX, panY}；opts 可选：{ hover }
    */
   function draw(ctx, cssW, cssH, map, view, opts = {}) {
     const { column, row, battlefield } = map;
     const layout = computeLayout(column, row, cssW, cssH, view.zoom, view.panX, view.panY);
-    const { selected, hover, selection, ghost } = opts;
+    const { hover } = opts;
 
     ctx.clearRect(0, 0, cssW, cssH);
     ctx.fillStyle = '#16181d';
@@ -122,74 +121,12 @@ const HexRender = (() => {
       }
     }
 
-    // 框选高亮
-    if (selection && selection.r0 >= 0) {
-      const { r0, c0, r1, c1 } = selection;
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-          const { cx, cy } = centerOf(r * column + c, column, layout);
-          hexPath(ctx, cx, cy, layout.size * 0.98);
-          ctx.fillStyle = 'rgba(255, 200, 60, 0.18)';
-          ctx.fill();
-        }
-      }
-      const corners = [
-        centerOf(r0 * column + c0, column, layout),
-        centerOf(r0 * column + c1, column, layout),
-        centerOf(r1 * column + c1, column, layout),
-        centerOf(r1 * column + c0, column, layout),
-      ];
-      ctx.beginPath();
-      corners.forEach((p, i) => (i === 0 ? ctx.moveTo(p.cx, p.cy) : ctx.lineTo(p.cx, p.cy)));
-      ctx.closePath();
-      ctx.strokeStyle = '#ffc83c';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    // 粘贴 ghost 预览（按剪贴板内容半透明绘制）
-    if (ghost && ghost.indices && ghost.indices.length) {
-      const cells = ghost.cells || [];
-      for (let k = 0; k < ghost.indices.length; k++) {
-        const idx = ghost.indices[k];
-        const { cx, cy } = centerOf(idx, column, layout);
-        const cell = cells[k];
-        if (cell) {
-          hexPath(ctx, cx, cy, layout.size * 0.98);
-          ctx.globalAlpha = 0.55;
-          ctx.fillStyle = MapConst.TERRAIN_COLORS[cell[0]] ?? '#888888';
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          if (cell[2] > 0) {
-            const markR = Math.max(4, layout.size * 0.30);
-            ctx.beginPath();
-            ctx.arc(cx, cy, markR, 0, Math.PI * 2);
-            ctx.globalAlpha = 0.7;
-            ctx.fillStyle = MapConst.flagColor(cell[1]);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-          }
-        } else {
-          hexPath(ctx, cx, cy, layout.size * 0.98);
-          ctx.fillStyle = 'rgba(120, 200, 255, 0.30)';
-          ctx.fill();
-        }
-      }
-    }
-
-    // 悬停/选中描边
+    // 悬停描边
     if (hover >= 0) {
       const { cx, cy } = centerOf(hover, column, layout);
       hexPath(ctx, cx, cy, layout.size);
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    if (selected >= 0 && selected !== hover) {
-      const { cx, cy } = centerOf(selected, column, layout);
-      hexPath(ctx, cx, cy, layout.size);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2.5;
       ctx.stroke();
     }
 

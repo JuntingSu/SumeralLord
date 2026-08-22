@@ -1,25 +1,20 @@
 /**
- * editor.js — 编辑器状态机：画笔/出生点/框选/复制粘贴/撤销重做/批量操作
+ * editor.js — 编辑器状态机：画笔/撤销重做/批量操作
  * 通过 onCanvas / onUI 订阅通知（main.js 注册渲染）。
  */
 const Editor = (() => {
   const state = {
     map: null,
     id: 'map_new',
-    tool: 'paint', // 'paint' | 'city' | 'select' | 'paste' | 'pan'
+    tool: 'paint', // 'paint' | 'pan'
     brush: {
       terrain: MapConst.TERRAIN.PLAIN,
       owner: MapConst.TILE_OWNER.EMPTY,
       strength: MapConst.DEFAULT_STRENGTH,
       mode: 'all', // 'all' | 'terrain' | 'strength'
-      seat: 1,
     },
     view: { zoom: 1, panX: 0, panY: 0 },
-    selected: -1,
     hover: -1,
-    selection: null, // {r0,c0,r1,c1}
-    clipboard: null, // {w,h,cells}
-    pasteAnchor: -1,
     undoStack: [],
     redoStack: [],
     dirty: false,
@@ -40,11 +35,7 @@ const Editor = (() => {
     state.id = id || 'map_new';
     state.undoStack = [];
     state.redoStack = [];
-    state.selected = -1;
     state.hover = -1;
-    state.selection = null;
-    state.clipboard = null;
-    state.pasteAnchor = -1;
     state.dirty = false;
     refreshCanvas();
     refreshUI();
@@ -62,9 +53,6 @@ const Editor = (() => {
     if (!state.map || state.undoStack.length === 0) return;
     state.redoStack.push(JSON.parse(JSON.stringify(state.map)));
     state.map = state.undoStack.pop();
-    state.selected = -1;
-    state.selection = null;
-    state.pasteAnchor = -1;
     refreshCanvas();
     refreshUI();
   }
@@ -73,9 +61,6 @@ const Editor = (() => {
     if (!state.map || state.redoStack.length === 0) return;
     state.undoStack.push(JSON.parse(JSON.stringify(state.map)));
     state.map = state.redoStack.pop();
-    state.selected = -1;
-    state.selection = null;
-    state.pasteAnchor = -1;
     refreshCanvas();
     refreshUI();
   }
@@ -121,98 +106,6 @@ const Editor = (() => {
     refreshUI();
   }
 
-  // ---------- 出生点 ----------
-  function placeCity(index) {
-    if (!state.map || index < 0) return;
-    pushUndo();
-    MapData.moveBirthPoint(state.map, state.brush.seat, index);
-    refreshCanvas();
-    refreshUI();
-  }
-
-  // ---------- 框选 / 复制 / 粘贴 ----------
-  function selectionFromIndexes(a, b) {
-    const col = state.map.column;
-    const ra = Math.floor(a / col);
-    const ca = a % col;
-    const rb = Math.floor(b / col);
-    const cb = b % col;
-    state.selection = {
-      r0: Math.min(ra, rb),
-      c0: Math.min(ca, cb),
-      r1: Math.max(ra, rb),
-      c1: Math.max(ca, cb),
-    };
-  }
-
-  function startSelect(index) {
-    if (!state.map || index < 0) return;
-    state.selected = index;
-    selectionFromIndexes(index, index);
-    refreshCanvas();
-  }
-
-  function selectDrag(index) {
-    if (!state.map || index < 0) return;
-    state.selected = index;
-    selectionFromIndexes(state.selected, index);
-    refreshCanvas();
-  }
-
-  function endSelect() {
-    refreshUI();
-  }
-
-  function copySelection() {
-    const sel = state.selection;
-    if (!state.map || !sel || sel.r0 < 0) return;
-    const w = sel.c1 - sel.c0 + 1;
-    const h = sel.r1 - sel.r0 + 1;
-    const cells = [];
-    for (let j = 0; j < h; j++) {
-      for (let i = 0; i < w; i++) {
-        const idx = (sel.r0 + j) * state.map.column + (sel.c0 + i);
-        cells.push(state.map.battlefield[idx].slice());
-      }
-    }
-    state.clipboard = { w, h, cells };
-    refreshUI();
-  }
-
-  /** 计算粘贴 ghost（anchor 为左上角所在格；越界部分跳过） */
-  function ghostForAnchor(anchor) {
-    if (!state.map || !state.clipboard || anchor < 0) return null;
-    const col = state.map.column;
-    const ar = Math.floor(anchor / col);
-    const ac = anchor % col;
-    const indices = [];
-    const cells = [];
-    for (let j = 0; j < state.clipboard.h; j++) {
-      for (let i = 0; i < state.clipboard.w; i++) {
-        const r = ar + j;
-        const c = ac + i;
-        if (r >= 0 && r < state.map.row && c >= 0 && c < state.map.column) {
-          indices.push(r * col + c);
-          cells.push(state.clipboard.cells[j * state.clipboard.w + i]);
-        }
-      }
-    }
-    return { indices, cells };
-  }
-
-  function pasteAt(anchor) {
-    if (!state.map || !state.clipboard || anchor < 0) return;
-    const ghost = ghostForAnchor(anchor);
-    if (!ghost || ghost.indices.length === 0) return;
-    pushUndo();
-    for (let k = 0; k < ghost.indices.length; k++) {
-      state.map.battlefield[ghost.indices[k]] = ghost.cells[k].slice();
-    }
-    state.pasteAnchor = -1;
-    refreshCanvas();
-    refreshUI();
-  }
-
   // ---------- 视图 ----------
   function setHover(index) {
     if (state.hover === index) return;
@@ -230,8 +123,6 @@ const Editor = (() => {
     if (!state.map) return;
     pushUndo();
     MapData.resizeMap(state.map, delta);
-    state.selected = -1;
-    state.selection = null;
     refreshCanvas();
     refreshUI();
   }
@@ -257,17 +148,6 @@ const Editor = (() => {
     refreshUI();
   }
 
-  function reorderPlayer(i, dir) {
-    if (!state.map) return;
-    const list = state.map.player_list;
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= list.length) return;
-    pushUndo();
-    [list[i], list[j]] = [list[j], list[i]];
-    refreshCanvas();
-    refreshUI();
-  }
-
   /** 信息/势力字段提交：记录一次撤销后执行 fn(map) */
   function commit(fn) {
     if (!state.map) return;
@@ -284,11 +164,6 @@ const Editor = (() => {
 
   function setTool(tool) {
     state.tool = tool;
-    if (tool !== 'paste') state.pasteAnchor = -1;
-    if (tool !== 'select') {
-      state.selected = -1;
-      state.selection = null;
-    }
     refreshCanvas();
     refreshUI();
   }
@@ -300,9 +175,8 @@ const Editor = (() => {
 
   return {
     state, getState, onCanvas, onUI, setMap, undo, redo,
-    paintStart, paintDrag, paintEnd, placeCity,
-    startSelect, selectDrag, endSelect, copySelection, pasteAt, ghostForAnchor,
-    setHover, setView, resize, generateMap, addPlayer, removePlayer, reorderPlayer,
+    paintStart, paintDrag, paintEnd,
+    setHover, setView, resize, generateMap, addPlayer, removePlayer,
     commit, updateId, setTool, setBrush,
   };
 })();

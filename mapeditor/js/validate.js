@@ -55,7 +55,6 @@ const MapValidate = (() => {
     let terrain2 = 0;
     let soldierOnBroken = 0;
     let soldierOnEmpty = 0;
-    const births = new Map(); // seat -> count
     if (Array.isArray(m.battlefield)) {
       m.battlefield.forEach((tile, i) => {
         if (!Array.isArray(tile) || tile.length !== 3) {
@@ -72,9 +71,6 @@ const MapValidate = (() => {
         if (!ownerOk(o)) issues.push({ level: 'error', text: `地块 ${i}：归属值 ${o} 非法（合法 128/0/255 或 1..127）` });
         if (s < 0) issues.push({ level: 'error', text: `地块 ${i}：兵力 ${s} 不能为负` });
         // 软性
-        if (t === TERRAIN.CITY && o >= 1 && o <= 127 && s > 0) {
-          births.set(o, (births.get(o) || 0) + 1);
-        }
         if (MapConst.NO_SOLDIER_TERRAIN.has(t) && (o !== TILE_OWNER.EMPTY || s !== 0)) {
           soldierOnBroken++;
         }
@@ -84,16 +80,6 @@ const MapValidate = (() => {
     if (terrain2 > 0) issues.push({ level: 'warn', text: `发现 ${terrain2} 个废弃地形编码 2` });
     if (soldierOnBroken > 0) issues.push({ level: 'warn', text: `${soldierOnBroken} 个山地/虚空格存在兵力（应无兵）` });
     if (soldierOnEmpty > 0) issues.push({ level: 'warn', text: `${soldierOnEmpty} 个无主格存在兵力（应 0）` });
-
-    // 出生点
-    if (Array.isArray(m.player_list)) {
-      for (const p of m.player_list) {
-        if (!p || typeof p.seat !== 'number') continue;
-        const n = births.get(p.seat) || 0;
-        if (n === 0) issues.push({ level: 'warn', text: `势力「${p.name || p.seat}」(seat=${p.seat}) 没有出生据点` });
-        else if (n > 1) issues.push({ level: 'warn', text: `势力「${p.name || p.seat}」(seat=${p.seat}) 有 ${n} 座出生据点（建议恰好 1 座）` });
-      }
-    }
 
     return issues;
   }

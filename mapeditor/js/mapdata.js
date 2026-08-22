@@ -137,29 +137,9 @@ const MapData = (() => {
     return copy;
   }
 
-  /** 每势力出生据点（第一个 据点+归属seat+兵力>0 的地块），Map<seat, index> */
-  function findBirthPoints(map) {
-    const births = new Map();
-    for (let i = 0; i < map.battlefield.length; i++) {
-      const [t, o, s] = map.battlefield[i];
-      if (t === TERRAIN.CITY && o >= 1 && o <= 127 && s > 0 && !births.has(o)) births.set(o, i);
-    }
-    return births;
-  }
-
-  /** 放置/移动某势力出生点：目标置据点+归属+兵力；原出生点归无主平原（保持每势力恰一座） */
-  function moveBirthPoint(map, seat, index) {
-    const births = findBirthPoints(map);
-    const old = births.get(seat);
-    if (old !== undefined && old !== index) {
-      map.battlefield[old] = [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0];
-    }
-    map.battlefield[index] = [TERRAIN.CITY, seat, DEFAULT_STRENGTH];
-  }
-
   return {
     nowTimestamp, newEmptyTile, createDefaultMap, resizeMap,
-    removePlayer, addPlayer, serialize, findBirthPoints, moveBirthPoint,
+    removePlayer, addPlayer, serialize,
     toGrid, fromGrid,
   };
 })();

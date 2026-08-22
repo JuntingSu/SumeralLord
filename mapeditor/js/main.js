@@ -36,13 +36,8 @@
   function render() {
     const s = Editor.getState();
     if (!s.map || !cssW) return;
-    let ghost = null;
-    if (s.tool === 'paste' && s.pasteAnchor >= 0) ghost = Editor.ghostForAnchor(s.pasteAnchor);
     const layout = HexRender.draw(ctx, cssW, cssH, s.map, s.view, {
-      selected: s.selected,
       hover: s.hover,
-      selection: s.selection,
-      ghost,
     });
 
     if (s.hover >= 0) {
@@ -112,10 +107,7 @@
     const idx = indexAt(clientX, clientY);
     if (idx < 0) return;
     mouseDown = true;
-    if (s.tool === 'paint') Editor.paintStart(idx);
-    else if (s.tool === 'city') Editor.placeCity(idx);
-    else if (s.tool === 'select') Editor.startSelect(idx);
-    else if (s.tool === 'paste') Editor.pasteAt(idx);
+    Editor.paintStart(idx);
   }
 
   function moveTo(clientX, clientY) {
@@ -132,21 +124,16 @@
     const idx = indexAt(clientX, clientY);
     if (mouseDown) {
       if (idx < 0) return;
-      if (s.tool === 'paint') Editor.paintDrag(idx);
-      else if (s.tool === 'select') Editor.selectDrag(idx);
-      else if (s.tool === 'paste' && s.pasteAnchor !== idx) { s.pasteAnchor = idx; render(); }
+      Editor.paintDrag(idx);
     } else {
       Editor.setHover(idx);
-      if (s.tool === 'paste' && s.pasteAnchor !== idx) { s.pasteAnchor = idx; render(); }
     }
   }
 
   function upNow() {
     if (mouseDown) {
       mouseDown = false;
-      const s = Editor.getState();
-      if (s.tool === 'paint') Editor.paintEnd();
-      else if (s.tool === 'select') Editor.endSelect();
+      Editor.paintEnd();
     }
     panning = false;
   }
@@ -169,7 +156,6 @@
     panning = false;
     const s = Editor.getState();
     if (s.hover !== -1) { s.hover = -1; render(); }
-    if (s.pasteAnchor !== -1) { s.pasteAnchor = -1; render(); }
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -264,17 +250,12 @@
     document.querySelectorAll('#brush-mode [data-mode]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.mode === s.brush.mode);
     });
-    // 面板显隐
+    // 面板显隐：画笔工具才显示画笔面板，平移工具隐藏
     const paintOn = s.tool === 'paint';
-    const cityOn = s.tool === 'city';
     $('brush-mode').style.display = paintOn ? '' : 'none';
     $('terrain-palette').style.display = paintOn ? '' : 'none';
     $('owner-palette').style.display = paintOn ? '' : 'none';
     $('strength-row').style.display = paintOn ? '' : 'none';
-    $('city-seat-row').style.display = cityOn ? '' : 'none';
-    $('btn-copy').style.display = s.tool === 'select' ? '' : 'none';
-    const hint = $('paste-hint');
-    if (hint) hint.style.display = s.tool === 'paste' ? '' : 'none';
   }
 
   function buildPalette(container, items, current, onClick) {
@@ -329,18 +310,10 @@
     // 兵力
     $('strength-input').value = s.brush.strength;
     $('strength-val').textContent = s.brush.strength;
-    // 出生点势力下拉
-    const seatSel = $('city-seat');
-    seatSel.innerHTML = s.map.player_list
-      .map((p) => `<option value="${p.seat}" ${p.seat === s.brush.seat ? 'selected' : ''}>势力${p.seat} ${esc(p.name)}</option>`)
-      .join('');
   }
   $('strength-input').addEventListener('input', (e) => {
     Editor.setBrush({ strength: Number(e.target.value) });
     $('strength-val').textContent = e.target.value;
-  });
-  $('city-seat').addEventListener('change', (e) => {
-    Editor.setBrush({ seat: Number(e.target.value) });
   });
 
   // ==================== 文件操作 ====================
@@ -453,13 +426,9 @@
     }
   });
 
-  // ==================== 撤销/重做 / 复制 / 尺寸 / 生成 ====================
+  // ==================== 撤销/重做 / 尺寸 / 生成 ====================
   $('btn-undo').addEventListener('click', () => Editor.undo());
   $('btn-redo').addEventListener('click', () => Editor.redo());
-  $('btn-copy').addEventListener('click', () => {
-    Editor.copySelection();
-    statusMsg('已复制选中区域，切到「粘贴」工具点击放置');
-  });
   document.querySelectorAll('.resize button').forEach((btn) => {
     btn.addEventListener('click', () => {
       Editor.resize({ [btn.dataset.dir]: Number(btn.dataset.d) });
@@ -482,7 +451,6 @@
   }
   bindCommit('f-title', (m, el) => { m.title = el.value.trim() || m.title; });
   bindCommit('f-author', (m, el) => { m.author = el.value.trim(); });
-  bindCommit('f-timestamp', (m, el) => { m.timestamp = el.value.trim(); });
   bindCommit('f-desc', (m, el) => { m.description = el.value; });
   bindCommit('f-tags', (m, el) => {
     m.tags = el.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
@@ -496,10 +464,6 @@
   $('f-id').addEventListener('change', (e) => {
     Editor.updateId(e.target.value.trim() || 'map_new');
     statusMsg('id（文件名）已更新');
-  });
-  $('btn-now').addEventListener('click', () => {
-    Editor.commit((m) => { m.timestamp = MapData.nowTimestamp(); });
-    statusMsg('时间戳已更新');
   });
 
   function syncInfo() {
@@ -529,7 +493,6 @@
     const s = Editor.getState();
     Players.render($('player-list'), s.map, {
       onPlayerField: (fn) => Editor.commit(fn),
-      onReorder: (i, dir) => Editor.reorderPlayer(i, dir),
       onRemove: (seat) => {
         const p = s.map?.player_list.find((x) => x.seat === seat);
         if (p && !window.confirm(`删除势力「${p.name}」(seat=${seat})？其战场格子将归无主，更高座次整体 -1。`)) return;
@@ -611,11 +574,6 @@
       const s = Editor.getState();
       if (s.tool !== 'paint') {
         Editor.setTool('paint');
-        refreshUI();
-      } else if (s.selection) {
-        s.selection = null;
-        s.selected = -1;
-        render();
         refreshUI();
       }
     }

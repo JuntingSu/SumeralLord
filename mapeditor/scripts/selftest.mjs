@@ -45,12 +45,11 @@ const report = (name, cond, extra = '') => {
 // 1. 默认地图
 const m1 = MapData.createDefaultMap(7, 10, 2);
 report('createDefaultMap(7,10,2)', valid(m1) === null, valid(m1) || '');
-report('默认地图有 2 座出生点', MapData.findBirthPoints(m1).size === 2);
 
 // 2. 生成器各模式
 for (const mode of ['plain', 'random', 'river', 'pvp']) {
   const g = Generator.generate({ row: 9, column: 11, playerNum: 2, mode });
-  report(`generator(${mode})`, valid(g) === null && MapData.findBirthPoints(g).size === 2, `${valid(g) || ''} 出生点=${MapData.findBirthPoints(g).size}`);
+  report(`generator(${mode})`, valid(g) === null, valid(g) || '');
 }
 
 // 3. 尺寸调整（四边 +1 与 -1）
@@ -78,17 +77,8 @@ report('addPlayer → 3 势力', m5.player_num === 3 && valid(m5) === null, `${v
 MapData.addPlayer(m5);
 report('addPlayer 再增 → 4 势力', m5.player_num === 4 && valid(m5) === null);
 
-// 6. 出生点移动
+// 6. 序列化剔除 id
 const m6 = MapData.createDefaultMap(7, 10, 2);
-const bp = [...MapData.findBirthPoints(m6).entries()];
-const oldIdx = bp[0][1];
-MapData.moveBirthPoint(m6, 1, 5);
-const births6 = MapData.findBirthPoints(m6);
-report('moveBirthPoint 移动 seat1 出生点', births6.size === 2 && births6.get(1) === 5 && births6.get(1) !== oldIdx, `新=${births6.get(1)} 旧=${oldIdx}`);
-const oldTile = m6.battlefield[oldIdx];
-report('原出生点还原为无主平原', oldTile[0] === 0 && oldTile[1] === 128 && oldTile[2] === 0, JSON.stringify(oldTile));
-
-// 7. 序列化剔除 id
 const m7 = { ...m6, id: 'should_not_appear' };
 report('serialize 剔除 id', !('id' in MapData.serialize(m7)), JSON.stringify(Object.keys(MapData.serialize(m7)).slice(0, 3)));
 
