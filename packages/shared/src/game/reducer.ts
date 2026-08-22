@@ -318,8 +318,9 @@ function victoryJudgeEvent(ctx: Ctx): void {
 
 // ---------- 一级事件（§8.1） ----------
 
-/** 移动事件（§8.1.1）。完整前置判定；进攻成功进占复用本事件（无效则自然不进占） */
-function moveEventCore(ctx: Ctx, from: number, to: number): boolean {
+/** 移动事件（§8.1.1）。完整前置判定；进攻成功进占复用本事件（无效则自然不进占）。
+ *  opts.skipBreakDeduction：断兵移动时跳过复制 -1（断兵进攻无反击次数的兵成功 → 完整进占，§8.1.2）。 */
+function moveEventCore(ctx: Ctx, from: number, to: number, opts?: { skipBreakDeduction?: boolean }): boolean {
   if (ctx.state.phase !== 'ACTION') return false;
   const origin = ctx.state.tiles[from].soldier;
   if (!origin || !origin.hasMovement) return false;
@@ -337,7 +338,7 @@ function moveEventCore(ctx: Ctx, from: number, to: number): boolean {
     updateEvent(ctx, from, { strength: 1 }); // ③ 原兵变 1
   } else if (mover.strength !== 1) {
     spawnEvent(ctx, to, mover);
-    updateEvent(ctx, to, { strength: mover.strength - 1 });
+    if (!opts?.skipBreakDeduction) updateEvent(ctx, to, { strength: mover.strength - 1 });
     despawnEvent(ctx, from);
   } else {
     spawnEvent(ctx, to, { ...mover, strength: 1 });
@@ -388,7 +389,10 @@ function attackEventCore(ctx: Ctx, from: number, to: number): boolean {
       updateEvent(ctx, from, { strength: attacker.strength - defender.strength });
     }
     despawnEvent(ctx, to);
-    const moved = moveEventCore(ctx, from, to);
+    // 断兵进攻成功且防守无反击次数 → 进占移动不扣兵力（完整进占，§8.1.2）
+    const moved = moveEventCore(ctx, from, to, {
+      skipBreakDeduction: !attacker.isLinked && defender.counter === 0,
+    });
     if (moved) {
       const occupant = ctx.state.tiles[to].soldier;
       if (occupant && sameConnectivityOwner(occupant.owner, attacker.owner) && !occupant.isLinked && occupant.hasMovement) {

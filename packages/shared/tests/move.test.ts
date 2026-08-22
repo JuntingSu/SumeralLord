@@ -199,17 +199,31 @@ describe('§8.1.2 进攻事件', () => {
     expect(soldierAt(r.state, 6)).toMatchObject({ owner: 1, strength: 1 });
   });
 
-  it('断兵进攻力=兵力；成功无反击（阻挡兵）→ 不受伤害直接进占、仍是断兵失去移动力', () => {
+  it('断兵进攻力=兵力；成功无反击（阻挡兵）→ 不受伤害、进占不扣兵力、仍是断兵失去移动力', () => {
     const map = makeMap({ tiles: { 17: [CITY, 1, 1], 18: [OCEAN, 1, 4], 19: [PLAIN, BLOCKER, 3] } });
     const { state } = startGame(map);
-    // 断兵 str4 -> 力 4 ≥ 3：成功；阻挡兵反击恒 0 -> 无反击伤害；19 邻接无己方连兵 -> 保持断兵
+    // 断兵 str4 -> 力 4 ≥ 3：成功；阻挡兵反击恒 0 -> 无反击伤害且进占不扣兵力；19 邻接无己方连兵 -> 保持断兵
     const r = act(state, 1, { intentType: 'ATTACK', from: 18, to: 19 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.chain[0]).toMatchObject({ kind: 'ATTACK' });
-    expect(soldierAt(r.state, 19)).toMatchObject({ owner: 1, strength: 3, isLinked: false, hasMovement: false });
+    expect(soldierAt(r.state, 19)).toMatchObject({ owner: 1, strength: 4, isLinked: false, hasMovement: false });
     expect(soldierAt(r.state, 18)).toBeNull();
     expect(soldierAt(r.state, 19)!.counter).toBe(1); // 承袭进攻兵反击（海洋地形值）
+  });
+
+  it('断兵进攻无反击次数的兵成功 → 进占移动不扣兵力（完整进占）', () => {
+    const map = makeMap({ tiles: { 17: [CITY, 1, 1], 18: [OCEAN, 1, 10], 19: [PLAIN, 2, 2] } });
+    const asg = assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: 102 });
+    const { state } = startGame(map, asg);
+    // 构造防守兵 counter=0（本回合已无反击次数）
+    soldierAt(state, 19)!.counter = 0;
+    // 断兵 str10 -> 力 10 ≥ 2：成功；防守无反击 -> 不受伤害；进占移动不扣兵力 -> str10
+    const r = act(state, 1, { intentType: 'ATTACK', from: 18, to: 19 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(soldierAt(r.state, 19)).toMatchObject({ owner: 1, strength: 10, isLinked: false, hasMovement: false });
+    expect(soldierAt(r.state, 18)).toBeNull();
   });
 
   it('进攻失败且防守无反击 → 进攻兵失去移动力', () => {
