@@ -10,6 +10,7 @@ import Room from './pages/Room';
 import Game from './pages/Game';
 import Replay from './pages/Replay';
 import History from './pages/History';
+import Leaderboard from './pages/Leaderboard';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
@@ -81,6 +82,14 @@ export default function App() {
         element={
           <RequireAuth>
             <History />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/leaderboard"
+        element={
+          <RequireAuth>
+            <Leaderboard />
           </RequireAuth>
         }
       />
