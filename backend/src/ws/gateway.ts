@@ -24,6 +24,7 @@ import type {
   RoomServerMsg,
   TimeSyncMsg,
 } from '@dl/shared';
+import { GAME_OVER_REF_ID, consensusRefId } from '@dl/shared';
 import type { RoomManager } from '../room/manager.js';
 import type { Game, GameManager } from '../game/manager.js';
 import { ConsensusManager, type ConsensusFatalCode } from '../game/consensus.js';
@@ -443,12 +444,20 @@ export class WsGateway {
     this.log.info({ gameId, seat, eventId }, '断线宽限超时，服务器代发投降');
   }
 
-  /** 全票一致：分配 eventId → 持久化 → 广播 CONSENSUS_CONFIRMED；FORCE_CLEAR 登记账本；VICTORY 追加 GAME_OVER + 结算 */
+  /** 全票一致：持久化 → 广播 CONSENSUS_CONFIRMED（非意图 refId，不占意图 eventId 序）；
+   *  FORCE_CLEAR 登记账本；VICTORY 追加 GAME_OVER + 结算 */
   private onConsensusConfirmed(gameId: string, consensusId: string, payload: ConsensusPayload): void {
     const game = this.games.get(gameId);
     if (!game || game.status !== 'in_game') return;
-    const eventId = this.games.allocateEventId(game);
-    const confirmed: ConsensusConfirmedMsg = { type: 'CONSENSUS_CONFIRMED', consensusId, confirmed: payload, eventId };
+    // consensusId 格式 {触发意图eventId}:{nodeType}:{seat}（客户端生成、入参校验过），
+    // refId 沿用该触发意图序号："{触发意图eventId}*"（如 "67*"，对 67 号意图的共识）
+    const triggerEventId = Number(consensusId.split(':')[0]);
+    const confirmed: ConsensusConfirmedMsg = {
+      type: 'CONSENSUS_CONFIRMED',
+      consensusId,
+      confirmed: payload,
+      refId: consensusRefId(triggerEventId),
+    };
     this.games.appendEvent(game, confirmed);
     this.broadcast(game.roomId, confirmed);
 
@@ -456,14 +465,13 @@ export class WsGateway {
       this.games.addClearedSeat(game, payload.seat);
       return;
     }
-    // VICTORY：对局结束 + 结算记录 + 积分结算 + GAME_OVER（同 eventId 序）
+    // VICTORY：对局结束 + 结算记录 + 积分结算 + GAME_OVER（refId 固定 "end"）
     this.disconnectWatch.clearGame(game.id);
     this.games.markFinished(game);
     const finishedAt = Date.now();
     this.games.recordMatchHistory(game, payload.winners, payload.winningTeam, finishedAt);
     // 结算在 recordMatchHistory 之后（回填其 score_changes 行）；此时对局流已含全部 INTENT_BROADCAST，步数统计准确
     settleMatch(this.app.db, this.games, game, payload.winners);
-    const overEventId = this.games.allocateEventId(game);
     const over: GameOverMsg = {
       type: 'GAME_OVER',
       gameId,
@@ -475,7 +483,7 @@ export class WsGateway {
         isAI: sa.isAI,
         cleared: game.clearedSeats.has(sa.seat),
       })),
-      eventId: overEventId,
+      refId: GAME_OVER_REF_ID,
     };
     this.games.appendEvent(game, over);
     this.broadcast(game.roomId, over);

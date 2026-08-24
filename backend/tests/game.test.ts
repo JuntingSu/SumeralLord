@@ -251,10 +251,10 @@ describe('BM5：全票共识（加速超时 300ms）', () => {
     a.send({ type: 'CONSENSUS_RESULT', consensusId: '1:victory:0', result: payload });
     b.send({ type: 'CONSENSUS_RESULT', consensusId: '1:victory:0', result: payload });
     const [ca, cb] = await Promise.all([a.waitFor('CONSENSUS_CONFIRMED'), b.waitFor('CONSENSUS_CONFIRMED')]);
-    expect(ca).toMatchObject({ consensusId: '1:victory:0', eventId: 1, confirmed: payload });
+    expect(ca).toMatchObject({ consensusId: '1:victory:0', refId: '1*', confirmed: payload });
     const over = await a.waitFor('GAME_OVER');
     expect(over.winners).toEqual(payload.winners);
-    expect(over.eventId).toBe(2); // GAME_OVER 同 eventId 序
+    expect(over.refId).toBe('end'); // GAME_OVER 非意图 refId（不占意图 eventId 序）
     expect(over.forces).toHaveLength(2);
     // match_history 落库
     const rows = app.db.select().from(matchHistory).where(eq(matchHistory.gameId, gameId)).all();
