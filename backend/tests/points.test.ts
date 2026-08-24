@@ -333,7 +333,7 @@ describe('历史记录含本人积分变动', () => {
     expect(res.statusCode).toBe(200);
     const { history } = res.json().data;
     expect(history.length).toBeGreaterThanOrEqual(1);
-    const mine = history.find((h: { gameId: string }) => h.gameId !== undefined && h.scoreChanges.length > 0);
+    const mine = history.find((h: { gameId: string; scoreChanges: ScoreChangeEntry[] }) => h.scoreChanges.length > 0);
     expect(mine).toBeDefined();
     const myChange = mine.scoreChanges.find((c: ScoreChangeEntry) => c.playerId === eve.id);
     expect(myChange).toBeDefined();
