@@ -16,6 +16,7 @@ import { roomRoutes } from './api/rooms.js';
 import { mapRoutes } from './api/maps.js';
 import { gameRoutes } from './api/game.js';
 import { userRoutes } from './api/users.js';
+import { leaderboardRoutes } from './api/leaderboard.js';
 import { ok } from './utils/respond.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -76,6 +77,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(mapRoutes);
   await app.register(gameRoutes);
   await app.register(userRoutes);
+  await app.register(leaderboardRoutes);
 
   gatewayRef = new WsGateway(app, rooms, games, tickets, app.log);
 
