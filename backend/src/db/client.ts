@@ -12,6 +12,14 @@ export interface DbHandle {
   sqlite: Database.Database;
 }
 
+/** 存量库守卫迁移：目标列缺失时补列（新库由 CREATE TABLE 直接建全） */
+function ensureColumn(sqlite: Database.Database, table: string, column: string, ddl: string): void {
+  const cols = sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+
 export function openDb(dbPath?: string): DbHandle {
   const file = dbPath ?? config.dbPath;
   mkdirSync(path.dirname(file), { recursive: true });
@@ -25,6 +33,7 @@ export function openDb(dbPath?: string): DbHandle {
       default_flag INTEGER NOT NULL DEFAULT 1,
       matches INTEGER NOT NULL DEFAULT 0,
       wins INTEGER NOT NULL DEFAULT 0,
+      score REAL NOT NULL DEFAULT 100,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS match_history (
@@ -36,8 +45,12 @@ export function openDb(dbPath?: string): DbHandle {
       winners TEXT NOT NULL,
       winning_team INTEGER NOT NULL DEFAULT -1,
       participants TEXT NOT NULL,
+      score_changes TEXT NOT NULL DEFAULT '[]',
       aborted INTEGER NOT NULL DEFAULT 0
     );
   `);
+  // 存量库补列（DEFAULT 使旧账号自动回填 100 分、旧对局 score_changes 回填 []）
+  ensureColumn(sqlite, 'users', 'score', 'score REAL NOT NULL DEFAULT 100');
+  ensureColumn(sqlite, 'match_history', 'score_changes', "score_changes TEXT NOT NULL DEFAULT '[]'");
   return { db: drizzle(sqlite, { schema }), sqlite };
 }

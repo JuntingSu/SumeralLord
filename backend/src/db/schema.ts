@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const users = sqliteTable('users', {
@@ -8,6 +8,8 @@ export const users = sqliteTable('users', {
   defaultFlag: integer('default_flag').notNull().default(1),
   matches: integer('matches').notNull().default(0),
   wins: integer('wins').notNull().default(0),
+  /** 当前积分（注册默认 100；结算见 backend/src/stats/settlement.ts） */
+  score: real('score').notNull().default(100),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -26,6 +28,8 @@ export const matchHistory = sqliteTable('match_history', {
   winningTeam: integer('winning_team').notNull().default(-1),
   /** 参战者快照（JSON：[{ seat, playerId, isAI }]） */
   participants: text('participants').notNull(),
+  /** 本局积分结算明细（JSON 数组，见 shared ScoreChangeEntry；平局/旧记录为 []） */
+  scoreChanges: text('score_changes').notNull().default('[]'),
   aborted: integer('aborted').notNull().default(0),
 });
 

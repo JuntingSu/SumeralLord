@@ -14,6 +14,37 @@ export interface UserPublic {
   matches: number;
   wins: number;
   flag: number;
+  /** 当前积分（一位小数；注册默认 100） */
+  score: number;
+}
+
+/** 单玩家单局积分结算明细（match_history.score_changes 数组元素） */
+export interface ScoreChangeEntry {
+  playerId: number;
+  /** 实际结算结果：中途离线者即使队伍获胜也为 lose（见 offline 标记） */
+  result: 'win' | 'lose';
+  /** 结算时刻离线（断线未重连） */
+  offline: boolean;
+  oldScore: number;
+  delta: number;
+  newScore: number;
+}
+
+/** 排行榜单行（score/matches 二榜共用） */
+export interface LeaderboardEntry {
+  id: number;
+  username: string;
+  flag: number;
+  score: number;
+  matches: number;
+  /** 榜单内为行号 1..100；me 为严格大于计数 + 1（允许并列同名次） */
+  rank: number;
+}
+
+/** 排行榜响应：Top100 列表 + 当前账号（含 rank，不在榜时按严格大于计数计算） */
+export interface LeaderboardResult {
+  list: LeaderboardEntry[];
+  me: LeaderboardEntry | null;
 }
 
 export interface LoginResult {
@@ -197,6 +228,8 @@ export interface MatchRecord {
   winningTeam: number;
   /** 参战者快照 [{ seat, playerId, isAI }] */
   participants: Array<{ seat: number; playerId: number | null; isAI: boolean }>;
+  /** 本局积分结算明细（每人一项；平局/旧记录为 []） */
+  scoreChanges: ScoreChangeEntry[];
   /** 共识中止（不结算） */
   aborted: boolean;
 }

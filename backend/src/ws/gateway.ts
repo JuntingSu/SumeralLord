@@ -31,6 +31,7 @@ import { DisconnectWatch } from '../game/disconnectWatch.js';
 import type { TicketService } from '../auth/ticket.js';
 import { createRateLimiter } from '../utils/rateLimit.js';
 import { config } from '../config.js';
+import { settleMatch } from '../stats/settlement.js';
 
 const HEARTBEAT_SWEEP_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 60_000;
@@ -455,10 +456,13 @@ export class WsGateway {
       this.games.addClearedSeat(game, payload.seat);
       return;
     }
-    // VICTORY：对局结束 + 结算记录 + GAME_OVER（同 eventId 序）
+    // VICTORY：对局结束 + 结算记录 + 积分结算 + GAME_OVER（同 eventId 序）
     this.disconnectWatch.clearGame(game.id);
     this.games.markFinished(game);
-    this.games.recordMatchHistory(game, payload.winners, payload.winningTeam, Date.now());
+    const finishedAt = Date.now();
+    this.games.recordMatchHistory(game, payload.winners, payload.winningTeam, finishedAt);
+    // 结算在 recordMatchHistory 之后（回填其 score_changes 行）；此时对局流已含全部 INTENT_BROADCAST，步数统计准确
+    settleMatch(this.app.db, this.games, game, payload.winners);
     const overEventId = this.games.allocateEventId(game);
     const over: GameOverMsg = {
       type: 'GAME_OVER',

@@ -213,6 +213,26 @@ export class GameManager {
     return { start, events: paged, nextCursor: events.length > limit ? last : 0 };
   }
 
+  /** 回放步数口径：对局流中 INTENT_BROADCAST 条数（= 回放页「N 意图」；GAME_START/CONSENSUS_CONFIRMED/GAME_OVER 不计入） */
+  countReplaySteps(game: Game): number {
+    let lines: string[] = [];
+    try {
+      lines = readFileSync(game.logFile, 'utf8').split('\n').filter(Boolean);
+    } catch {
+      return 0;
+    }
+    let steps = 0;
+    for (const line of lines) {
+      try {
+        const msg = JSON.parse(line) as { type?: string };
+        if (msg.type === 'INTENT_BROADCAST') steps += 1;
+      } catch {
+        // 坏行跳过
+      }
+    }
+    return steps;
+  }
+
   markFinished(game: Game): void {
     game.status = 'finished';
   }

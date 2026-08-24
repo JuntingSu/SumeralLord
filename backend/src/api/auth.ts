@@ -13,8 +13,15 @@ export interface AuthPluginOptions {
   loginPerMin?: number;
 }
 
-function toUserPublic(row: UserRow): UserPublic {
-  return { id: row.id, username: row.username, matches: row.matches, wins: row.wins, flag: row.defaultFlag };
+export function toUserPublic(row: UserRow): UserPublic {
+  return {
+    id: row.id,
+    username: row.username,
+    matches: row.matches,
+    wins: row.wins,
+    flag: row.defaultFlag,
+    score: row.score,
+  };
 }
 
 export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (app, opts) => {
