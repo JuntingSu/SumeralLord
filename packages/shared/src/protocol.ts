@@ -254,6 +254,13 @@ export type ConsensusPayload = z.infer<typeof ConsensusPayloadSchema>;
 /** consensusId 严格格式：{触发意图eventId}:{nodeType}:{受影响seat} */
 export const CONSENSUS_ID_PATTERN = /^\d+:(force_clear|victory):\d+$/;
 
+/**
+ * 非意图消息的独立序号（refId）：不占用意图 eventId 整数序列，避免在意图流中制造空洞。
+ * 格式：共识 = "{触发意图eventId}*"（对 N 号意图的共识）；终局 = "end"。
+ */
+export const consensusRefId = (triggerEventId: number): string => `${triggerEventId}*`;
+export const GAME_OVER_REF_ID = 'end';
+
 // ---------- WS 客户端 → 服务器 ----------
 
 export const IntentSubmitSchema = z.object({
@@ -310,7 +317,8 @@ export interface ConsensusConfirmedMsg {
   type: 'CONSENSUS_CONFIRMED';
   consensusId: string;
   confirmed: ConsensusPayload;
-  eventId: number;
+  /** 非意图独立序号："{触发意图eventId}*"（不占用意图 eventId 序列） */
+  refId: string;
 }
 
 /** 对局结束时各势力会话结果（服务器会话账本，非游戏演算；前端结算以本地 reducer 状态为准） */
@@ -328,7 +336,8 @@ export interface GameOverMsg {
   winners: string[];
   winningTeam: number;
   forces: ForceResult[];
-  eventId: number;
+  /** 非意图独立序号：终局固定 "end"（不占用意图 eventId 序列） */
+  refId: string;
 }
 
 export interface TimeSyncMsg {

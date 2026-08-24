@@ -150,7 +150,10 @@ export class GameManager {
     appendFileSync(game.logFile, JSON.stringify(msg) + '\n');
   }
 
-  /** 按 eventId 顺序读对局流；after 过滤，limit 分页，返回 nextCursor（0 = 无更多） */
+  /** 按存储序（广播序 = 写入序）读对局流：
+   *  意图消息按 eventId>after 过滤；非意图消息（共识/终局，携带 refId 串）始终包含
+   *  （重连清共识账本用；前端补发对无 intent 的消息会跳过）。limit 分页；
+   *  nextCursor = 全量最后一个意图 eventId（0 = 无更多）。 */
   readEvents(gameId: string, after: number, limit: number): { events: Array<Record<string, unknown>>; nextCursor: number } {
     const game = this.games.get(gameId);
     if (!game) return { events: [], nextCursor: 0 };
@@ -161,19 +164,25 @@ export class GameManager {
       return { events: [], nextCursor: 0 };
     }
     const events: Array<Record<string, unknown>> = [];
+    let lastIntent = 0;
     for (const line of lines) {
       try {
         const msg = JSON.parse(line) as Record<string, unknown>;
-        if (typeof msg.eventId === 'number' && msg.eventId > after) events.push(msg);
+        if (typeof msg.eventId === 'number') {
+          if (msg.eventId > after) {
+            events.push(msg);
+            lastIntent = msg.eventId;
+          }
+        } else if (typeof msg.refId === 'string') {
+          events.push(msg);
+        }
       } catch {
         // 坏行跳过
       }
     }
-    events.sort((a, b) => Number(a.eventId) - Number(b.eventId));
     const paged = events.slice(0, limit);
-    const last = paged.length > 0 ? Number(paged[paged.length - 1].eventId) : 0;
     const hasMore = events.length > limit;
-    return { events: paged, nextCursor: hasMore ? last : 0 };
+    return { events: paged, nextCursor: hasMore ? lastIntent : 0 };
   }
 
   /** 读对局日志（BM7a 回放）：首行 GAME_START + 从 after 起的对局流分页（内存无关，日志文件即数据源） */
@@ -199,18 +208,25 @@ export class GameManager {
       }
     }
     const events: Array<Record<string, unknown>> = [];
+    let lastIntent = 0;
     for (const line of lines) {
       try {
         const msg = JSON.parse(line) as Record<string, unknown>;
-        if (typeof msg.eventId === 'number' && msg.eventId > after) events.push(msg);
+        if (typeof msg.eventId === 'number') {
+          if (msg.eventId > after) {
+            events.push(msg);
+            lastIntent = msg.eventId;
+          }
+        } else if (typeof msg.refId === 'string') {
+          events.push(msg);
+        }
       } catch {
         // 坏行跳过
       }
     }
-    events.sort((a, b) => Number(a.eventId) - Number(b.eventId));
     const paged = events.slice(0, limit);
-    const last = paged.length > 0 ? Number(paged[paged.length - 1].eventId) : 0;
-    return { start, events: paged, nextCursor: events.length > limit ? last : 0 };
+    const hasMore = events.length > limit;
+    return { start, events: paged, nextCursor: hasMore ? lastIntent : 0 };
   }
 
   markFinished(game: Game): void {

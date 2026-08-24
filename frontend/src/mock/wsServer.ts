@@ -65,9 +65,13 @@ export function defaultMockSeats(): SeatAssignment[] {
   ];
 }
 
-/** Mock 对局事件日志项（与真实 JSONL 单行同构） */
+/** Mock 对局事件日志项（与真实 JSONL 单行同构）：
+ *  意图消息带 eventId（整数序）；非意图消息（共识/终局）带 refId（不占意图序） */
 interface LogEntry {
-  eventId: number;
+  /** 意图 eventId；非意图消息为 null */
+  eventId: number | null;
+  /** 非意图独立序号（"{触发意图eventId}*" / "end"）；意图消息为 undefined */
+  refId?: string;
   msg: RoomServerMsg;
 }
 
@@ -138,16 +142,17 @@ export class MockWsServer implements GameTransport {
     this.emit(broadcast);
   }
 
-  /** 共识上报（P2）：延迟回 CONSENSUS_CONFIRMED（模拟其他端全票一致） */
+  /** 共识上报（P2）：延迟回 CONSENSUS_CONFIRMED（refId = "{触发意图eventId}*"，不占意图序） */
   submitConsensus(consensusId: string, result: unknown): void {
     if (this.closed) return;
     const parsed = ConsensusPayloadSchema.safeParse(result);
     if (!parsed.success) return;
     window.setTimeout(() => {
       if (this.closed) return;
-      const eventId = ++this.eventId;
-      const msg: RoomServerMsg = { type: 'CONSENSUS_CONFIRMED', consensusId, confirmed: parsed.data, eventId };
-      this.log.push({ eventId, msg });
+      const triggerEventId = Number(consensusId.split(':')[0]);
+      const refId = `${triggerEventId}*`;
+      const msg: RoomServerMsg = { type: 'CONSENSUS_CONFIRMED', consensusId, confirmed: parsed.data, refId };
+      this.log.push({ eventId: null, refId, msg });
       this.emit(msg);
     }, this.opts.consensusDelayMs ?? 100);
   }
@@ -164,7 +169,7 @@ export class MockWsServer implements GameTransport {
 
   sendReconnect(lastEventId: number, _gameId: string): void {
     const batch = this.log
-      .filter((e) => e.eventId > lastEventId)
+      .filter((e) => (e.eventId !== null && e.eventId > lastEventId) || e.refId !== undefined)
       .map((e) => e.msg as unknown as Record<string, unknown>);
     this.emit({ type: 'RECONNECT_ACK', gameId: this.gameId, lastEventId: this.eventId, batch });
   }
@@ -179,9 +184,11 @@ export class MockWsServer implements GameTransport {
     after: number,
     limit = 500,
   ): Promise<{ events: Array<Record<string, unknown>>; nextCursor: number }> {
-    const pending = this.log.filter((e) => e.eventId > after);
+    const pending = this.log.filter((e) => (e.eventId !== null && e.eventId > after) || e.refId !== undefined);
     const events = pending.slice(0, limit).map((e) => e.msg as unknown as Record<string, unknown>);
-    return { events, nextCursor: pending.length > limit ? pending[limit - 1].eventId : 0 };
+    let lastIntent = 0;
+    for (const e of pending) if (e.eventId !== null) lastIntent = e.eventId;
+    return { events, nextCursor: pending.length > limit ? lastIntent : 0 };
   }
 
   /** Mock 开局构造（与真实 GAME_START 同构；reducer 初始化由前端执行） */
