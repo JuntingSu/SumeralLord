@@ -66,6 +66,11 @@ function encodePng(width, height, pixelAt) {
 const COLORS = [
   '#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#9b5de5',
   '#f15bb5', '#00bbf9', '#83c5be', '#b56576',
+  '#ff6d00', '#8e44ad', '#16a085', '#e67e22', '#2980b9',
+  '#c0392b', '#27ae60', '#7d3c98', '#1abc9c', '#f39c12',
+  '#34495e', '#e84393', '#00b894', '#6c5ce7', '#fdcb6e',
+  '#e17055', '#0984e3', '#55efc4', '#d63031', '#00cec9',
+  '#ffeaa7',
 ];
 
 const W = 192;

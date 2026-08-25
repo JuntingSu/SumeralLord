@@ -316,7 +316,7 @@ export default function BoardCanvas({
       hollow.src = `/static/flags/flag_${n}_hollow.png`;
       spritesRef.current[String(n)] = { solid, hollow };
     };
-    for (let n = 1; n <= 9; n++) load(n);
+    for (let n = 1; n <= 30; n++) load(n);
   }, []);
 
   /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；hollow=true 用镂空 sprite 露出地形，未加载时擦边回退） */

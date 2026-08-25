@@ -60,11 +60,24 @@ const IO = (() => {
     return (url || '').replace(/\/+$/, '');
   }
 
-  /** 保存到服务器 maps-uncensored 审查队列 */
+  /** 当前登录 token（主程序 localStorage 的 dl_token；与 auth/client.ts 一致） */
+  function authToken() {
+    try {
+      return typeof localStorage !== 'undefined' ? localStorage.getItem('dl_token') : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 保存到服务器：达标玩家直存 maps，其余走 maps-uncensored 审查队列 */
   async function saveToServer(baseUrl, id, map) {
+    const token = authToken();
     const resp = await fetch(`${base(baseUrl)}/api/maps`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ id, map: MapData.serialize(map) }),
     });
     const result = await resp.json().catch(() => ({}));

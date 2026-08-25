@@ -48,8 +48,8 @@ const MapConst = (() => {
   const DEFAULT_STRENGTH = 5;
   const DEFAULT_SERVER = 'http://127.0.0.1:3000';
 
-  /** 有图片的旗帜编号（static/flags/flag_N.png 实心 + flag_N_hollow.png 镂空；45753/45754 为新增自定义旗） */
-  const FLAG_IMAGE_NUMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 45753, 45754];
+  /** 有图片的旗帜编号（static/flags/flag_N.png 实心 + flag_N_hollow.png 镂空；1..30 为标准纯色旗） */
+  const FLAG_IMAGE_NUMS = Array.from({ length: 30 }, (_, i) => i + 1);
 
   /** 旗帜实心文件 URL；无对应文件的旗号返回 ''（回退纯色） */
   function flagImage(flag) {

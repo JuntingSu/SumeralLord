@@ -1,4 +1,4 @@
-// 积分系统集成测试：注册 100 分 → VICTORY 结算 → 步数>100 对局数 → 离线按败方 → 中止/平局不结算 → 历史/排行榜
+// 积分系统集成测试：注册 100 分 → VICTORY 结算 → 步数>25 对局数 → 离线按败方 → 中止/平局不结算 → 历史/排行榜
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { AddressInfo } from 'node:net';
@@ -166,7 +166,7 @@ beforeAll(async () => {
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
   port = (app.server.address() as AddressInfo).port;
-  for (const name of ['alice', 'bob', 'carol', 'eve', 'frank', 'grace', 'henry', 'zeta']) await newUser(name);
+  for (const name of ['alice', 'bob', 'carol', 'eve', 'frank', 'grace', 'henry', 'zeta', 'ivan', 'judy']) await newUser(name);
 });
 
 afterAll(async () => {
@@ -202,7 +202,7 @@ describe('VICTORY 完整结算（0 和）', () => {
     const [eve, frank] = await Promise.all([me('eve'), me('frank')]);
     expect(eve.score).toBe(110);
     expect(frank.score).toBe(90);
-    expect(eve.matches).toBe(0); // 0 步 < 100，对局数不加
+    expect(eve.matches).toBe(0); // 0 步 < 25，对局数不加
     expect(frank.matches).toBe(0);
 
     const rows = app.db.select().from(matchHistory).where(eq(matchHistory.gameId, gameId)).all();
@@ -216,8 +216,8 @@ describe('VICTORY 完整结算（0 和）', () => {
   });
 });
 
-describe('步数 > 100 → 对局数 +1（观战者不计）', () => {
-  it('先发 101 条 SWITCH_PHASE 意图再 VICTORY → 双方 matches+1，观战者 carol 不变', async () => {
+describe('步数 > 25 → 对局数 +1（观战者不计）', () => {
+  it('先发 26 条 SWITCH_PHASE 意图再 VICTORY → 双方 matches+1，观战者 carol 不变', async () => {
     const roomId = await setupRoom('alice', 'bob');
     // carol 以观战身份加入（不参与对局与结算）
     const join = await app.inject({
@@ -232,7 +232,7 @@ describe('步数 > 100 → 对局数 +1（观战者不计）', () => {
     await startGame(roomId, 'alice');
     await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
 
-    for (let i = 1; i <= 101; i++) {
+    for (let i = 1; i <= 26; i++) {
       a.send({ type: 'INTENT_SUBMIT', clientTempId: `s${i}`, intent: { intentType: 'SWITCH_PHASE' } });
       await a.waitFor((m) => m.type === 'INTENT_ACK' && m.clientTempId === `s${i}`);
     }
@@ -244,6 +244,28 @@ describe('步数 > 100 → 对局数 +1（观战者不计）', () => {
     expect(alice.matches).toBe(1);
     expect(bob.matches).toBe(1);
     expect(carol.matches).toBe(0);
+  });
+});
+
+describe('步数恰好 25 → 对局数不加（阈值 > 25）', () => {
+  it('先发 25 条 SWITCH_PHASE 意图再 VICTORY → 双方 matches 保持 0', async () => {
+    const roomId = await setupRoom('ivan', 'judy');
+    const a = await wsConnect(roomId, 'ivan');
+    const b = await wsConnect(roomId, 'judy');
+    await startGame(roomId, 'ivan');
+    await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
+
+    for (let i = 1; i <= 25; i++) {
+      a.send({ type: 'INTENT_SUBMIT', clientTempId: `s${i}`, intent: { intentType: 'SWITCH_PHASE' } });
+      await a.waitFor((m) => m.type === 'INTENT_ACK' && m.clientTempId === `s${i}`);
+    }
+    await reportVictory(a, b, [String(users.get('ivan')!.id)]);
+    a.close();
+    b.close();
+
+    const [ivan, judy] = await Promise.all([me('ivan'), me('judy')]);
+    expect(ivan.matches).toBe(0);
+    expect(judy.matches).toBe(0);
   });
 });
 
@@ -352,13 +374,16 @@ describe('排行榜', () => {
     app.db.update(usersTable).set({ score: 100, matches: 0 }).where(eq(usersTable.id, users.get('grace')!.id)).run();
     app.db.update(usersTable).set({ score: 90, matches: 0 }).where(eq(usersTable.id, users.get('henry')!.id)).run();
     app.db.update(usersTable).set({ score: 100, matches: 0 }).where(eq(usersTable.id, users.get('zeta')!.id)).run();
+    // 阈值边界测试用户（ivan/judy）复位为基准值，避免影响榜单
+    app.db.update(usersTable).set({ score: 100, matches: 0 }).where(eq(usersTable.id, users.get('ivan')!.id)).run();
+    app.db.update(usersTable).set({ score: 100, matches: 0 }).where(eq(usersTable.id, users.get('judy')!.id)).run();
 
-    // 积分榜：bob(300) > eve(200) > frank(150) > carol(120) > grace(100)/zeta(100,id 靠后) > henry(90) > alice(50)
+    // 积分榜：bob(300) > eve(200) > frank(150) > carol(120) > grace/zeta/ivan/judy(100,id 升序) > henry(90) > alice(50)
     const scoreRes = await app.inject({ method: 'GET', url: '/api/leaderboard/score', headers: auth('eve') });
     expect(scoreRes.statusCode).toBe(200);
     const scoreBoard = scoreRes.json().data;
     expect(scoreBoard.list.map((e: { username: string }) => e.username)).toEqual([
-      'bob', 'eve', 'frank', 'carol', 'grace', 'zeta', 'henry', 'alice',
+      'bob', 'eve', 'frank', 'carol', 'grace', 'zeta', 'ivan', 'judy', 'henry', 'alice',
     ]);
     expect(scoreBoard.list[0]).toMatchObject({ username: 'bob', rank: 1, score: 300 });
     expect(scoreBoard.list[1]).toMatchObject({ username: 'eve', rank: 2, score: 200 });
@@ -370,7 +395,7 @@ describe('排行榜', () => {
     expect(matchRes.statusCode).toBe(200);
     const matchBoard = matchRes.json().data;
     expect(matchBoard.list.map((e: { username: string }) => e.username)).toEqual([
-      'frank', 'carol', 'eve', 'alice', 'bob', 'grace', 'henry', 'zeta',
+      'frank', 'carol', 'eve', 'alice', 'bob', 'grace', 'henry', 'zeta', 'ivan', 'judy',
     ]);
     expect(matchBoard.me).toMatchObject({ username: 'eve', rank: 3, matches: 5 });
 

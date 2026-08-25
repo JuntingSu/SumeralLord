@@ -12,8 +12,9 @@
   <div class="brand">🗺 数字领主 · 地图编辑器 <a id="btn-back-lobby" href="/lobby" style="display:none" class="back">← 返回大厅</a></div>
   <div class="grp">
     <button id="btn-new" title="新建地图">新建</button>
-    <button id="btn-open" title="从本地 JSON 文件打开">打开</button>
+    <button id="btn-open" title="从本地 JSON 文件导入编辑">📂 本地导入</button>
     <input type="file" id="file-open" accept=".json,application/json" hidden>
+    <button id="btn-mapcode" title="从地图码（base64）导入编辑">🎴 地图码导入</button>
     <div id="server-search-wrap">
       <input id="server-map-search" size="20" placeholder="搜索服务器地图" title="按标题/作者/简介/标签搜索">
       <button id="btn-server-search" title="按标题/作者/简介/标签搜索服务器地图">🔍</button>
@@ -24,7 +25,7 @@
     <label class="server" id="server-field">服务器
       <input id="server-url" size="22" placeholder="http://127.0.0.1:3000">
     </label>
-    <button id="btn-save" title="保存到服务器 maps-uncensored 审查队列">💾 保存到服务器</button>
+    <button id="btn-save" title="保存到服务器（对局数>15 或积分>150 时直存正式地图，否则进审查队列）">💾 保存到服务器</button>
     <button id="btn-export" title="导出为 JSON 文件下载">📥 导出 JSON</button>
   </div>
   <div id="status" class="status">就绪</div>
@@ -160,8 +161,19 @@
   </div>
 </dialog>
 
+<dialog id="dlg-mapcode">
+  <h3>从地图码导入</h3>
+  <p class="hint">粘贴旧版地图编辑器导出的地图码（base64 字符串）。将自动转换为本游戏地图：删除星星模式、地形码映射、玩家旗帜重编号（1..30）。</p>
+  <textarea id="mapcode-input" rows="5" placeholder="粘贴地图码…" spellcheck="false"></textarea>
+  <div class="dlg-btns">
+    <button id="dlg-mapcode-cancel">取消</button>
+    <button id="dlg-mapcode-ok" class="primary">导入</button>
+  </div>
+</dialog>
+
 <script src="js/constants.js"></script>
 <script src="js/mapdata.js"></script>
+<script src="js/mapcode.js"></script>
 <script src="js/render.js"></script>
 <script src="js/validate.js"></script>
 <script src="js/generator.js"></script>

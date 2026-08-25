@@ -22,7 +22,7 @@ const Players = (() => {
     list.forEach((p) => {
       const row = document.createElement('div');
       row.className = 'prow';
-      // 旗号 0 为无图片兜底（纯色），其余为有图片的旗号（1-9 + 自定义 45753/45754）
+      // 旗号 0 为无图片兜底（纯色），其余为有图片的旗号（1..30 标准纯色旗）
       const flagOptions = [0, ...MapConst.FLAG_IMAGE_NUMS];
       row.innerHTML = `
         <button class="p-drag" title="按住并上下拖动，调整座次">⇕</button>

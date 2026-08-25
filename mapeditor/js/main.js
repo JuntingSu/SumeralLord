@@ -363,6 +363,24 @@
     e.target.value = '';
     if (file) loadFile(file);
   });
+
+  // 地图码导入：base64 解码 → 适配为本游戏 JSON 地图载入编辑器
+  $('btn-mapcode').addEventListener('click', () => $('dlg-mapcode').showModal());
+  $('dlg-mapcode-cancel').addEventListener('click', () => $('dlg-mapcode').close());
+  $('dlg-mapcode-ok').addEventListener('click', async () => {
+    const code = $('mapcode-input').value.trim();
+    if (!code) { statusMsg('请先粘贴地图码', 'error'); return; }
+    statusMsg('解析地图码中…');
+    const res = await MapCode.decodeMapCode(code);
+    if (!res.ok) { statusMsg(res.error, 'error'); return; }
+    const errors = MapValidate.validate(res.map).filter((i) => i.level === 'error');
+    Editor.setMap(res.map, MapData.randomId());
+    $('dlg-mapcode').close();
+    $('mapcode-input').value = '';
+    statusMsg(errors.length
+      ? `已从地图码导入「${res.map.title || '未命名'}」（${errors.length} 处校验问题，请检查）`
+      : `已从地图码导入「${res.map.title || '未命名'}」`);
+  });
   function loadFile(file) {
     const reader = new FileReader();
     reader.onload = () => {
@@ -372,7 +390,7 @@
         return;
       }
       Editor.setMap(res.map, MapData.randomId());
-      statusMsg(`已打开 ${file.name}`);
+      statusMsg(`已导入 ${file.name}`);
     };
     reader.readAsText(file);
   }
@@ -407,8 +425,11 @@
     statusMsg('保存中…');
     try {
       const res = await IO.saveToServer(serverUrl(), id, s.map);
-      if (res.ok) statusMsg(`已保存到服务器 maps-uncensored/${id}.json`);
-      else statusMsg(`保存失败：${res.result.message || 'HTTP ' + res.status}`, 'error');
+      if (res.ok) {
+        const savedTo = res.result?.data?.savedTo || 'maps-uncensored';
+        const reason = res.result?.data?.reason;
+        statusMsg(reason ? `已保存到服务器 ${savedTo}/${id}.json（${reason}）` : `已保存到服务器 ${savedTo}/${id}.json`);
+      } else statusMsg(`保存失败：${res.result.message || 'HTTP ' + res.status}`, 'error');
     } catch (e) {
       statusMsg(`保存失败：${e.message}（请检查服务器地址）`, 'error');
     }

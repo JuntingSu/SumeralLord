@@ -102,7 +102,7 @@ export interface SettlementResult {
 
 /**
  * 编排：读结算时刻积分快照 → 算结算明细 → 回填 score_changes + 更新积分/对局数（同一事务）。
- * 对局数口径与积分独立：steps > 100 才 +1（含离线者、含平局）；观战者/AI 不计入。
+ * 对局数口径与积分独立：steps > 25 才 +1（含离线者、含平局）；观战者/AI 不计入。
  */
 export function settleMatch(
   db: Db,
@@ -131,7 +131,7 @@ export function settleMatch(
   const scoreChanges = winners.length === 0 ? [] : computeScoreChanges(players);
 
   const steps = games.countReplaySteps(game);
-  const matchCounted = steps > 100;
+  const matchCounted = steps > 25;
 
   // 回填与更新同事务：失败整体回滚，避免「对局数加了但积分没写」半截状态
   db.transaction((tx) => {
