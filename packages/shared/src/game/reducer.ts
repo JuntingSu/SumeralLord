@@ -155,20 +155,27 @@ function despawnEvent(ctx: Ctx, tile: number): void {
 
 // ---------- 三级事件（§8.3） ----------
 
-/** 重连（§8.3.1）：目标地块及周围同势力兵若连断并存，将断兵全部变连（级联传播） */
+/** 重连（§8.3.1）：目标地块及周围同势力兵若连断并存，将断兵全部变连（级联传播）。
+ *  实现澄清（§4.1 连兵性）：只有与连兵【直接相邻】的兵才变连——连兵链不能含断兵，
+ *  海洋（半断）等永远断兵的兵不构成链桥，不能把桥另一侧的兵一并判连。 */
 function rejoinEvent(ctx: Ctx, tile: number): void {
   ctx.chain.push({ level: 3, kind: 'REJOIN', tile });
   const cur = ctx.state.tiles[tile].soldier;
   if (!cur) return;
+  const owner = cur.owner;
   const group = [tile, ...neighborsOf(tile, ctx.geo)].filter((t) => {
     const s = ctx.state.tiles[t].soldier;
-    return s !== null && sameConnectivityOwner(s.owner, cur.owner);
+    return s !== null && sameConnectivityOwner(s.owner, owner);
   });
   if (!group.some((t) => ctx.state.tiles[t].soldier!.isLinked)) return;
   for (const t of [...group].sort((a, b) => a - b)) {
     const s = ctx.state.tiles[t].soldier;
-    if (s && sameConnectivityOwner(s.owner, cur.owner) && !s.isLinked) {
-      updateEvent(ctx, t, { isLinked: true });
+    if (s && sameConnectivityOwner(s.owner, owner) && !s.isLinked) {
+      const hasLinkedNeighbor = neighborsOf(t, ctx.geo).some((n) => {
+        const ns = ctx.state.tiles[n].soldier;
+        return ns !== null && sameConnectivityOwner(ns.owner, owner) && ns.isLinked;
+      });
+      if (hasLinkedNeighbor) updateEvent(ctx, t, { isLinked: true });
     }
   }
 }
