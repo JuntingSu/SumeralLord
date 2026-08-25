@@ -56,6 +56,13 @@ export default function ResultModal({
     if (playerId === null) return null;
     return participantBySeat.get(seat)?.username ?? playerNames.get(playerId) ?? null;
   };
+  // 胜者玩家名映射（forces 提供 seat↔playerId；未知时兜底 #id）
+  const nameByPlayerId = new Map<number, string>();
+  for (const f of forces) {
+    if (f.playerId === null) continue;
+    nameByPlayerId.set(f.playerId, playerNameOf(f.seat, f.playerId) ?? `#${f.playerId}`);
+  }
+  const winnerNames = winners.map((id) => nameByPlayerId.get(Number(id)) ?? id);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-[32rem] rounded-xl bg-slate-800 p-6 shadow-2xl">
@@ -63,7 +70,7 @@ export default function ResultModal({
           {winners.length > 0 ? '🎉 对局结束' : '对局结束（平局）'}
         </h2>
         <p className="mt-2 text-center text-sm text-slate-300">
-          胜利：<span className="font-medium text-emerald-300">{winners.length > 0 ? winners.join('、') : '无'}</span>
+          胜利：<span className="font-medium text-emerald-300">{winnerNames.length > 0 ? winnerNames.join('、') : '无'}</span>
           {gameOver.winningTeam > 0 && <span className="ml-2 text-xs text-slate-500">（队伍 {gameOver.winningTeam}）</span>}
         </p>
 
