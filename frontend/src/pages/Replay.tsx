@@ -36,7 +36,7 @@ export default function Replay() {
   const [cursor, setCursor] = useState(0);
   const [total, setTotal] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(4);
   const [replaying, setReplaying] = useState(false);
 
   const animatorRef = useRef<EventAnimator | null>(null);
@@ -101,6 +101,7 @@ export default function Replay() {
             queueRef.current = queueRef.current.slice(1);
           },
         );
+        animatorRef.current.setSpeed(4); // 默认 4 倍速演出
         const b = initState({
           map: log.start.map,
           seatAssignments: log.start.seatAssignments,

@@ -417,7 +417,8 @@ export const useGame = create<GameStore>((set, get) => {
 
     sendChat: (text) => {
       const s = get();
-      if (s.isSpectator || s.gameOver || s.fatal) return false;
+      // 观战可发言（后端不限制观战 CHAT）；对局结束/中止后不发言
+      if (s.gameOver || s.fatal) return false;
       return s.transport?.sendChat(text) ?? false;
     },
 

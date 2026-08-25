@@ -36,7 +36,7 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
     <div className="relative">
       <input
         id={id}
-        className="w-full rounded bg-slate-700 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+        className="w-full rounded bg-slate-700 px-3 py-2 pr-8 text-white outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
         value={query}
         disabled={disabled}
         autoComplete="off"
@@ -49,6 +49,24 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
           if (selected && !matchesQuery(selected, text)) onChange('');
         }}
       />
+      {query && !disabled && (
+        <button
+          type="button"
+          aria-label="清空输入"
+          title="清空输入"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            setQuery('');
+            onChange('');
+            setOpen(false);
+          }}
+          className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full bg-slate-500/70 text-slate-200 transition-colors hover:bg-slate-400"
+        >
+          <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />
+          </svg>
+        </button>
+      )}
       {open && !disabled && (
         <ul
           role="listbox"

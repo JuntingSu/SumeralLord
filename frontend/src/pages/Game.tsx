@@ -19,7 +19,7 @@ import { computeFog, type FogLevel } from '../game/fog';
 import { formatClock } from '../game/timer';
 import { EventAnimator } from '../canvas/animator';
 import BoardCanvas from '../components/BoardCanvas';
-import Chat from '../components/Chat';
+import GameChat from '../components/GameChat';
 import ResultModal from './Result';
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
@@ -43,6 +43,7 @@ export default function Game() {
   const connection = useGame((s) => s.connection);
   const timer = useGame((s) => s.timer);
   const opponentClocks = useGame((s) => s.opponentClocks);
+  const timeSettings = useGame((s) => s.timeSettings);
   const gameOver = useGame((s) => s.gameOver);
   const fatal = useGame((s) => s.fatal);
   const disconnectedSeats = useGame((s) => s.disconnectedSeats);
@@ -58,6 +59,8 @@ export default function Game() {
     accumulated: 0,
     lastSend: 0,
   });
+  /** 侧边栏简略模式（默认开启：仅旗帜+势力名+点数+倒计时进度条，浮在棋盘上） */
+  const [compactSidebar, setCompactSidebar] = useState(true);
 
   // ---------- 回合/阶段提示浮层（我的回合/行动/加点开始时居中展示，0.7s 后淡出） ----------
   const phaseAnnouncements = useGame((s) => s.phaseAnnouncements);
@@ -100,16 +103,16 @@ export default function Game() {
     };
   }, [announceText]);
 
-  // ---------- 动画播放器（M5.1）：驱动 eventQueue 逐链演出；board 权威不变 ----------
+  // ---------- 动画播放器（M5.1）：驱动 eventQueue 逐链演出；board 权威不变。固定 4 倍速，无倍速调节 ----------
   const animatorRef = useRef<EventAnimator | null>(null);
   if (animatorRef.current === null) {
     animatorRef.current = new EventAnimator(
       () => useGame.getState().eventQueue,
       () => useGame.getState().popChain(),
     );
+    animatorRef.current.setSpeed(4);
   }
   const [animPaused, setAnimPaused] = useState(false);
-  const [animSpeed, setAnimSpeed] = useState(1);
   /** 演出中（粗粒度同步，仅变化时 setState；操作守卫用 ref 实时判断） */
   const [animating, setAnimating] = useState(false);
   useEffect(() => {
@@ -119,10 +122,6 @@ export default function Game() {
     }, 200);
     return () => window.clearInterval(iv);
   }, []);
-  const setPlaySpeed = (v: number) => {
-    animatorRef.current?.setSpeed(v);
-    setAnimSpeed(v);
-  };
   const togglePause = () => {
     const next = !animPaused;
     animatorRef.current?.setPaused(next);
@@ -133,6 +132,16 @@ export default function Game() {
     animatorRef.current?.reset();
     useGame.getState().clearEventQueue();
   };
+
+  // 断线重连检测：本会话重连成功后标记为「重连者」（与观战者一样可一键跳转至现在）
+  const [reconnected, setReconnected] = useState(false);
+  const openedOnceRef = useRef(false);
+  useEffect(() => {
+    if (connection === 'open') {
+      if (openedOnceRef.current) setReconnected(true);
+      openedOnceRef.current = true;
+    }
+  }, [connection]);
 
   // ---------- 传输通道 + 初始化（挂载时一次） ----------
   // 初始化路径：
@@ -161,7 +170,10 @@ export default function Game() {
               fogMode: useRoom.getState().room?.fogMode ?? false,
             });
             const g = useGame.getState();
-            if ((msg.lastEventId ?? 0) > g.appliedEventId) g.reconnectCatchUp();
+            if ((msg.lastEventId ?? 0) > g.appliedEventId) {
+              setReconnected(true); // 刷新/新加入追平：视同重连，提供跳转至现在
+              g.reconnectCatchUp();
+            }
           } catch {
             navigate('/lobby', { replace: true });
           }
@@ -169,7 +181,10 @@ export default function Game() {
         return;
       }
       // board 已就绪（Room 跳转路径）：若服务器已有本端未应用的事件 → 重放追平
-      if ((msg.lastEventId ?? 0) > s.appliedEventId) s.reconnectCatchUp();
+      if ((msg.lastEventId ?? 0) > s.appliedEventId) {
+        setReconnected(true);
+        s.reconnectCatchUp();
+      }
     });
     transport.connect().catch(() => undefined);
     return () => {
@@ -367,7 +382,6 @@ export default function Game() {
   }
 
   const currentForce = board.forces.find((f) => f.seat === board.currentSeat);
-  const myForce = mySeat !== null ? board.forces.find((f) => f.seat === mySeat) : null;
   const aliveForces = board.forces.filter((f) => f.exists);
 
   return (
@@ -410,56 +424,127 @@ export default function Game() {
       </header>
 
       <main className="flex flex-1 gap-4 overflow-hidden px-6 py-4">
-        {/* 左状态栏：势力列表 */}
-        <aside className="w-56 shrink-0 space-y-2 overflow-y-auto rounded-lg bg-slate-800 p-3">
-          {aliveForces.map((f) => {
-            const player = room?.players.find((p) => p.id === f.playerId);
-            const isCurrent = f.seat === board.currentSeat;
-            const isMine = f.seat === mySeat;
-            return (
-              <div
-                key={f.seat}
-                className={`rounded border px-3 py-2 ${isCurrent ? 'border-amber-400 bg-slate-700' : 'border-slate-700 bg-slate-800'} ${
-                  !f.alive ? 'opacity-40' : ''
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <img
-                    src={`/static/flags/flag_${f.flag}.png`}
-                    alt=""
-                    className="h-6 w-5 object-contain"
-                    onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
-                  />
-                  <span className="flex-1 truncate text-sm font-medium" style={{ color: seatColor(f.seat) }}>
-                    {f.name}
-                    {isMine ? (
-                      <span className="ml-1 text-xs text-emerald-400">（我）</span>
-                    ) : player ? (
-                      <span className="ml-1 text-xs text-slate-300">（{player.username}）</span>
-                    ) : null}
-                  </span>
-                </div>
-                <div className="mt-1 flex justify-between text-xs text-slate-400">
-                  <span>{!player ? (f.isAI ? 'AI（休闲）' : '—') : ''}</span>
-                  <span>{f.alive ? `点数 ${f.points}` : '已清除'}</span>
-                </div>
-                {isMine && (
-                  <div className="mt-1 flex justify-between text-xs">
-                    <span className="text-slate-400">
-                      步时 <b className={timer.stepTimeRemain < 10 ? 'animate-pulse text-red-400' : 'text-slate-200'}>{formatClock(timer.stepTimeRemain)}</b>
-                    </span>
-                    <span className="text-slate-400">
-                      局时 <b className={timer.gameTimeRemain < 10 ? 'animate-pulse text-red-400' : 'text-slate-200'}>{formatClock(timer.gameTimeRemain)}</b>
+        {/* 完整模式：左侧边栏（四行卡片）；简略模式默认开启时隐藏 */}
+        {!compactSidebar && (
+          <aside className="w-40 shrink-0 space-y-1.5 overflow-y-auto rounded-lg bg-slate-800 p-2">
+            {aliveForces.map((f) => {
+              const player = room?.players.find((p) => p.id === f.playerId);
+              const isCurrent = f.seat === board.currentSeat;
+              const isMine = f.seat === mySeat;
+              const clock =
+                f.seat === mySeat
+                  ? { stepTimeRemain: timer.stepTimeRemain, gameTimeRemain: timer.gameTimeRemain }
+                  : opponentClocks[f.seat];
+              const lowTime =
+                isMine && clock !== undefined && (clock.stepTimeRemain < 10 || clock.gameTimeRemain < 10);
+              return (
+                <div
+                  key={f.seat}
+                  className={`rounded border px-2 py-1.5 ${isCurrent ? 'border-amber-400 bg-slate-700' : 'border-slate-700 bg-slate-800'} ${
+                    !f.alive ? 'opacity-40' : ''
+                  }`}
+                >
+                  {/* 行1：旗帜 + 势力名（"我"保留绿色标记） */}
+                  <div className="flex items-center gap-1.5">
+                    <img
+                      src={`/static/flags/flag_${f.flag}.png`}
+                      alt=""
+                      className="h-5 w-4 object-contain"
+                      onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
+                    />
+                    <span className="flex-1 truncate text-xs font-medium" style={{ color: seatColor(f.seat) }}>
+                      {f.name}
+                      {isMine && <span className="ml-0.5 text-[10px] text-emerald-400">（我）</span>}
                     </span>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </aside>
+                  {/* 行2：扮演玩家 + 当前积分 */}
+                  <div className="mt-0.5 flex items-baseline justify-between gap-1 text-[11px]">
+                    <span className="truncate text-slate-300">{player ? player.username : f.isAI ? 'AI（休闲）' : '—'}</span>
+                    {player && <span className="shrink-0 text-slate-400">{player.score.toFixed(1)}</span>}
+                  </div>
+                  {/* 行3：点数 + 可加点（a 灰色、b 粉色；b = 按连兵数量统计的可支配加点数） */}
+                  <div className="mt-0.5 text-[11px] text-slate-400">
+                    {f.alive ? (
+                      <>
+                        点数 <span className="text-slate-300">{f.points}</span>
+                        <span className="text-pink-400">
+                          (+{board.tiles.filter((t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked).length})
+                        </span>
+                      </>
+                    ) : (
+                      '已清除'
+                    )}
+                  </div>
+                  {/* 行4：步时 + 局时（数据源与逻辑同原「对手计时」） */}
+                  {f.alive && (
+                    <div className={`mt-0.5 text-center text-[11px] tabular-nums ${lowTime ? 'text-red-400' : 'text-slate-300'}`}>
+                      {clock ? `${formatClock(clock.stepTimeRemain)}/${formatClock(clock.gameTimeRemain)}` : '—'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </aside>
+        )}
 
         {/* 中间战场 */}
         <section className="relative min-w-0 flex-1 rounded-lg bg-slate-800/50">
+          {/* 左上角三横杠：切换侧边栏模式（简略 ↔ 完整） */}
+          <button
+            onClick={() => setCompactSidebar((v) => !v)}
+            className="absolute left-2 top-2 z-20 rounded bg-slate-800/80 p-1.5 leading-none text-white shadow hover:bg-slate-700"
+            title={compactSidebar ? '展开完整侧边栏' : '收起为简略模式'}
+            aria-label="切换侧边栏模式"
+          >
+            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M2 4h12M2 8h12M2 12h12" />
+            </svg>
+          </button>
+
+          {/* 简略模式（默认开启）：势力信息浮在棋盘左上角（旗帜+势力名+点数+倒计时进度条） */}
+          {compactSidebar && (
+            <div className="pointer-events-none absolute left-2 top-10 z-10 space-y-1.5">
+              {aliveForces.map((f) => {
+                const isCurrent = f.seat === board.currentSeat;
+                const clock =
+                  f.seat === mySeat
+                    ? { stepTimeRemain: timer.stepTimeRemain, gameTimeRemain: timer.gameTimeRemain }
+                    : opponentClocks[f.seat];
+                const stepPct = clock
+                  ? Math.max(0, Math.min(100, (clock.stepTimeRemain / timeSettings.stepTime) * 100))
+                  : 0;
+                return (
+                  <div
+                    key={f.seat}
+                    className={`flex items-center gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 ${!f.alive ? 'opacity-40' : ''}`}
+                  >
+                    <img
+                      src={`/static/flags/flag_${f.flag}.png`}
+                      alt=""
+                      className="h-5 w-4 object-contain"
+                      onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
+                    />
+                    {/* 名称+点数 与进度条合计高度 = 旗帜高度（h-5） */}
+                    <div className="flex w-28 flex-col justify-between" style={{ height: '1.25rem' }}>
+                      <div className="flex items-baseline gap-1">
+                        <span
+                          className={`truncate text-xs leading-none ${isCurrent ? 'font-bold' : 'font-medium'}`}
+                          style={{ color: seatColor(f.seat) }}
+                        >
+                          {f.name}
+                        </span>
+                        <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
+                      </div>
+                      <div className="h-1 w-full overflow-hidden rounded bg-white/20">
+                        <div className="h-full bg-white" style={{ width: `${stepPct}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <BoardCanvas
             board={board}
             mySeat={mySeat}
@@ -479,7 +564,16 @@ export default function Game() {
             animatorRef={animatorRef}
             className="h-full w-full"
           />
-          {/* 底部提示条 + 演出控制 */}
+          {/* 结束行动/加点：浮在地图区正下方、距底边一段距离 */}
+          {isMyActionTurn && (
+            <button
+              onClick={handleSwitchPhase}
+              className="absolute bottom-14 left-1/2 z-10 -translate-x-1/2 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500"
+            >
+              {phase === 'ACTION' ? '结束行动' : '结束加点'}
+            </button>
+          )}
+          {/* 底部提示条 + 演出控制（固定 4 倍速；仅重连/观战提供跳转至现在） */}
           <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-slate-900/80 px-4 py-2 text-xs text-slate-300">
             <span>
               {animating
@@ -511,77 +605,22 @@ export default function Game() {
                   >
                     单步
                   </button>
-                  {[1, 2, 4].map((v) => (
+                  {(isSpectator || reconnected) && (
                     <button
-                      key={v}
-                      onClick={() => setPlaySpeed(v)}
-                      className={`rounded px-2 py-0.5 hover:bg-slate-600 ${animSpeed === v ? 'bg-slate-600 text-amber-300' : 'bg-slate-700 text-slate-400'}`}
+                      onClick={fastForward}
+                      className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
                     >
-                      {v}x
+                      跳转至现在（{eventQueue.length}）
                     </button>
-                  ))}
-                  <button
-                    onClick={fastForward}
-                    className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
-                  >
-                    快进（{eventQueue.length} 事件）
-                  </button>
+                  )}
                 </>
               )}
             </span>
           </div>
+          {/* 对局内聊天：默认折叠在棋盘右下角仅显示最近一条，点击小三角展开（观战可发言） */}
+          <GameChat chat={chat} onSend={(text) => useGame.getState().sendChat(text)} />
         </section>
-
-        {/* 右栏：己方信息 + 行动 */}
-        <aside className="w-64 shrink-0 space-y-3 overflow-y-auto">
-          <div className="rounded-lg bg-slate-800 p-3">
-            <h3 className="mb-2 text-xs font-bold text-slate-400">我的势力</h3>
-            {myForce ? (
-              <>
-                <p className="text-sm font-medium" style={{ color: seatColor(myForce.seat) }}>
-                  {myForce.name}
-                </p>
-                <p className="mt-1 text-xs text-slate-400">点数：{myForce.points}</p>
-                <p className="text-xs text-slate-400">状态：{myForce.alive ? '存活' : '已清除'}</p>
-              </>
-            ) : (
-              <p className="text-xs text-slate-500">{isSpectator ? '观战视角（全图可见）' : '未分配势力'}</p>
-            )}
-          </div>
-
-          {/* 对手计时（TIME_SYNC 校正显示） */}
-          <div className="rounded-lg bg-slate-800 p-3">
-            <h3 className="mb-2 text-xs font-bold text-slate-400">对手计时</h3>
-            {board.forces
-              .filter((f) => f.exists && f.alive && f.seat !== mySeat)
-              .map((f) => {
-                const c = opponentClocks[f.seat];
-                return (
-                  <p key={f.seat} className="text-xs text-slate-300">
-                    {f.name}：{c ? `${formatClock(c.stepTimeRemain)} / ${formatClock(c.gameTimeRemain)}` : '—'}
-                  </p>
-                );
-              })}
-          </div>
-
-          {/* 阶段按钮 */}
-          <div className="rounded-lg bg-slate-800 p-3">
-            <button
-              onClick={handleSwitchPhase}
-              disabled={!isMyActionTurn || gameOver !== null || fatal !== null}
-              className="w-full rounded bg-indigo-600 px-4 py-2.5 font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-            >
-              {phase === 'ACTION' ? '结束行动阶段' : phase === 'ADD_POINT' ? '结束加点阶段' : '—'}
-            </button>
-            {!isMyActionTurn && <p className="mt-2 text-center text-xs text-slate-500">仅自己回合的行动/加点阶段可切换</p>}
-          </div>
-        </aside>
       </main>
-
-      {/* 底部聊天（M5.3）：对局内参战可发、观战灰禁 */}
-      <footer className="border-t border-slate-700 px-6 py-2">
-        <Chat chat={chat} disabled={isSpectator} onSend={(text) => useGame.getState().sendChat(text)} />
-      </footer>
 
       {/* 回合/阶段提示：黑底白框白字，屏幕正中，展示 0.7s 后淡出 */}
       {announceText !== null && (

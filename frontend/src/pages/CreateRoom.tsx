@@ -33,7 +33,7 @@ export default function CreateRoom() {
     listMaps()
       .then((list) => {
         setMaps(list);
-        if (list.length > 0) setMapId(list[0].id);
+        // 初始不预选任何地图，由用户自行搜索选择
       })
       .catch(() => setError('地图列表加载失败'));
   }, []);
@@ -49,6 +49,10 @@ export default function CreateRoom() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!mapId) {
+      setError('请先选择地图再创建房间');
+      return;
+    }
     setBusy(true);
     try {
       const body: CreateRoomBody = {
@@ -144,7 +148,7 @@ export default function CreateRoom() {
 
           <button
             type="submit"
-            disabled={busy || !mapId}
+            disabled={busy}
             className="mt-6 w-full rounded bg-emerald-600 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
             {busy ? '创建中…' : '创建并进入'}
@@ -155,8 +159,10 @@ export default function CreateRoom() {
           <h2 className="mb-4 text-lg font-bold">地图预览</h2>
           {preview ? (
             <HexMapPreview battlefield={preview.battlefield} column={preview.column} row={preview.row} height={320} />
-          ) : (
+          ) : mapId ? (
             <div className="flex h-64 items-center justify-center text-slate-500">加载中…</div>
+          ) : (
+            <div className="flex h-64 items-center justify-center text-slate-500">请选择地图以查看预览</div>
           )}
           {(() => {
             const meta = maps.find((m) => m.id === mapId);
