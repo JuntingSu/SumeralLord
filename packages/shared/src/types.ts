@@ -30,6 +30,25 @@ export interface ScoreChangeEntry {
   newScore: number;
 }
 
+/** 对局结算结果参与者行（GET /api/game/:gameId/result；按 seat 对齐势力） */
+export interface GameResultParticipant {
+  seat: number;
+  playerId: number | null;
+  isAI: boolean;
+  /** 玩家名（无玩家/AI 为 null） */
+  username: string | null;
+}
+
+/** 对局结算结果（结算页展示：玩家名 + 全员积分变动；无 match_history 行时接口 404） */
+export interface GameResultData {
+  gameId: string;
+  winners: string[];
+  winningTeam: number;
+  aborted: boolean;
+  scoreChanges: ScoreChangeEntry[];
+  participants: GameResultParticipant[];
+}
+
 /** 排行榜单行（score/matches 二榜共用） */
 export interface LeaderboardEntry {
   id: number;
@@ -156,6 +175,12 @@ export interface RoomPlayer {
   joinedAt: number;
   /** 是否已连接房间 WS（false = 离线显示） */
   online: boolean;
+  /** 当前积分（一位小数；与 users.score 同步） */
+  score: number;
+  /** 计入对局数的对局中获胜场数（users.wins） */
+  wins: number;
+  /** 计入对局数的对局数（users.matches） */
+  matches: number;
 }
 
 export interface RoomForce {

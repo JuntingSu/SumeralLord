@@ -11,6 +11,8 @@ import { config } from './config.js';
 import { RoomManager } from './room/manager.js';
 import { GameManager } from './game/manager.js';
 import { WsGateway } from './ws/gateway.js';
+import { users } from './db/schema.js';
+import { eq } from 'drizzle-orm';
 import { authRoutes } from './api/auth.js';
 import { roomRoutes } from './api/rooms.js';
 import { mapRoutes } from './api/maps.js';
@@ -42,6 +44,11 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   const rooms = new RoomManager({
     ...opts.roomOpts,
     onEvent: (event) => gatewayRef?.publish(event),
+    // 房间玩家列表战绩（积分/胜场/对局数）：序列化时实时读库，保证对局结算后即时刷新
+    statsOf: (userId) => {
+      const row = db.select().from(users).where(eq(users.id, userId)).get();
+      return row ? { score: row.score, wins: row.wins, matches: row.matches } : { score: 0, wins: 0, matches: 0 };
+    },
   });
   app.decorate('db', db);
   app.decorate('tickets', tickets);

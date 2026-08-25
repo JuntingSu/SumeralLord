@@ -92,6 +92,9 @@ interface GameStore {
   /** 对局内聊天记录（M5.3；房间期聊天由 room store 维护） */
   chat: ChatEntry[];
 
+  /** 我方回合/行动阶段/加点阶段开始提示队列（实时路径收集；重连重放不触发） */
+  phaseAnnouncements: string[];
+
   startGame(params: { roomId: string; startMsg: GameStartMsg; myUserId: number | null; fogMode: boolean }): void;
   onServerMessage(msg: RoomServerMsg): void;
   onStatus(status: WsStatus): void;
@@ -107,10 +110,24 @@ interface GameStore {
   clearEventQueue(): void;
   /** 断线重连后全量重放追平 */
   reconnectCatchUp(): void;
+  /** 原子取出并清空阶段提示队列（消费与追加不竞态） */
+  drainPhaseAnnouncements(): string[];
   reset(): void;
 }
 
 type ApplyOutcome = 'applied' | 'duplicate' | 'gap' | 'ignored';
+
+/** 从事件链提取我方回合/阶段开始提示（END_TURN 转到己座；SWITCH_PHASE 切入 ACTION/ADD_POINT） */
+function collectPhaseAnnouncements(chain: GameEvent[], mySeat: number | null): string[] {
+  if (mySeat === null) return [];
+  const out: string[] = [];
+  for (const e of chain) {
+    if (e.kind === 'END_TURN' && e.toSeat === mySeat) out.push('你的回合');
+    else if (e.kind === 'SWITCH_PHASE' && e.seat === mySeat && e.to === 'ACTION') out.push('行动阶段');
+    else if (e.kind === 'SWITCH_PHASE' && e.seat === mySeat && e.to === 'ADD_POINT') out.push('加点阶段');
+  }
+  return out;
+}
 
 /** 严格按 eventId 序应用一条对局流消息（纯逻辑，供 store 与补发共用） */
 /** 严格按 eventId 序应用一条对局流消息（经 set 提交，保证订阅者收到通知） */
@@ -121,6 +138,7 @@ function applyStreamMessage(
   intent: PlayerIntent,
   fromSeat: number,
   transport: GameTransport | null,
+  replay = false,
 ): ApplyOutcome {
   const s = get();
   if (s.gameOver || s.fatal) return 'ignored';
@@ -149,6 +167,8 @@ function applyStreamMessage(
   }
   // 链应用前兵表快照（动画插值起点；board 权威不变）
   const beforeTiles: Array<SoldierState | null> = board.tiles.map((t) => (t.soldier ? { ...t.soldier } : null));
+  // 实时路径（非重放）收集我方回合/阶段开始提示
+  const announcements = replay ? [] : collectPhaseAnnouncements(r.chain, s.mySeat);
   set({
     board: r.state,
     appliedEventId: eventId,
@@ -156,6 +176,8 @@ function applyStreamMessage(
     lastChain: r.chain,
     pendingConsensus,
     timer,
+    phaseAnnouncements:
+      announcements.length > 0 ? [...s.phaseAnnouncements, ...announcements] : s.phaseAnnouncements,
   });
   return 'applied';
 }
@@ -173,7 +195,7 @@ export const useGame = create<GameStore>((set, get) => {
       for (const raw of events) {
         const msg = raw as { eventId?: number; intent?: PlayerIntent; fromSeat?: number };
         if (typeof msg.eventId !== 'number' || !msg.intent) continue;
-        applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat ?? 0, transport);
+        applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat ?? 0, transport, true);
       }
       if (nextCursor > 0) void catchUp();
     } catch {
@@ -210,6 +232,7 @@ export const useGame = create<GameStore>((set, get) => {
     fatal: null,
     submitting: false,
     chat: [],
+    phaseAnnouncements: [],
 
     startGame: ({ roomId, startMsg, myUserId, fogMode }) => {
       const init = initState({
@@ -219,6 +242,9 @@ export const useGame = create<GameStore>((set, get) => {
       });
       const mySeat = startMsg.seatAssignments.find((a) => a.playerId !== null && a.playerId === myUserId)?.seat ?? null;
       const isSpectator = myUserId !== null && mySeat === null;
+      // 开局首个回合若即我方：收集开局链中的阶段提示（回合开始补「你的回合」）
+      const initAnnouncements = collectPhaseAnnouncements(init.chain, mySeat);
+      if (mySeat !== null && mySeat === init.state.currentSeat) initAnnouncements.unshift('你的回合');
       set({
         gameId: startMsg.gameId,
         roomId,
@@ -242,6 +268,7 @@ export const useGame = create<GameStore>((set, get) => {
         disconnectedSeats: [],
         opponentClocks: {},
         chat: [],
+        phaseAnnouncements: initAnnouncements,
       });
       // 首个回合的计时基准（initState 已自动完成首势力准备 → 行动）
       const seat = init.state.currentSeat;
@@ -325,7 +352,7 @@ export const useGame = create<GameStore>((set, get) => {
               type_: 'GAME_OVER' | string;
             };
             if (m.type === 'INTENT_BROADCAST' && typeof m.eventId === 'number' && m.intent) {
-              applyStreamMessage(get, set, m.eventId, m.intent, m.fromSeat ?? 0, s.transport);
+              applyStreamMessage(get, set, m.eventId, m.intent, m.fromSeat ?? 0, s.transport, true);
             } else if (m.type === 'CONSENSUS_CONFIRMED' && m.consensusId) {
               const pendingConsensus = { ...get().pendingConsensus };
               delete pendingConsensus[m.consensusId];
@@ -427,6 +454,12 @@ export const useGame = create<GameStore>((set, get) => {
       s.transport.sendReconnect(s.appliedEventId, s.gameId);
     },
 
+    drainPhaseAnnouncements: () => {
+      const drained = get().phaseAnnouncements;
+      set({ phaseAnnouncements: [] });
+      return drained;
+    },
+
     reset: () => {
       hasOpenedOnce = false;
       set({
@@ -452,6 +485,7 @@ export const useGame = create<GameStore>((set, get) => {
         disconnectedSeats: [],
         submitting: false,
         chat: [],
+        phaseAnnouncements: [],
       });
     },
   };

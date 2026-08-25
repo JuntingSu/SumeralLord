@@ -63,6 +63,13 @@ export interface RoomUser {
   flag: number;
 }
 
+/** 玩家战绩统计（房间玩家列表展示用；由调用方从 DB 读取，实时序列化） */
+export interface PlayerStats {
+  score: number;
+  wins: number;
+  matches: number;
+}
+
 export interface RoomManagerOptions {
   idleMs?: number;
   sweepIntervalMs?: number;
@@ -72,6 +79,8 @@ export interface RoomManagerOptions {
   gameOverRetainMs?: number;
   /** 状态变更事件回调（WS 网关广播源） */
   onEvent?: (event: RoomManagerEvent) => void;
+  /** 玩家战绩统计读取（缺省 0；供房间玩家列表显示积分/胜率） */
+  statsOf?: (userId: number) => PlayerStats;
 }
 
 /** 地图 player_list → 房间势力（出生王城在 battlefield 中，房间层只关心元信息） */
@@ -447,7 +456,18 @@ export class RoomManager {
 
   private toRoomPlayer(room: Room, userId: number): RoomData['players'][number] {
     const p = room.players.get(userId)!;
-    return { id: p.id, username: p.username, flag: p.flag, state: p.state, online: p.online, joinedAt: p.joinedAt };
+    const stats = this.opts.statsOf?.(userId) ?? { score: 0, wins: 0, matches: 0 };
+    return {
+      id: p.id,
+      username: p.username,
+      flag: p.flag,
+      state: p.state,
+      online: p.online,
+      joinedAt: p.joinedAt,
+      score: stats.score,
+      wins: stats.wins,
+      matches: stats.matches,
+    };
   }
 
   /** 离开/被踢时释放该玩家占用的势力（换图前的换选逻辑不复用，这里要逐 seat 广播） */
@@ -475,7 +495,9 @@ export class RoomManager {
       playerNum: room.mapPlayerNum,
       timeSettings: room.timeSettings,
       status: room.status === 'ROOM_OPEN' ? 'waiting' : room.status === 'GAME_OVER' ? 'game_over' : 'in_game',
-      players: [...room.players.values()].sort((a, b) => a.joinedAt - b.joinedAt),
+      players: [...room.players.values()]
+        .sort((a, b) => a.joinedAt - b.joinedAt)
+        .map((p) => this.toRoomPlayer(room, p.id)),
       forces: room.forces,
     };
   }

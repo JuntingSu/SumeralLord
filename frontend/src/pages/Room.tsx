@@ -246,10 +246,15 @@ export default function Room() {
                       (e.target as HTMLImageElement).style.visibility = 'hidden';
                     }}
                   />
-                  <span className="flex-1 truncate text-sm">
-                    {p.username}
-                    {p.id === room.hostId && <span title="房主">👑</span>}
-                    {!p.online && <span className="ml-1 text-xs text-slate-500">离线</span>}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm">
+                      {p.username}
+                      {p.id === room.hostId && <span title="房主">👑</span>}
+                      {!p.online && <span className="ml-1 text-xs text-slate-500">离线</span>}
+                    </span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {p.score.toFixed(1)} 分 · 胜率 {p.matches > 0 ? `${p.wins}/${p.matches}` : '—'}
+                    </span>
                   </span>
                   <span className={`rounded px-1.5 py-0.5 text-xs ${badge.cls}`}>{badge.text}</span>
                   {isHost && p.id !== me.id && (
