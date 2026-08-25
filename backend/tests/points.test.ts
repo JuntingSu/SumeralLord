@@ -36,12 +36,12 @@ async function newUser(name: string): Promise<void> {
   users.set(name, { token: data.token, id: data.user.id });
 }
 
-/** 本人最新统计（score/matches） */
-async function me(name: string): Promise<{ score: number; matches: number }> {
+/** 本人最新统计（score/matches/wins） */
+async function me(name: string): Promise<{ score: number; matches: number; wins: number }> {
   const res = await app.inject({ method: 'GET', url: '/api/users/me', headers: auth(name) });
   expect(res.statusCode).toBe(200);
-  const user = res.json().data.user as { score: number; matches: number };
-  return { score: user.score, matches: user.matches };
+  const user = res.json().data.user as { score: number; matches: number; wins: number };
+  return { score: user.score, matches: user.matches, wins: user.wins };
 }
 
 class Client {
@@ -175,9 +175,9 @@ afterAll(async () => {
 });
 
 describe('注册即 100 分', () => {
-  it('新用户 GET /api/users/me → score=100, matches=0；登录响应亦含 score', async () => {
+  it('新用户 GET /api/users/me → score=100, matches=0, wins=0；登录响应亦含 score', async () => {
     const s = await me('zeta');
-    expect(s).toEqual({ score: 100, matches: 0 });
+    expect(s).toEqual({ score: 100, matches: 0, wins: 0 });
     const login = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
@@ -187,8 +187,8 @@ describe('注册即 100 分', () => {
   });
 });
 
-describe('VICTORY 完整结算（0 和）', () => {
-  it('eve 胜 / frank 败（各 100）→ eve=110、frank=90；score_changes 两项正确；matches 不变（0 步）', async () => {
+describe('不计入对局数（0 步）则不结算积分', () => {
+  it('eve 胜 / frank 败但 0 步 → 双方积分不变（100）、matches 不变、score_changes=[]、无胜场', async () => {
     const roomId = await setupRoom('eve', 'frank');
     const a = await wsConnect(roomId, 'eve');
     const b = await wsConnect(roomId, 'frank');
@@ -200,24 +200,17 @@ describe('VICTORY 完整结算（0 和）', () => {
     b.close();
 
     const [eve, frank] = await Promise.all([me('eve'), me('frank')]);
-    expect(eve.score).toBe(110);
-    expect(frank.score).toBe(90);
-    expect(eve.matches).toBe(0); // 0 步 < 25，对局数不加
-    expect(frank.matches).toBe(0);
+    expect(eve).toEqual({ score: 100, matches: 0, wins: 0 }); // 0 步 < 25：不计入对局数 → 不结算积分
+    expect(frank).toEqual({ score: 100, matches: 0, wins: 0 });
 
     const rows = app.db.select().from(matchHistory).where(eq(matchHistory.gameId, gameId)).all();
     expect(rows).toHaveLength(1);
-    const changes = JSON.parse(rows[0].scoreChanges) as ScoreChangeEntry[];
-    expect(changes).toHaveLength(2);
-    const eveEntry = changes.find((c) => c.playerId === users.get('eve')!.id)!;
-    const frankEntry = changes.find((c) => c.playerId === users.get('frank')!.id)!;
-    expect(eveEntry).toMatchObject({ result: 'win', offline: false, oldScore: 100, delta: 10, newScore: 110 });
-    expect(frankEntry).toMatchObject({ result: 'lose', offline: false, oldScore: 100, delta: -10, newScore: 90 });
+    expect(JSON.parse(rows[0].scoreChanges)).toEqual([]);
   });
 });
 
-describe('步数 > 25 → 对局数 +1（观战者不计）', () => {
-  it('先发 26 条 SWITCH_PHASE 意图再 VICTORY → 双方 matches+1，观战者 carol 不变', async () => {
+describe('步数 > 25 → 计入对局数并结算积分（观战者不计）', () => {
+  it('先发 26 条 SWITCH_PHASE 意图再 VICTORY → 双方 matches+1、胜方积分 110/败方 90、胜方 wins+1，观战者 carol 不变', async () => {
     const roomId = await setupRoom('alice', 'bob');
     // carol 以观战身份加入（不参与对局与结算）
     const join = await app.inject({
@@ -241,18 +234,18 @@ describe('步数 > 25 → 对局数 +1（观战者不计）', () => {
     b.close();
 
     const [alice, bob, carol] = await Promise.all([me('alice'), me('bob'), me('carol')]);
-    expect(alice.matches).toBe(1);
-    expect(bob.matches).toBe(1);
-    expect(carol.matches).toBe(0);
+    expect(alice).toEqual({ score: 110, matches: 1, wins: 1 }); // 计入对局数 → 结算积分 + 胜场
+    expect(bob).toEqual({ score: 90, matches: 1, wins: 0 });
+    expect(carol).toEqual({ score: 100, matches: 0, wins: 0 }); // 观战者不计
   });
 });
 
-describe('步数恰好 25 → 对局数不加（阈值 > 25）', () => {
-  it('先发 25 条 SWITCH_PHASE 意图再 VICTORY → 双方 matches 保持 0', async () => {
+describe('步数恰好 25 → 不计入对局数也不结算积分（阈值 > 25）', () => {
+  it('先发 25 条 SWITCH_PHASE 意图再 VICTORY → 双方 score/matches/wins 均保持初始值，score_changes=[]', async () => {
     const roomId = await setupRoom('ivan', 'judy');
     const a = await wsConnect(roomId, 'ivan');
     const b = await wsConnect(roomId, 'judy');
-    await startGame(roomId, 'ivan');
+    const gameId = await startGame(roomId, 'ivan');
     await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
 
     for (let i = 1; i <= 25; i++) {
@@ -264,18 +257,28 @@ describe('步数恰好 25 → 对局数不加（阈值 > 25）', () => {
     b.close();
 
     const [ivan, judy] = await Promise.all([me('ivan'), me('judy')]);
-    expect(ivan.matches).toBe(0);
-    expect(judy.matches).toBe(0);
+    expect(ivan).toEqual({ score: 100, matches: 0, wins: 0 }); // 25 步恰未过阈值：不结算
+    expect(judy).toEqual({ score: 100, matches: 0, wins: 0 });
+
+    const rows = app.db.select().from(matchHistory).where(eq(matchHistory.gameId, gameId)).all();
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].scoreChanges)).toEqual([]);
   });
 });
 
-describe('中途离线按败者结算', () => {
-  it('bob 断线（50ms 检测）后 alice 单端上报 VICTORY 且 winners 含 bob → bob offline:true/result:lose', async () => {
+describe('中途离线按败者结算（计入对局数的对局）', () => {
+  it('先凑 26 步使对局计入 → bob 断线（50ms 检测）后 alice 单端上报 VICTORY 且 winners 含 bob → bob offline:true/result:lose', async () => {
     const roomId = await setupRoom('grace', 'henry');
     const a = await wsConnect(roomId, 'grace');
     const b = await wsConnect(roomId, 'henry');
     await startGame(roomId, 'grace');
     await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
+
+    // 先发 26 条 SWITCH_PHASE 凑足步数（>25 计入对局数），再断线验证离线按败方结算
+    for (let i = 1; i <= 26; i++) {
+      a.send({ type: 'INTENT_SUBMIT', clientTempId: `s${i}`, intent: { intentType: 'SWITCH_PHASE' } });
+      await a.waitFor((m) => m.type === 'INTENT_ACK' && m.clientTempId === `s${i}`);
+    }
 
     b.close(); // henry 断线
     await a.waitFor('PLAYER_DISCONNECT');
@@ -293,6 +296,8 @@ describe('中途离线按败者结算', () => {
     const [grace, henry] = await Promise.all([me('grace'), me('henry')]);
     expect(grace.score).toBe(110); // 剩余池 10 全归 grace
     expect(henry.score).toBe(90);
+    expect(grace.wins).toBe(1); // 在线获胜方胜场 +1
+    expect(henry.wins).toBe(0);
 
     // 结算明细中 henry 为离线败者
     const rows = app.db.select().from(matchHistory).all();
@@ -349,17 +354,17 @@ describe('中止局与平局不结算', () => {
 });
 
 describe('历史记录含本人积分变动', () => {
-  it('GET /api/users/:id/history 每行带 scoreChanges，本人 delta 正确', async () => {
-    const eve = users.get('eve')!;
-    const res = await app.inject({ method: 'GET', url: `/api/users/${eve.id}/history`, headers: auth('eve') });
+  it('GET /api/users/:id/history 每行带 scoreChanges，本人 delta 正确（alice 的 26 步胜局）', async () => {
+    const alice = users.get('alice')!;
+    const res = await app.inject({ method: 'GET', url: `/api/users/${alice.id}/history`, headers: auth('alice') });
     expect(res.statusCode).toBe(200);
     const { history } = res.json().data;
     expect(history.length).toBeGreaterThanOrEqual(1);
     const mine = history.find((h: { gameId: string; scoreChanges: ScoreChangeEntry[] }) => h.scoreChanges.length > 0);
     expect(mine).toBeDefined();
-    const myChange = mine.scoreChanges.find((c: ScoreChangeEntry) => c.playerId === eve.id);
+    const myChange = mine.scoreChanges.find((c: ScoreChangeEntry) => c.playerId === alice.id);
     expect(myChange).toBeDefined();
-    expect(myChange.delta).toBeGreaterThan(0); // eve 的胜局 +10
+    expect(myChange.delta).toBeGreaterThan(0); // alice 的胜局 +10
   });
 });
 
@@ -401,6 +406,67 @@ describe('排行榜', () => {
 
     const bad = await app.inject({ method: 'GET', url: '/api/leaderboard/nope', headers: auth('eve') });
     expect(bad.statusCode).toBe(400);
+  });
+});
+
+describe('结算结果接口（用户名 + 全员积分变动）', () => {
+  it('0 步对局：返回双方用户名，scoreChanges=[]（不计入不结算）', async () => {
+    const roomId = await setupRoom('eve', 'frank');
+    const a = await wsConnect(roomId, 'eve');
+    const b = await wsConnect(roomId, 'frank');
+    const gameId = await startGame(roomId, 'eve');
+    await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
+
+    await reportVictory(a, b, [String(users.get('eve')!.id)]);
+    a.close();
+    b.close();
+
+    const res = await app.inject({ method: 'GET', url: `/api/game/${gameId}/result`, headers: auth('eve') });
+    expect(res.statusCode).toBe(200);
+    const data = res.json().data as {
+      winners: string[];
+      aborted: boolean;
+      scoreChanges: ScoreChangeEntry[];
+      participants: Array<{ seat: number; playerId: number | null; isAI: boolean; username: string | null }>;
+    };
+    expect(data.winners).toEqual([String(users.get('eve')!.id)]);
+    expect(data.aborted).toBe(false);
+    expect(data.scoreChanges).toEqual([]);
+    const bySeat = new Map(data.participants.map((p) => [p.seat, p]));
+    expect(bySeat.get(1)!.username).toBe('eve');
+    expect(bySeat.get(2)!.username).toBe('frank');
+  });
+
+  it('26 步对局：返回双方用户名 + 积分变动（胜方正、败方负）', async () => {
+    const roomId = await setupRoom('ivan', 'judy');
+    const a = await wsConnect(roomId, 'ivan');
+    const b = await wsConnect(roomId, 'judy');
+    const gameId = await startGame(roomId, 'ivan');
+    await Promise.all([a.waitFor('GAME_START'), b.waitFor('GAME_START')]);
+
+    for (let i = 1; i <= 26; i++) {
+      a.send({ type: 'INTENT_SUBMIT', clientTempId: `r${i}`, intent: { intentType: 'SWITCH_PHASE' } });
+      await a.waitFor((m) => m.type === 'INTENT_ACK' && m.clientTempId === `r${i}`);
+    }
+    await reportVictory(a, b, [String(users.get('ivan')!.id)]);
+    a.close();
+    b.close();
+
+    const res = await app.inject({ method: 'GET', url: `/api/game/${gameId}/result`, headers: auth('judy') });
+    expect(res.statusCode).toBe(200);
+    const data = res.json().data as {
+      winners: string[];
+      scoreChanges: ScoreChangeEntry[];
+      participants: Array<{ seat: number; playerId: number | null; isAI: boolean; username: string | null }>;
+    };
+    expect(data.winners).toEqual([String(users.get('ivan')!.id)]);
+    const ivan = data.scoreChanges.find((c) => c.playerId === users.get('ivan')!.id)!;
+    const judy = data.scoreChanges.find((c) => c.playerId === users.get('judy')!.id)!;
+    expect(ivan.delta).toBeGreaterThan(0); // 胜方 +（含保底 ≥5）
+    expect(judy.delta).toBeLessThan(0); // 败方 -
+    const bySeat = new Map(data.participants.map((p) => [p.seat, p]));
+    expect(bySeat.get(1)!.username).toBe('ivan');
+    expect(bySeat.get(2)!.username).toBe('judy');
   });
 });
 

@@ -12,7 +12,9 @@ import { useGame, attachTransport } from '../stores/game';
 import { useRoom } from '../stores/room';
 import { WsClient } from '../ws/client';
 import { MockWsServer } from '../mock/wsServer';
-import { fetchGameMeta } from '../api/game';
+import { fetchGameMeta, fetchGameResult } from '../api/game';
+import { getRoom } from '../api/room';
+import type { GameResultData } from '@dl/shared';
 import { computeFog, type FogLevel } from '../game/fog';
 import { formatClock } from '../game/timer';
 import { EventAnimator } from '../canvas/animator';
@@ -56,6 +58,47 @@ export default function Game() {
     accumulated: 0,
     lastSend: 0,
   });
+
+  // ---------- 回合/阶段提示浮层（我的回合/行动/加点开始时居中展示，0.7s 后淡出） ----------
+  const phaseAnnouncements = useGame((s) => s.phaseAnnouncements);
+  const [announceText, setAnnounceText] = useState<string | null>(null);
+  const [announceFading, setAnnounceFading] = useState(false);
+  const announceQueueRef = useRef<string[]>([]);
+  const announceTextRef = useRef<string | null>(null);
+  announceTextRef.current = announceText;
+
+  // 消费 store 提示队列 → 排入本地播放队列（当前无展示则立即开播）
+  useEffect(() => {
+    if (phaseAnnouncements.length === 0) return;
+    const drained = useGame.getState().drainPhaseAnnouncements();
+    if (drained.length === 0) return;
+    announceQueueRef.current.push(...drained);
+    if (announceTextRef.current === null) {
+      const next = announceQueueRef.current.shift()!;
+      setAnnounceFading(false);
+      setAnnounceText(next);
+    }
+  }, [phaseAnnouncements]);
+
+  // 当前提示播放：展示 0.7s → 淡出 0.3s → 下一条 / 结束
+  useEffect(() => {
+    if (announceText === null) return;
+    const t1 = window.setTimeout(() => setAnnounceFading(true), 700);
+    const t2 = window.setTimeout(() => {
+      const next = announceQueueRef.current.shift();
+      if (next !== undefined) {
+        setAnnounceFading(false);
+        setAnnounceText(next);
+      } else {
+        setAnnounceFading(false);
+        setAnnounceText(null);
+      }
+    }, 1000);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [announceText]);
 
   // ---------- 动画播放器（M5.1）：驱动 eventQueue 逐链演出；board 权威不变 ----------
   const animatorRef = useRef<EventAnimator | null>(null);
@@ -138,6 +181,35 @@ export default function Game() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
+
+  // ---------- 房间信息（势力列表需玩家用户名；Room 页已填则跳过，刷新/直连对局页时拉取） ----------
+  useEffect(() => {
+    if (!roomId) return;
+    getRoom(roomId)
+      .then((data) => {
+        if (useRoom.getState().room?.id !== data.id) useRoom.getState().setRoom(data);
+      })
+      .catch(() => undefined);
+  }, [roomId]);
+
+  // ---------- 结算结果（结算页用户名 + 全员积分变动；GAME_OVER 后拉取） ----------
+  const [settleResult, setSettleResult] = useState<GameResultData | null>(null);
+  useEffect(() => {
+    if (!gameOver || !gameId) {
+      setSettleResult(null);
+      return;
+    }
+    fetchGameResult(gameId)
+      .then(setSettleResult)
+      .catch(() => setSettleResult(null));
+  }, [gameOver, gameId]);
+
+  // 用户名兜底（结算结果未返回时先显示房间内用户名，避免闪现 id）
+  const playerNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const p of room?.players ?? []) m.set(p.id, p.username);
+    return m;
+  }, [room]);
 
   // ---------- 本地计时器（规则 v2 §10）：1s tick + 5s TIME_SYNC ----------
   const myTurn = board !== null && mySeat !== null && board.currentSeat === mySeat && !isSpectator;
@@ -360,11 +432,15 @@ export default function Game() {
                   />
                   <span className="flex-1 truncate text-sm font-medium" style={{ color: seatColor(f.seat) }}>
                     {f.name}
-                    {isMine && <span className="ml-1 text-xs text-emerald-400">（我）</span>}
+                    {isMine ? (
+                      <span className="ml-1 text-xs text-emerald-400">（我）</span>
+                    ) : player ? (
+                      <span className="ml-1 text-xs text-slate-300">（{player.username}）</span>
+                    ) : null}
                   </span>
                 </div>
                 <div className="mt-1 flex justify-between text-xs text-slate-400">
-                  <span>{player ? player.username : f.isAI ? 'AI（休闲）' : '—'}</span>
+                  <span>{!player ? (f.isAI ? 'AI（休闲）' : '—') : ''}</span>
                   <span>{f.alive ? `点数 ${f.points}` : '已清除'}</span>
                 </div>
                 {isMine && (
@@ -507,6 +583,19 @@ export default function Game() {
         <Chat chat={chat} disabled={isSpectator} onSend={(text) => useGame.getState().sendChat(text)} />
       </footer>
 
+      {/* 回合/阶段提示：黑底白框白字，屏幕正中，展示 0.7s 后淡出 */}
+      {announceText !== null && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center">
+          <div
+            className={`rounded-lg border-2 border-white bg-black px-10 py-5 text-3xl font-bold text-white shadow-lg transition-opacity duration-300 ${
+              announceFading ? 'opacity-0' : 'opacity-100'
+            }`}
+          >
+            {announceText}
+          </div>
+        </div>
+      )}
+
       {/* 结算/中止弹窗 */}
       {(gameOver !== null || fatal !== null) && (
         <ResultModal
@@ -515,6 +604,8 @@ export default function Game() {
           board={board}
           isSpectator={isSpectator}
           gameId={gameId}
+          result={settleResult}
+          playerNames={playerNameById}
           onClose={() => {
             // 结算页关闭上报：全部参战玩家关闭后，房间立即回落等待中（服务器据此结束结算展示）
             const s = useGame.getState();

@@ -102,7 +102,9 @@ export interface SettlementResult {
 
 /**
  * 编排：读结算时刻积分快照 → 算结算明细 → 回填 score_changes + 更新积分/对局数（同一事务）。
- * 对局数口径与积分独立：steps > 25 才 +1（含离线者、含平局）；观战者/AI 不计入。
+ * 口径（用户拍板）：不计入对局数（steps ≤ 25）的对局**不结算积分**；
+ * 计入对局数（steps > 25）时才结算积分，且在线获胜方 wins +1；平局（winners 为空）只加对局数不结算积分。
+ * 观战者/AI 不计入。
  */
 export function settleMatch(
   db: Db,
@@ -127,11 +129,10 @@ export function settleMatch(
     offline: !p.connected,
   }));
 
-  // 平局（winners 为空）→ 不结算积分，score_changes = []；对局数照常按步数口径
-  const scoreChanges = winners.length === 0 ? [] : computeScoreChanges(players);
-
+  // 不计入对局数（steps ≤ 25）或平局（winners 为空）→ 不结算积分，score_changes = []
   const steps = games.countReplaySteps(game);
   const matchCounted = steps > 25;
+  const scoreChanges = !matchCounted || winners.length === 0 ? [] : computeScoreChanges(players);
 
   // 回填与更新同事务：失败整体回滚，避免「对局数加了但积分没写」半截状态
   db.transaction((tx) => {
@@ -146,7 +147,11 @@ export function settleMatch(
         matches: (row?.matches ?? 0) + (matchCounted ? 1 : 0),
       };
       const change = byId.get(playerId);
-      if (change) values.score = change.newScore;
+      if (change) {
+        values.score = change.newScore;
+        // 计入对局数的对局：在线获胜方胜场 +1（与「不计入则不结算」口径一致）
+        if (change.result === 'win') values.wins = (row?.wins ?? 0) + 1;
+      }
       tx.update(users).set(values).where(eq(users.id, playerId)).run();
     }
   });

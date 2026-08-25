@@ -1,9 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { ERROR_CODES } from '@dl/shared';
-import type { SeatAssignment } from '@dl/shared';
+import type { GameResultData, ScoreChangeEntry, SeatAssignment } from '@dl/shared';
 import { authPreHandler } from '../auth/guard.js';
-import { matchHistory } from '../db/schema.js';
+import { matchHistory, users } from '../db/schema.js';
 import { ok, fail } from '../utils/respond.js';
 
 /** 对局查询接口（v1：断线重连/中途观战数据源；BM7a：回放日志。操作意图全部走 WS） */
@@ -49,6 +49,32 @@ export const gameRoutes: FastifyPluginAsync = async (app) => {
       reducerVersion: game.reducerVersion,
     });
   });
+  /** 对局结算结果（结算页：玩家名 + 全员积分变动）。
+   *  数据源 match_history（VICTORY 时 recordMatchHistory + settleMatch 已写入）；
+   *  鉴权：任意登录用户（GAME_OVER 本就广播给房间全员，含观战；结果不敏感）。 */
+  app.get('/api/game/:gameId/result', async (request, reply) => {
+    const { gameId } = request.params as { gameId: string };
+    const row = app.db.select().from(matchHistory).where(eq(matchHistory.gameId, gameId)).get();
+    if (!row) return fail(reply, 404, ERROR_CODES.ROOM_NOT_FOUND, '对局不存在或未结算');
+    const participants = JSON.parse(row.participants) as Array<{ seat: number; playerId: number | null; isAI: boolean }>;
+    const ids = [...new Set(participants.filter((p) => p.playerId !== null).map((p) => p.playerId as number))];
+    const userRows = ids.length > 0 ? app.db.select().from(users).where(inArray(users.id, ids)).all() : [];
+    const nameById = new Map(userRows.map((r) => [r.id, r.username]));
+    return ok(reply, {
+      gameId,
+      winners: JSON.parse(row.winners) as string[],
+      winningTeam: row.winningTeam,
+      aborted: row.aborted === 1,
+      scoreChanges: JSON.parse(row.scoreChanges ?? '[]') as ScoreChangeEntry[],
+      participants: participants.map((p) => ({
+        seat: p.seat,
+        playerId: p.playerId,
+        isAI: p.isAI,
+        username: p.playerId !== null ? (nameById.get(p.playerId) ?? null) : null,
+      })),
+    } satisfies GameResultData);
+  });
+
   /** 对局日志（BM7a 回放）：GAME_START 首行 + 对局流分页；鉴权：参战者（内存对局或 match_history） */
   app.get('/api/game/:gameId/log', async (request, reply) => {
     const { gameId } = request.params as { gameId: string };
