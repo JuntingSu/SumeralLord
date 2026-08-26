@@ -326,7 +326,7 @@ function victoryJudgeEvent(ctx: Ctx): void {
 // ---------- 一级事件（§8.1） ----------
 
 /** 移动事件（§8.1.1）。完整前置判定；进攻成功进占复用本事件（无效则自然不进占）。
- *  opts.skipBreakDeduction：断兵移动时跳过复制 -1（断兵进攻无反击次数的兵成功 → 完整进占，§8.1.2）。 */
+ *  opts.skipBreakDeduction：断兵移动时跳过复制 -1（断兵进攻成功 → 完整进占，§8.1.2）。 */
 function moveEventCore(ctx: Ctx, from: number, to: number, opts?: { skipBreakDeduction?: boolean }): boolean {
   if (ctx.state.phase !== 'ACTION') return false;
   const origin = ctx.state.tiles[from].soldier;
@@ -396,9 +396,9 @@ function attackEventCore(ctx: Ctx, from: number, to: number): boolean {
       updateEvent(ctx, from, { strength: attacker.strength - defender.strength });
     }
     despawnEvent(ctx, to);
-    // 断兵进攻成功且防守无反击次数 → 进占移动不扣兵力（完整进占，§8.1.2）
+    // 断兵进攻成功 → 进占移动不扣兵力（完整进占，§8.1.2）：损失已由反击结算体现，进占不应再扣复制 -1
     const moved = moveEventCore(ctx, from, to, {
-      skipBreakDeduction: !attacker.isLinked && defender.counter === 0,
+      skipBreakDeduction: !attacker.isLinked,
     });
     if (moved) {
       const occupant = ctx.state.tiles[to].soldier;
