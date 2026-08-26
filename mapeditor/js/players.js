@@ -33,7 +33,10 @@ const Players = (() => {
         <select class="p-ai" title="电脑难度">${MapConst.AI_LEVELS.map((l) => `<option value="${l}" ${l === p.computer ? 'selected' : ''}>${MapConst.AI_LABELS[l]}</option>`).join('')}</select>
         <div class="p-flag-wrap">
           <button class="p-flag-btn" type="button" title="选择旗帜"><span class="fprev"></span><span class="p-flag-num">${p.flag}</span></button>
-          <div class="p-flag-pop" hidden>${flagOptions.map((f) => `<button type="button" class="p-flag-opt" data-flag="${f}"><span class="fprev"></span>${f}</button>`).join('')}</div>
+          <div class="p-flag-pop" hidden>
+            <div class="p-flag-head"><span>选择旗帜</span><button type="button" class="p-flag-close" title="关闭">✕</button></div>
+            <div class="p-flag-grid">${flagOptions.map((f) => `<button type="button" class="p-flag-opt" data-flag="${f}"><span class="fprev"></span>${f}</button>`).join('')}</div>
+          </div>
         </div>
         <button class="p-del" title="删除势力（战场该座次格子一并清理）">✕</button>
       `;
@@ -85,6 +88,10 @@ const Players = (() => {
       flagBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         flagPop.hidden = !flagPop.hidden;
+      });
+      q('.p-flag-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        flagPop.hidden = true;
       });
       q('.p-del').addEventListener('click', () => actions.onRemove(p.seat));
     });

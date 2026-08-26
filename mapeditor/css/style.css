@@ -256,18 +256,20 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   top: calc(100% + 4px);
   left: 0;
   z-index: 30;
-  display: grid;
-  grid-template-columns: repeat(3, auto);
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
   background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
 }
-.p-flag-pop button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 5px; font-size: 11px; }
-.p-flag-pop button:hover { border-color: var(--accent); }
-.p-flag-pop button.sel { border-color: var(--accent); background: rgba(77, 163, 255, 0.18); }
+/* 弹窗标题行：桌面端隐藏，移动端弹窗显示（选择旗帜 + ✕） */
+.p-flag-head { display: none; }
+.p-flag-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 4px; }
+.p-flag-grid button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 5px; font-size: 11px; }
+.p-flag-grid button:hover { border-color: var(--accent); }
+.p-flag-grid button.sel { border-color: var(--accent); background: rgba(77, 163, 255, 0.18); }
 
 /* 校验 */
 #validate-summary { padding: 8px; border-radius: 5px; margin-bottom: 8px; font-weight: 700; }
@@ -328,8 +330,9 @@ dialog h3 { margin-bottom: 12px; }
 
 body.mobile #left,
 body.mobile #right-resizer { display: none !important; }
-/* 顶部尺寸按钮与左上/右上悬浮工具栏同排冲突，移动端隐藏（行调整可用底部 resize-bottom，拖动模式下可见） */
-body.mobile #resize-top { display: none !important; }
+/* 上下扩容按钮向中心平移，避开左上/右上悬浮工具与底部画笔栏 */
+body.mobile #resize-top { top: 62px; }
+body.mobile #resize-bottom { bottom: 60px; }
 
 /* 左上：涂刷/拖动/撤回/前进（仅图标，悬浮地图之上） */
 body.mobile #mobile-toolbar {
@@ -470,3 +473,37 @@ body.mobile #dlg-settings #right {
 /* 随机生成弹窗 */
 body.mobile #dlg-generate .dlg-body { padding: 10px; max-height: 72vh; overflow-y: auto; }
 body.mobile #dlg-generate .dlg-body .panel { background: transparent; border: none; padding: 0; }
+
+/* 移动端：旗帜选择以居中弹窗展示全部旗帜，点旗帜/外部/✕ 关闭 */
+body.mobile .p-flag-pop {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  width: min(92vw, 380px);
+  max-height: 74vh;
+  overflow-y: auto;
+  padding: 10px;
+}
+body.mobile .p-flag-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+body.mobile .p-flag-close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--dim);
+  padding: 0 6px;
+}
+body.mobile .p-flag-close:hover { color: var(--text); border: none; }
+body.mobile .p-flag-grid { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+body.mobile .p-flag-grid button { padding: 6px 2px; font-size: 12px; }
+body.mobile .p-flag-grid .fprev { width: 26px; height: 26px; }
