@@ -62,7 +62,7 @@
       <p class="hint">山地/虚空不可驻兵；无主格兵力强制为 0；野生/阻挡可驻兵（中立兵）。</p>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="gen-panel">
       <h3>随机生成</h3>
       <div class="frow"><label>行</label><input id="gen-row" type="number" min="3" max="30" value="9"></div>
       <div class="frow"><label>列</label><input id="gen-col" type="number" min="3" max="40" value="11"></div>
@@ -113,6 +113,30 @@
       <button data-dir="right" data-d="-1">右-1</button>
       <button data-dir="right" data-d="-2">右-2</button>
       <button data-dir="right" data-d="-5">右-5</button>
+    </div>
+
+    <!-- ==================== 移动端：悬浮工具按钮（悬浮于地图之上） ==================== -->
+    <div id="mobile-toolbar" class="m-only" hidden>
+      <button data-tool="paint" title="涂刷">✏️</button>
+      <button data-tool="pan" title="拖动">✋</button>
+      <button id="btn-undo-m" title="撤销">↩</button>
+      <button id="btn-redo-m" title="前进">↪</button>
+    </div>
+    <div id="mobile-actions" class="m-only" hidden>
+      <button id="btn-settings-m" title="地图信息 / 势力 / 校验">⚙</button>
+      <button id="btn-generate-m" title="随机生成地图">🎲</button>
+    </div>
+
+    <!-- ==================== 移动端：涂刷参数底栏 ==================== -->
+    <div id="mobile-brush" class="m-only" hidden>
+      <div class="mb-mode" title="涂刷模式">
+        <label class="chk"><input type="checkbox" id="m-mode-all" checked>全部</label>
+        <label class="chk"><input type="checkbox" id="m-mode-terrain">仅地形</label>
+        <label class="chk"><input type="checkbox" id="m-mode-strength">仅兵力</label>
+      </div>
+      <div class="mb-pal" id="m-terrain-palette" title="地形"><span class="mb-label">地形</span><div class="palette"></div></div>
+      <div class="mb-pal" id="m-owner-palette" title="归属"><span class="mb-label">归属</span><div class="palette"></div></div>
+      <div class="mb-pal" id="m-strength" title="兵力（0-255）"><span class="mb-label">兵力</span><input id="m-strength-input" type="number" min="0" max="255" value="5"></div>
     </div>
   </section>
 
@@ -171,6 +195,24 @@
   </div>
 </dialog>
 
+<!-- ==================== 移动端：齿轮弹窗（右侧面板内容） ==================== -->
+<dialog id="dlg-settings" class="m-dlg">
+  <div class="dlg-head">
+    <h3>地图设置</h3>
+    <button id="dlg-settings-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body"></div>
+</dialog>
+
+<!-- ==================== 移动端：随机生成弹窗 ==================== -->
+<dialog id="dlg-generate" class="m-dlg">
+  <div class="dlg-head">
+    <h3>随机生成地图</h3>
+    <button id="dlg-generate-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body"></div>
+</dialog>
+
 <script src="js/constants.js"></script>
 <script src="js/mapdata.js"></script>
 <script src="js/mapcode.js"></script>
@@ -181,5 +223,6 @@
 <script src="js/players.js"></script>
 <script src="js/editor.js"></script>
 <script src="js/main.js"></script>
+<script src="js/mobile.js"></script>
 </body>
 </html>
