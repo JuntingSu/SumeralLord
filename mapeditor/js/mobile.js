@@ -2,7 +2,7 @@
  * mobile.js — 手机端适配（在 main.js 之后加载）
  * 窄屏时：隐藏两侧侧边栏，只显示地图区域；
  * 左上悬浮 涂刷/拖动/撤回/前进（仅图标）；右上 齿轮（设置）/ 骰子（随机生成）按钮；
- * 涂刷模式下底部一条画笔参数栏（模式复选框 + 地形/归属色板 + 兵力输入框）；
+ * 涂刷模式下底部一条参数栏：模式/地形/归属/兵力 四个框，点击弹起选项面板（仿服务器地图搜索下拉）；
  * 右侧面板整块移入齿轮弹窗，随机生成模块移入骰子弹窗（内容与桌面端完全一致）。
  * 依赖全局：Editor / MapConst。
  */
@@ -37,8 +37,9 @@
   function buildTerrainPalette() {
     const s = Editor.getState();
     if (!s.map) return;
+    const pop = $('mb-pop-terrain');
     buildPalette(
-      document.querySelector('#m-terrain-palette .palette'),
+      pop,
       MapConst.TERRAIN_ORDER.map((t) => ({
         value: t,
         label: MapConst.TERRAIN_LABELS[t],
@@ -46,13 +47,14 @@
         text: MapConst.TERRAIN_LABELS[t],
       })),
       s.brush.terrain,
-      (v) => Editor.setBrush({ terrain: v }),
+      (v) => { Editor.setBrush({ terrain: v }); pop.hidden = true; },
     );
   }
 
   function buildOwnerPalette() {
     const s = Editor.getState();
     if (!s.map) return;
+    const pop = $('mb-pop-owner');
     const items = MapConst.OWNER_ORDER.map((o) => ({
       value: o,
       label: MapConst.OWNER_LABELS[o],
@@ -68,11 +70,17 @@
       });
     }
     buildPalette(
-      document.querySelector('#m-owner-palette .palette'),
+      pop,
       items,
       s.brush.owner,
-      (v) => Editor.setBrush({ owner: v }),
+      (v) => { Editor.setBrush({ owner: v }); pop.hidden = true; },
     );
+  }
+
+  function ownerLabel(owner, map) {
+    if (owner in MapConst.OWNER_LABELS) return MapConst.OWNER_LABELS[owner];
+    const p = map.player_list.find((x) => x.seat === owner);
+    return p ? `P${p.seat}` : String(owner);
   }
 
   function syncMobileUI() {
@@ -86,6 +94,10 @@
     mModeAll.checked = s.brush.mode === 'all';
     mModeTerrain.checked = s.brush.mode === 'terrain';
     mModeStrength.checked = s.brush.mode === 'strength';
+    $('m-mode-value').textContent = s.brush.mode === 'all' ? '全部' : s.brush.mode === 'terrain' ? '仅地形' : '仅兵力';
+    $('m-terrain-value').textContent = MapConst.TERRAIN_LABELS[s.brush.terrain] ?? s.brush.terrain;
+    $('m-owner-value').textContent = ownerLabel(s.brush.owner, s.map);
+    $('m-strength-value').textContent = s.brush.strength;
     mStrength.value = s.brush.strength;
     buildTerrainPalette();
     buildOwnerPalette();
@@ -126,19 +138,45 @@
   // 点击「生成随机地图」后关闭弹窗（实际生成由 main.js 的 btn-generate 处理器负责）
   $('btn-generate').addEventListener('click', () => closeDlg(dlgGenerate));
 
-  // 模式复选框：互斥，始终恰好勾选一个
+  // 模式复选框：互斥，始终恰好勾选一个；选定后收起面板
   function setMode(mode, self) {
     [mModeAll, mModeTerrain, mModeStrength].forEach((c) => { if (c !== self) c.checked = false; });
     Editor.setBrush({ mode });
+    $('mb-pop-mode').hidden = true;
   }
   mModeAll.addEventListener('change', () => { if (mModeAll.checked) setMode('all', mModeAll); else mModeAll.checked = true; });
   mModeTerrain.addEventListener('change', () => { if (mModeTerrain.checked) setMode('terrain', mModeTerrain); else mModeTerrain.checked = true; });
   mModeStrength.addEventListener('change', () => { if (mModeStrength.checked) setMode('strength', mModeStrength); else mModeStrength.checked = true; });
 
+  // 兵力：输入即应用（input 实时 + change 失焦提交），保证任何环境都能生效
+  function applyStrength(v) {
+    Editor.setBrush({ strength: v });
+    $('m-strength-value').textContent = v;
+  }
+  mStrength.addEventListener('input', () => {
+    applyStrength(Math.max(0, Math.min(255, Math.round(Number(mStrength.value) || 0))));
+  });
   mStrength.addEventListener('change', () => {
     const v = Math.max(0, Math.min(255, Math.round(Number(mStrength.value) || 0)));
-    Editor.setBrush({ strength: v });
     mStrength.value = v;
+    applyStrength(v);
+  });
+  $('m-strength-ok').addEventListener('click', () => { $('mb-pop-strength').hidden = true; });
+
+  // 四个参数框：点击展开对应选项面板（同一时刻只开一个）
+  document.querySelectorAll('#mobile-brush .mb-box').forEach((box) => {
+    box.addEventListener('click', (e) => {
+      if (e.target.closest('.mb-pop')) return; // 面板内点击由面板自身处理
+      const pop = box.querySelector('.mb-pop');
+      const willOpen = pop.hidden;
+      document.querySelectorAll('#mobile-brush .mb-pop').forEach((p) => { p.hidden = true; });
+      if (willOpen) pop.hidden = false;
+    });
+  });
+  // 点击底栏外任意处收起所有面板
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#mobile-brush')) return;
+    document.querySelectorAll('#mobile-brush .mb-pop').forEach((p) => { p.hidden = true; });
   });
 
   Editor.onUI(syncMobileUI);

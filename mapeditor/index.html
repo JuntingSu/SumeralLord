@@ -127,16 +127,35 @@
       <button id="btn-generate-m" title="随机生成地图">🎲</button>
     </div>
 
-    <!-- ==================== 移动端：涂刷参数底栏 ==================== -->
+    <!-- ==================== 移动端：涂刷参数底栏（四个框，点击弹起选项面板） ==================== -->
     <div id="mobile-brush" class="m-only" hidden>
-      <div class="mb-mode" title="涂刷模式">
-        <label class="chk"><input type="checkbox" id="m-mode-all" checked>全部</label>
-        <label class="chk"><input type="checkbox" id="m-mode-terrain">仅地形</label>
-        <label class="chk"><input type="checkbox" id="m-mode-strength">仅兵力</label>
+      <div class="mb-box" id="mb-mode" title="涂刷模式">
+        <span class="mb-caption">模式</span>
+        <span class="mb-current" id="m-mode-value">全部</span>
+        <div class="mb-pop" id="mb-pop-mode" hidden>
+          <label class="chk"><input type="checkbox" id="m-mode-all" checked>全部</label>
+          <label class="chk"><input type="checkbox" id="m-mode-terrain">仅地形</label>
+          <label class="chk"><input type="checkbox" id="m-mode-strength">仅兵力</label>
+        </div>
       </div>
-      <div class="mb-pal" id="m-terrain-palette" title="地形"><span class="mb-label">地形</span><div class="palette"></div></div>
-      <div class="mb-pal" id="m-owner-palette" title="归属"><span class="mb-label">归属</span><div class="palette"></div></div>
-      <div class="mb-pal" id="m-strength" title="兵力（0-255）"><span class="mb-label">兵力</span><input id="m-strength-input" type="number" min="0" max="255" value="5"></div>
+      <div class="mb-box" id="mb-terrain" title="地形">
+        <span class="mb-caption">地形</span>
+        <span class="mb-current" id="m-terrain-value">平原</span>
+        <div class="mb-pop" id="mb-pop-terrain" hidden></div>
+      </div>
+      <div class="mb-box" id="mb-owner" title="归属">
+        <span class="mb-caption">归属</span>
+        <span class="mb-current" id="m-owner-value">无主</span>
+        <div class="mb-pop" id="mb-pop-owner" hidden></div>
+      </div>
+      <div class="mb-box" id="mb-strength" title="兵力">
+        <span class="mb-caption">兵力</span>
+        <span class="mb-current" id="m-strength-value">5</span>
+        <div class="mb-pop" id="mb-pop-strength" hidden>
+          <input id="m-strength-input" type="number" min="0" max="255" value="5">
+          <button id="m-strength-ok" type="button" class="mini">确定</button>
+        </div>
+      </div>
     </div>
   </section>
 

@@ -327,8 +327,9 @@ dialog h3 { margin-bottom: 12px; }
 .m-only { display: none !important; }
 
 body.mobile #left,
-body.mobile #right-resizer,
-body.mobile .resize-float { display: none !important; }
+body.mobile #right-resizer { display: none !important; }
+/* 顶部尺寸按钮与左上/右上悬浮工具栏同排冲突，移动端隐藏（行调整可用底部 resize-bottom，拖动模式下可见） */
+body.mobile #resize-top { display: none !important; }
 
 /* 左上：涂刷/拖动/撤回/前进（仅图标，悬浮地图之上） */
 body.mobile #mobile-toolbar {
@@ -373,28 +374,62 @@ body.mobile #mobile-actions {
   border-radius: 6px;
 }
 
-/* 涂刷模式底栏：单行横向滚动，悬浮地图底部 */
+/* 涂刷参数底栏：四个框（模式/地形/归属/兵力），点击弹起选项面板（向上弹出） */
 body.mobile #mobile-brush { display: none !important; }
 body.mobile #mobile-brush.active {
   display: flex !important;
   position: absolute;
   left: 0; right: 0; bottom: 0;
   z-index: 30;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 5px 8px;
   background: rgba(38, 42, 51, 0.96);
   border-top: 1px solid var(--border);
-  overflow-x: auto;
-  white-space: nowrap;
 }
-#mobile-brush > * { flex: none; }
-#mobile-brush .mb-mode { display: flex; align-items: center; gap: 2px; }
-#mobile-brush .mb-mode .chk { margin: 0; font-size: 12px; }
-#mobile-brush .mb-mode .chk input { width: 15px; height: 15px; margin: 0; }
-#mobile-brush .mb-pal { display: flex; align-items: center; gap: 4px; }
-#mobile-brush .mb-label { color: var(--dim); font-size: 11px; }
-#m-strength-input { width: 54px; }
+.mb-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 2px 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.mb-box:hover { border-color: var(--accent); }
+.mb-box .mb-caption { color: var(--dim); font-size: 10px; line-height: 1; }
+.mb-box .mb-current {
+  font-size: 12px; line-height: 1.3; color: var(--text);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 选项面板：风格同服务器地图搜索结果下拉 */
+.mb-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 150px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* 最右侧框的面板向右对齐，避免超出屏幕 */
+.mb-box:last-child .mb-pop { left: auto; right: 0; }
+#mb-pop-terrain, #mb-pop-owner { flex-direction: row; flex-wrap: wrap; }
+.mb-pop .chk { margin: 0; font-size: 12px; white-space: nowrap; }
+.mb-pop .chk input { width: 15px; height: 15px; margin: 0; }
+#mb-pop-strength { flex-direction: row; align-items: center; gap: 6px; }
+#m-strength-input { width: 60px; }
 body.mobile .pal { width: 30px; height: 22px; font-size: 10px; }
 
 /* 移动端弹窗 */
