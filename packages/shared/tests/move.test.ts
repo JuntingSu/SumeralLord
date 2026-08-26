@@ -226,6 +226,18 @@ describe('§8.1.2 进攻事件', () => {
     expect(soldierAt(r.state, 18)).toBeNull();
   });
 
+  it('断兵进攻有反击次数的兵成功 → 进占移动不再重复扣兵力（3断兵攻1兵 → 应剩2）', () => {
+    const map = makeMap({ tiles: { 17: [CITY, 1, 1], 18: [OCEAN, 1, 3], 19: [PLAIN, 2, 1] } });
+    const asg = assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: 102 });
+    const { state } = startGame(map, asg);
+    // 断兵 str3 → 力 3 ≥ 1：成功；防守反击 1 → 3-1=2；进占移动不得再复制 -1（bug：再 -1 只剩 1）
+    const r = act(state, 1, { intentType: 'ATTACK', from: 18, to: 19 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(soldierAt(r.state, 19)).toMatchObject({ owner: 1, strength: 2, isLinked: false, hasMovement: false });
+    expect(soldierAt(r.state, 18)).toBeNull();
+  });
+
   it('进攻失败且防守无反击 → 进攻兵失去移动力', () => {
     const map = makeMap({ tiles: { 6: [CITY, 1, 3], 7: [PLAIN, 2, 9], 8: [PLAIN, 1, 1] } });
     // 构造 counter=0：先让 seat2 回合内防守方... 简化：直接用阻挡兵（永不反击）
