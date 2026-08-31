@@ -3,3 +3,4 @@ dist/
 *.log
 backend/data/
 mapeditor-release/
+pack.txt
