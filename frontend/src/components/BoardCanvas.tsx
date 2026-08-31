@@ -3,7 +3,7 @@
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
 // M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）+ 双击复位（view 变换统一应用于两层与拾取）；
 // 断兵视觉正式化：flag_{n}_hollow.png 镂空 sprite（未加载完成时回退 punchHollow 擦边）。
-import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { TERRAIN, TILE_OWNER } from '@dl/shared';
 import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
@@ -88,6 +88,17 @@ function centerOf(index: number, column: number, size: number, offX: number, off
   return { cx, cy };
 }
 
+/** 棋盘布局：由画布 CSS 尺寸与行列数计算六边形边长与居中偏移。静态层、动态层与拾取共用同一几何，避免两层错位。 */
+function computeLayout(cssW: number, cssH: number, rows: number, columns: number) {
+  const pad = 8;
+  const totalWUnits = SQRT3 * (columns + 0.5);
+  const totalHUnits = 2 + 1.5 * (rows - 1);
+  const size = Math.min((cssW - pad * 2) / totalWUnits, (cssH - pad * 2) / totalHUnits);
+  const totalW = totalWUnits * size;
+  const totalH = totalHUnits * size;
+  return { size, offX: (cssW - totalW) / 2, offY: (cssH - totalH) / 2, totalH };
+}
+
 /** 断兵 2px 镂空（过渡方案；hollow sprite 未加载时回退） */
 function punchHollow(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
   ctx.save();
@@ -157,6 +168,41 @@ export default function BoardCanvas({
 
   const geoRef = useRef({ rows: board.rows, columns: board.columns, cylindrical: board.cylindrical });
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  /** 画布 CSS 尺寸 + DPR：静态层/动态层/拾取共用同一尺寸源，任何变化都触发两层按新几何重绘 */
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0, dpr: 1 });
+
+  // 画布尺寸 / DPR 跟踪。静态层原先只在 view/board 变化时重绘，改窗口大小（桌面）或移动端浏览器
+  // UI 收起/DPR 变化后位图停留在旧尺寸被 CSS 拉伸，与每帧自适应的动态层错位；这里统一由
+  // ResizeObserver + 窗口 resize + DPR 监听驱动，使两层始终使用同一份几何。
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      const dpr = window.devicePixelRatio || 1;
+      setCanvasSize((prev) => (prev.w === w && prev.h === h && prev.dpr === dpr ? prev : { w, h, dpr }));
+    };
+    update();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(update);
+      ro.observe(el);
+    }
+    window.addEventListener('resize', update);
+    // 移动端浏览器 UI 收起/展开或缩放时 devicePixelRatio 可能变化（尺寸不变时 ResizeObserver 不触发），单独监听
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    mq.addEventListener?.('change', update);
+    window.visualViewport?.addEventListener('resize', update);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', update);
+      mq.removeEventListener?.('change', update);
+      window.visualViewport?.removeEventListener('resize', update);
+    };
+  }, []);
+
   /** owner → 旗帜编号（预计算；野生 0 无 sprite 走色块兜底，阻挡/未知用 8） */
   const flagOf = useMemo(() => {
     const map = new Map<number, number>();
@@ -185,20 +231,12 @@ export default function BoardCanvas({
       const y = clientY - rect.top;
       const { scale, offX, offY } = viewRef.current;
       const { rows, columns } = geoRef.current;
-      // 尺寸参数与静态层绘制一致（画布 css 尺寸下计算）
-      const cssW = rect.width;
-      const cssH = rect.height;
-      const pad = 8;
-      const totalWUnits = SQRT3 * (columns + 0.5);
-      const totalHUnits = 2 + 1.5 * (rows - 1);
-      const size = Math.min((cssW - pad * 2) / totalWUnits, (cssH - pad * 2) / totalHUnits);
-      const totalH = totalHUnits * size;
-      const baseOffX = (cssW - totalWUnits * size) / 2;
-      const baseOffY = (cssH - totalH) / 2;
+      // 拾取与静态/动态层共用同一布局几何（画布 css 尺寸下计算）
+      const L = computeLayout(rect.width, rect.height, rows, columns);
       let best: number | null = null;
       let bestDist = Infinity;
       for (let i = 0; i < rows * columns; i++) {
-        const c = centerOf(i, columns, size, baseOffX, baseOffY, totalH);
+        const c = centerOf(i, columns, L.size, L.offX, L.offY, L.totalH);
         const wx = offX + c.cx * scale;
         const wy = offY + c.cy * scale;
         const d = (x - wx) ** 2 + (y - wy) ** 2;
@@ -238,24 +276,16 @@ export default function BoardCanvas({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const cssW = canvas.clientWidth;
-    const cssH = canvas.clientHeight;
+    const { w: cssW, h: cssH, dpr } = canvasSize;
     if (cssW === 0 || cssH === 0) return;
-    const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
 
     const { rows, columns } = board;
-    const pad = 8;
-    const totalWUnits = SQRT3 * (columns + 0.5);
-    const totalHUnits = 2 + 1.5 * (rows - 1);
-    const size = Math.min((cssW - pad * 2) / totalWUnits, (cssH - pad * 2) / totalHUnits);
-    const totalW = totalWUnits * size;
-    const totalH = totalHUnits * size;
-    const offX = (cssW - totalW) / 2;
-    const offY = (cssH - totalH) / 2;
+    const L = computeLayout(cssW, cssH, rows, columns);
+    const { size, offX, offY, totalH } = L;
     // 地块间隔：绘制半径缩小，相邻地块之间留缝（布局/拾取仍用 size）
     const ts = size * (1 - TILE_GAP);
     // M5.2：视图变换
@@ -304,7 +334,7 @@ export default function BoardCanvas({
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-  }, [board, fogEnabled, fogLevels, view]);
+  }, [board, fogEnabled, fogLevels, view, canvasSize]);
 
   // 旗帜 sprite 预加载（实心 + 镂空）
   useEffect(() => {
@@ -380,9 +410,8 @@ export default function BoardCanvas({
       const canvas = overlayRef.current;
       const ctx = canvas?.getContext('2d');
       if (canvas && ctx) {
-        const cssW = canvas.clientWidth;
-        const cssH = canvas.clientHeight;
-        const dpr = window.devicePixelRatio || 1;
+        const { w: cssW, h: cssH, dpr } = canvasSize;
+        if (cssW === 0 || cssH === 0) return; // 尺寸未就绪，下一帧再画
         if (canvas.width !== Math.round(cssW * dpr)) {
           canvas.width = Math.round(cssW * dpr);
           canvas.height = Math.round(cssH * dpr);
@@ -390,13 +419,8 @@ export default function BoardCanvas({
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cssW, cssH);
         const { rows, columns } = board;
-        const pad = 8;
-        const totalWUnits = SQRT3 * (columns + 0.5);
-        const totalHUnits = 2 + 1.5 * (rows - 1);
-        const size = Math.min((cssW - pad * 2) / totalWUnits, (cssH - pad * 2) / totalHUnits);
-        const totalH = totalHUnits * size;
-        const offX = (cssW - totalWUnits * size) / 2;
-        const offY = (cssH - totalH) / 2;
+        const L = computeLayout(cssW, cssH, rows, columns);
+        const { size, offX, offY, totalH } = L;
         const ts = size * (1 - TILE_GAP);
         const v = viewRef.current;
         const tx = (c: { cx: number; cy: number }) => ({ cx: v.offX + c.cx * v.scale, cy: v.offY + c.cy * v.scale });
@@ -543,10 +567,10 @@ export default function BoardCanvas({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier]);
+  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier, canvasSize]);
 
   return (
-    <div className={className} style={{ position: 'relative', overflow: 'hidden' }}>
+    <div ref={containerRef} className={className} style={{ position: 'relative', overflow: 'hidden' }}>
       <canvas
         ref={staticRef}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', touchAction: 'none' }}
