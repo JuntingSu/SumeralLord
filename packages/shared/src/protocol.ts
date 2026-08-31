@@ -81,6 +81,10 @@ export type ReadyBody = z.infer<typeof ReadyBodySchema>;
 export const SelectForceBodySchema = z.object({ seat: z.number().int().min(-1).max(127) });
 export type SelectForceBody = z.infer<typeof SelectForceBodySchema>;
 
+/** 房主将某势力上的玩家移出（seat 为势力座次，非 -1） */
+export const ForceRemoveBodySchema = z.object({ seat: z.number().int().min(0).max(127) });
+export type ForceRemoveBody = z.infer<typeof ForceRemoveBodySchema>;
+
 // ---------- WS 房间阶段（BM3）：客户端 → 服务器 ----------
 
 export const ChatSendSchema = z.object({

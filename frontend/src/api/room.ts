@@ -67,6 +67,14 @@ export function kickPlayer(id: string, playerId: number): Promise<RoomData> {
   });
 }
 
+/** 房主将某势力上的玩家移出（被移者回落未选择势力·未准备状态） */
+export function kickFromForce(id: string, seat: number): Promise<RoomData> {
+  return api<RoomData>(`/api/rooms/${id}/force-remove`, {
+    method: 'POST',
+    body: JSON.stringify({ seat }),
+  });
+}
+
 export function updateRoomSettings(id: string, patch: RoomSettingsPatch): Promise<RoomData> {
   return api<RoomData>(`/api/rooms/${id}/settings`, {
     method: 'PATCH',

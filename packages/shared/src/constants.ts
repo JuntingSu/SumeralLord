@@ -55,7 +55,6 @@ export const AUTH = {
 
 export const CHAT = {
   MAX_LENGTH: 200,
-  RATE_PER_MIN: 10,
 } as const;
 
 export const ROOMS = {

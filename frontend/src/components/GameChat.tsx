@@ -1,4 +1,4 @@
-// 对局内聊天（POV 改动）：默认折叠在棋盘区域右下角仅显示最近一条消息，
+// 对局内聊天（POV 改动）：默认折叠在棋盘区域右下角显示最近 3 条消息，
 // 点击小三角展开查看全部对话；输入栏单行、发送按钮紧凑；观战也可发言。
 import { useEffect, useRef, useState } from 'react';
 import type { ChatEntry } from '../stores/room';
@@ -7,9 +7,11 @@ interface GameChatProps {
   chat: ChatEntry[];
   /** 发送（返回 false 表示发送失败，提示并保留输入） */
   onSend: (text: string) => boolean;
+  /** 定位容器类（默认对局内右下角浮层；房间页移动端可改为 fixed 定位） */
+  className?: string;
 }
 
-export default function GameChat({ chat, onSend }: GameChatProps) {
+export default function GameChat({ chat, onSend, className = 'absolute bottom-12 right-3 z-10' }: GameChatProps) {
   const [expanded, setExpanded] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
@@ -20,8 +22,6 @@ export default function GameChat({ chat, onSend }: GameChatProps) {
     const el = chatListRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [chat.length]);
-
-  const last = chat[chat.length - 1];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +36,7 @@ export default function GameChat({ chat, onSend }: GameChatProps) {
   };
 
   return (
-    <div className="absolute bottom-12 right-3 z-10 flex flex-col items-end gap-1.5">
+    <div className={`flex flex-col items-end gap-1.5 ${className}`}>
       {expanded ? (
         <div className="w-72 rounded-lg bg-slate-800/95 shadow-lg">
           <div className="flex items-center justify-between border-b border-slate-700 px-3 py-1.5">
@@ -47,7 +47,7 @@ export default function GameChat({ chat, onSend }: GameChatProps) {
               aria-label="收起对话"
             >
               <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <path d="M2 7.5l4-4 4 4" />
+                <path d="M2 4.5l4 4 4-4" />
               </svg>
             </button>
           </div>
@@ -79,25 +79,27 @@ export default function GameChat({ chat, onSend }: GameChatProps) {
           {sendError && <p className="px-3 pb-1 text-right text-[10px] text-red-400">{sendError}</p>}
         </div>
       ) : (
-        /* 折叠：仅显示最近一条 + 右下角小三角展开 */
+        /* 折叠：显示最近 3 条 + 小三角展开 */
         <button
           onClick={() => setExpanded(true)}
           className="flex max-w-72 items-center gap-1.5 rounded-lg bg-slate-800/90 px-3 py-1.5 text-left text-xs shadow-lg hover:bg-slate-700"
           title="展开全部对话"
         >
-          <span className="truncate">
-            {last ? (
-              <>
-                <span className="text-emerald-400">{last.username}：</span>
-                <span className="text-slate-200">{last.text}</span>
-              </>
+          <span className="min-w-0 flex-1 space-y-0.5">
+            {chat.length > 0 ? (
+              chat.slice(-3).map((m) => (
+                <span key={`${m.ts}-${m.from}`} className="block truncate">
+                  <span className="text-emerald-400">{m.username}：</span>
+                  <span className="text-slate-200">{m.text}</span>
+                </span>
+              ))
             ) : (
               <span className="text-slate-500">暂无消息</span>
             )}
           </span>
           <span className="shrink-0 text-slate-400">
             <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M2 4.5l4 4 4-4" />
+              <path d="M2 7.5l4-4 4 4" />
             </svg>
           </span>
         </button>

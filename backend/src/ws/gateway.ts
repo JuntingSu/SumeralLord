@@ -30,7 +30,6 @@ import type { Game, GameManager } from '../game/manager.js';
 import { ConsensusManager, type ConsensusFatalCode } from '../game/consensus.js';
 import { DisconnectWatch } from '../game/disconnectWatch.js';
 import type { TicketService } from '../auth/ticket.js';
-import { createRateLimiter } from '../utils/rateLimit.js';
 import { config } from '../config.js';
 import { settleMatch } from '../stats/settlement.js';
 
@@ -52,13 +51,12 @@ interface RoomConnection {
  * 房间阶段 WS 网关（BM3）：
  * - 一次性 ticket 握手 + 房间成员校验；同用户新连接顶替旧连接（4006）
  * - 心跳 PING/PONG，60s 无消息判定断线
- * - 订阅 RoomManager 状态事件并广播；CHAT 转发（长度/频率限制）
+ * - 订阅 RoomManager 状态事件并广播；CHAT 转发（仅长度限制）
  * - 断开 → 玩家标记离线（ROOM_UPDATE 广播）
  */
 export class WsGateway {
   private readonly wss: WebSocketServer;
   private readonly conns = new Set<RoomConnection>();
-  private readonly chatLimiter = createRateLimiter(CHAT.RATE_PER_MIN, 60_000);
   private readonly sweeper: NodeJS.Timeout;
   private readonly consensus: ConsensusManager;
   private readonly disconnectWatch: DisconnectWatch;
@@ -237,10 +235,6 @@ export class WsGateway {
       }
       if (chat.data.text.length > CHAT.MAX_LENGTH) {
         this.send(conn, { type: 'ERROR', code: 'INVALID_PARAMS', message: '消息过长', fatal: false });
-        return;
-      }
-      if (!this.chatLimiter(`${conn.roomId}:${conn.userId}`)) {
-        this.send(conn, { type: 'ERROR', code: 'RATE_LIMITED', message: '发言太频繁，请稍后再试', fatal: false });
         return;
       }
       const chatMsg: ChatMsg = {

@@ -4,6 +4,7 @@ import {
   ERROR_CODES,
   ChangeMapBodySchema,
   CreateRoomBodySchema,
+  ForceRemoveBodySchema,
   JoinRoomBodySchema,
   KickBodySchema,
   ReadyBodySchema,
@@ -131,6 +132,17 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
       const { id } = request.params as { id: string };
       const body = parseBody(SelectForceBodySchema, request.body);
       const room = app.rooms.selectForce(roomUserOf(request).id, id, body.seat);
+      return ok(reply, room);
+    } catch (err) {
+      return sendRoomError(reply, err);
+    }
+  });
+
+  app.post('/api/rooms/:id/force-remove', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const body = parseBody(ForceRemoveBodySchema, request.body);
+      const room = app.rooms.kickForce(roomUserOf(request).id, id, body.seat);
       return ok(reply, room);
     } catch (err) {
       return sendRoomError(reply, err);

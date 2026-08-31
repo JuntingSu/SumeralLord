@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { MapFullData, MapMeta, RoomSettingsPatch } from '@dl/shared';
+import type { MapFullData, MapMeta, RoomPlayer, RoomSettingsPatch } from '@dl/shared';
 import { TIME_OPTIONS } from '@dl/shared';
 import { getMap, listMaps } from '../api/map';
 import {
   changeRoomMap,
   disbandRoom,
   getRoom,
+  kickFromForce,
   kickPlayer,
   leaveRoom,
   selectForce,
@@ -23,16 +24,41 @@ import { WsClient } from '../ws/client';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
 import Chat from '../components/Chat';
+import GameChat from '../components/GameChat';
 
-const STATE_BADGE: Record<string, { text: string; cls: string }> = {
-  unready: { text: '未准备', cls: 'bg-slate-600 text-slate-200' },
-  prepared: { text: '已准备', cls: 'bg-emerald-700 text-emerald-100' },
-  spectating: { text: '观战', cls: 'bg-indigo-700 text-indigo-100' },
-  in_game: { text: '对局中', cls: 'bg-indigo-700 text-indigo-100' },
-};
+/** 玩家状态 icon：灰空心圆=未准备，绿√=已准备，红×=断线；紧贴玩家名展示 */
+function PlayerStateIcon({ player }: { player: RoomPlayer }) {
+  if (!player.online) {
+    return (
+      <span
+        title="已断线"
+        className="ml-1 inline-flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded-full bg-red-500 align-middle text-[9px] font-bold leading-none text-white"
+      >
+        ✕
+      </span>
+    );
+  }
+  if (player.state === 'prepared') {
+    return (
+      <span
+        title="已准备"
+        className="ml-1 inline-flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded-full bg-emerald-500 align-middle text-[9px] font-bold leading-none text-white"
+      >
+        ✓
+      </span>
+    );
+  }
+  return <span title="未准备" className="ml-1 inline-block h-[13px] w-[13px] shrink-0 rounded-full border-2 border-slate-400 align-middle" />;
+}
 
-/** 势力行：座次 | 旗帜 | 势力名 | 扮演用户名 | 队伍 | 准备状态 | 选择/取消 */
-const FORCE_ROW_COLS = 'grid grid-cols-[44px_36px_minmax(72px,1fr)_minmax(72px,1fr)_48px_56px_64px] items-center gap-2';
+/** 势力行：座次 | 旗帜 | 势力名 | 扮演玩家 | 队伍 | (桌面)准备状态 | 选择/取消；窄屏去掉状态列并收窄列宽 */
+const FORCE_ROW_COLS =
+  'grid grid-cols-[36px_30px_minmax(48px,1fr)_minmax(48px,1fr)_36px_48px] items-center gap-1.5 sm:grid-cols-[44px_36px_minmax(72px,1fr)_minmax(72px,1fr)_48px_56px_64px] sm:gap-2';
+
+/** 地图六边形网格高宽比（与 HexMapPreview 尺寸计算一致），用于移动端浮动小预览等比例缩放 */
+function mapAspectRatio(map: MapFullData): number {
+  return (2 + 1.5 * (map.row - 1)) / (Math.sqrt(3) * (map.column + 0.5));
+}
 
 export default function Room() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -49,6 +75,10 @@ export default function Room() {
   const [maps, setMaps] = useState<MapMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WsClient | null>(null);
+  const mapPreviewRef = useRef<HTMLDivElement>(null);
+  const [mapPreviewFullyVisible, setMapPreviewFullyVisible] = useState(true);
+  const [mapPreviewDismissed, setMapPreviewDismissed] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
 
   // 加载房间 + 成员身份校验
   useEffect(() => {
@@ -124,6 +154,24 @@ export default function Room() {
       .catch(() => setMapFull(null));
   }, [room?.mapId, room, mapFull?.id]);
 
+  // 地图预览完整可见性（移动端单列布局：整幅预览未完整进入视口时，左下角浮动小预览）
+  useEffect(() => {
+    const el = mapPreviewRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const obs = new IntersectionObserver(([entry]) => setMapPreviewFullyVisible(entry.isIntersecting), {
+      threshold: 1,
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [mapFull?.id]);
+
+  // 视口宽度变化 → 浮动小预览高度按「页宽 45%」等比例更新
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // 换图候选
   useEffect(() => {
     listMaps()
@@ -150,6 +198,7 @@ export default function Room() {
   const isHost = room.hostId === me.id;
   const isSpectator = myPlayer?.state === 'spectating';
   const players = room.players.filter((p) => p.state !== 'spectating');
+  const spectators = room.players.filter((p) => p.state === 'spectating');
   const allReady = players.length > 0 && players.every((p) => p.state === 'prepared');
   const canStart = isHost && allReady;
   const myForceSelected = room.forces.some((f) => f.playerId === me.id);
@@ -191,8 +240,8 @@ export default function Room() {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-900 text-white">
-      <header className="flex items-center justify-between border-b border-slate-700 px-6 py-3">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-3 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <Link to="/lobby" className="text-sm text-emerald-400 hover:underline">
             ← 大厅
           </Link>
@@ -221,22 +270,20 @@ export default function Room() {
       </header>
 
       {error && (
-        <div className="mx-6 mt-3 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200" role="alert">
+        <div className="mx-3 mt-3 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200 sm:mx-6" role="alert">
           {error}
         </div>
       )}
 
-      <main className="mx-auto grid w-full max-w-6xl flex-1 gap-4 px-6 py-4 lg:grid-cols-[240px_1fr_320px]">
-        {/* 玩家列表 */}
-        <section className="rounded-lg bg-slate-800 p-4">
-          <h2 className="mb-3 text-sm font-bold text-slate-400">
-            玩家（{players.length}/{room.playerNum}）
-            {room.players.length > players.length && ` · 观战 ${room.players.length - players.length}`}
-          </h2>
-          <ul className="space-y-2">
-            {room.players.map((p) => {
-              const badge = STATE_BADGE[p.state] ?? STATE_BADGE.unready;
-              return (
+      <main className="mx-auto grid w-full max-w-6xl flex-1 gap-3 px-3 py-4 sm:gap-4 sm:px-6 lg:grid-cols-[240px_1fr_320px]">
+        {/* 左侧列：玩家列表 + 观战列表（观战单列展示在左下角） */}
+        <div className="flex min-h-0 flex-col gap-4">
+          <section className="rounded-lg bg-slate-800 p-4">
+            <h2 className="mb-3 text-sm font-bold text-slate-400">
+              玩家（{players.length}/{room.playerNum}）
+            </h2>
+            <ul className="space-y-2">
+              {players.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 rounded bg-slate-700/50 px-2 py-1.5">
                   <img
                     src={`/static/flags/flag_${p.flag}.png`}
@@ -247,16 +294,17 @@ export default function Room() {
                     }}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">
-                      {p.username}
-                      {p.id === room.hostId && <span title="房主">👑</span>}
-                      {!p.online && <span className="ml-1 text-xs text-slate-500">离线</span>}
+                    <span className="flex min-w-0 items-center text-sm">
+                      <span className="truncate">
+                        {p.username}
+                        {p.id === room.hostId && <span title="房主">👑</span>}
+                      </span>
+                      <PlayerStateIcon player={p} />
                     </span>
                     <span className="block truncate text-xs text-slate-400">
-                      {p.score.toFixed(1)} 分 · 胜率 {p.matches > 0 ? `${p.wins}/${p.matches}` : '—'}
+                      {p.score.toFixed(1)} 分 · 胜率 {p.matches > 0 ? `${((p.wins / p.matches) * 100).toFixed(1)}%` : '—'}
                     </span>
                   </span>
-                  <span className={`rounded px-1.5 py-0.5 text-xs ${badge.cls}`}>{badge.text}</span>
                   {isHost && p.id !== me.id && (
                     <button
                       onClick={() => guard(() => kickPlayer(room.id, p.id))}
@@ -267,21 +315,62 @@ export default function Room() {
                     </button>
                   )}
                 </li>
-              );
-            })}
-          </ul>
-        </section>
+              ))}
+            </ul>
+          </section>
+
+          {spectators.length > 0 && (
+            <section className="rounded-lg bg-slate-800 p-4">
+              <h2 className="mb-3 text-sm font-bold text-slate-400">观战（{spectators.length}）</h2>
+              <ul className="space-y-2">
+                {spectators.map((p) => (
+                  <li key={p.id} className="flex items-center gap-2 rounded bg-slate-700/50 px-2 py-1.5">
+                    <img
+                      src={`/static/flags/flag_${p.flag}.png`}
+                      alt=""
+                      className="h-7 w-6 object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.visibility = 'hidden';
+                      }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center text-sm">
+                        <span className="truncate">
+                          {p.username}
+                          {p.id === room.hostId && <span title="房主">👑</span>}
+                        </span>
+                        {!p.online && <PlayerStateIcon player={p} />}
+                      </span>
+                      <span className="block truncate text-xs text-slate-400">
+                        {p.score.toFixed(1)} 分 · 胜率 {p.matches > 0 ? `${((p.wins / p.matches) * 100).toFixed(1)}%` : '—'}
+                      </span>
+                    </span>
+                    {isHost && p.id !== me.id && (
+                      <button
+                        onClick={() => guard(() => kickPlayer(room.id, p.id))}
+                        className="text-xs text-red-400 hover:text-red-300"
+                        title="踢出房间"
+                      >
+                        踢出
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
 
         {/* 势力列表：单列行式布局 */}
         <section className="flex min-h-0 flex-col rounded-lg bg-slate-800 p-4">
           <h2 className="mb-3 text-sm font-bold text-slate-400">势力选择（先到先得）</h2>
-          <div className={`${FORCE_ROW_COLS} mb-1 px-2 text-xs font-bold text-slate-500`}>
+          <div className={`${FORCE_ROW_COLS} mb-1 px-1.5 text-xs font-bold text-slate-500 sm:px-2`}>
             <span>座次</span>
             <span>旗帜</span>
             <span>势力名</span>
             <span>扮演玩家</span>
             <span>队伍</span>
-            <span>状态</span>
+            <span className="hidden sm:block">状态</span>
             <span className="text-right">操作</span>
           </div>
           <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
@@ -289,7 +378,7 @@ export default function Room() {
               const occupant = f.playerId !== null ? room.players.find((p) => p.id === f.playerId) : null;
               const mine = f.playerId === me.id;
               return (
-                <li key={f.seat} className={`${FORCE_ROW_COLS} rounded bg-slate-700/30 px-2 py-1.5`}>
+                <li key={f.seat} className={`${FORCE_ROW_COLS} rounded bg-slate-700/30 px-1.5 py-1.5 sm:px-2`}>
                   <span className="text-sm text-slate-400">{f.seat}</span>
                   <img
                     src={`/static/flags/flag_${f.flag}.png`}
@@ -304,15 +393,24 @@ export default function Room() {
                     {occupant?.username ?? '—'}
                   </span>
                   <span className="text-sm text-slate-400">{f.team}</span>
-                  <span className="text-xs text-slate-400">{seatStateText(f.playerId)}</span>
+                  <span className="hidden text-xs text-slate-400 sm:block">{seatStateText(f.playerId)}</span>
                   <span className="text-right">
                     {occupant ? (
                       mine && !isSpectator ? (
                         <button
                           onClick={() => guard(() => selectForce(room.id, -1))}
                           className="text-xs text-red-400 hover:text-red-300"
+                          title="取消自己的选择"
                         >
                           取消
+                        </button>
+                      ) : isHost && !mine ? (
+                        <button
+                          onClick={() => guard(() => kickFromForce(room.id, f.seat))}
+                          className="text-xs text-red-400 hover:text-red-300"
+                          title={`将 ${occupant.username} 移出该势力`}
+                        >
+                          踢出
                         </button>
                       ) : null
                     ) : isSpectator ? (
@@ -332,7 +430,7 @@ export default function Room() {
           </ul>
 
           {/* 底部操作区 */}
-          <div className="mt-4 flex items-center gap-3 border-t border-slate-700 pt-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-700 pt-3">
             {!isSpectator && (
               <button
                 onClick={() => guard(() => setReady(room.id, myPlayer?.state !== 'prepared'))}
@@ -381,7 +479,9 @@ export default function Room() {
             <h2 className="mb-2 text-sm font-bold text-slate-400">地图</h2>
             {mapFull ? (
               <>
-                <HexMapPreview battlefield={mapFull.battlefield} column={mapFull.column} row={mapFull.row} height={200} />
+                <div ref={mapPreviewRef}>
+                  <HexMapPreview battlefield={mapFull.battlefield} column={mapFull.column} row={mapFull.row} height={200} />
+                </div>
                 <p className="mt-2 text-sm font-medium">{mapFull.title}</p>
                 <p className="text-xs text-slate-400">
                   {mapFull.column}×{mapFull.row} · {mapFull.player_num} 势力 · {mapFull.tags.join(' / ')}
@@ -481,14 +581,56 @@ export default function Room() {
         </section>
       </main>
 
-      {/* 底部聊天 */}
-      <footer className="border-t border-slate-700 px-6 py-3">
+      {/* 底部聊天（仅桌面端；移动端改用右下角浮层对话） */}
+      <footer className="hidden border-t border-slate-700 px-3 py-3 sm:px-6 lg:block">
         <Chat
           chat={chat}
           placeholder={isSpectator ? '观战中…（房间内可发言）' : '输入消息…'}
           onSend={(text) => !!wsRef.current?.sendChat(text)}
         />
       </footer>
+
+      {/* 移动端：整幅地图预览未完整展示时，左下角浮动 45% 页宽、70% 透明度的等比例小预览；可关闭/恢复 */}
+      {!mapPreviewFullyVisible && mapFull && (
+        <div className="pointer-events-none fixed bottom-3 left-3 z-10 flex items-end gap-1.5 lg:hidden">
+          {mapPreviewDismissed ? (
+            <button
+              onClick={() => setMapPreviewDismissed(false)}
+              className="pointer-events-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-700/90 text-sm font-bold text-white shadow-lg"
+              title="恢复地图预览"
+              aria-label="恢复地图预览"
+            >
+              {'>'}
+            </button>
+          ) : (
+            <>
+              <div className="overflow-hidden rounded-lg opacity-70" style={{ width: '45vw' }}>
+                <HexMapPreview
+                  battlefield={mapFull.battlefield}
+                  column={mapFull.column}
+                  row={mapFull.row}
+                  height={Math.round(viewportWidth * 0.45 * mapAspectRatio(mapFull))}
+                />
+              </div>
+              <button
+                onClick={() => setMapPreviewDismissed(true)}
+                className="pointer-events-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700/90 text-xs text-white shadow-lg"
+                title="关闭地图预览"
+                aria-label="关闭地图预览"
+              >
+                ✕
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 移动端：对话使用对局内实现（折叠气泡 + 展开面板） */}
+      <GameChat
+        chat={chat}
+        onSend={(text) => !!wsRef.current?.sendChat(text)}
+        className="fixed bottom-3 right-3 z-20 lg:hidden"
+      />
     </div>
   );
 }

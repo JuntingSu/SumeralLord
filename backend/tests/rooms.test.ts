@@ -336,3 +336,74 @@ describe('空闲自动解散（注入短超时）', () => {
     }
   });
 });
+
+describe('房主移出势力（/force-remove）', () => {
+  it('房主可将已准备玩家移出势力，被移者回落未准备', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: createPayload({ name: '移出势力测试' }),
+    });
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth('bob'), payload: { asSpectator: false } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('bob'), payload: { seat: 1 } });
+    const ready = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('bob'), payload: { ready: true } });
+    expect(ready.statusCode).toBe(200);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-remove`,
+      headers: auth('alice'),
+      payload: { seat: 1 },
+    });
+    expect(res.statusCode).toBe(200);
+    const room = res.json().data;
+    const force = (room.forces as Array<{ seat: number; playerId: number | null }>).find((f) => f.seat === 1);
+    expect(force?.playerId).toBeNull();
+    const bobState = (room.players as Array<{ username: string; state: string }>).find((p) => p.username === 'bob');
+    expect(bobState?.state).toBe('unready');
+
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
+  });
+
+  it('非房主移出势力 → 403 NOT_HOST；移出空势力/自己 → 400', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: createPayload({ name: '移出势力测试2' }),
+    });
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth('bob'), payload: { asSpectator: false } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('bob'), payload: { seat: 1 } });
+
+    const notHost = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-remove`,
+      headers: auth('bob'),
+      payload: { seat: 2 },
+    });
+    expect(notHost.statusCode).toBe(403);
+    expect(notHost.json().code).toBe('NOT_HOST');
+
+    const empty = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-remove`,
+      headers: auth('alice'),
+      payload: { seat: 2 },
+    });
+    expect(empty.statusCode).toBe(400);
+
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('alice'), payload: { seat: 2 } });
+    const self = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-remove`,
+      headers: auth('alice'),
+      payload: { seat: 2 },
+    });
+    expect(self.statusCode).toBe(400);
+
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
+  });
+});

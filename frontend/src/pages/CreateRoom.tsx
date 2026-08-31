@@ -84,7 +84,7 @@ export default function CreateRoom() {
           ← 返回大厅
         </Link>
       </header>
-      <main className="mx-auto grid max-w-5xl gap-8 px-6 py-8 md:grid-cols-2">
+      <main className="mx-auto max-w-5xl px-6 py-8">
         <form onSubmit={handleSubmit} className="rounded-lg bg-slate-800 p-6">
           <h1 className="mb-6 text-xl font-bold">创建房间</h1>
           {error && (
@@ -93,86 +93,112 @@ export default function CreateRoom() {
             </div>
           )}
 
-          <label className={labelCls} htmlFor="room-name">房间名</label>
-          <input id="room-name" className={`${inputCls} mb-4`} value={name} onChange={(e) => setName(e.target.value)} required maxLength={20} />
+          {/* 左列全部输入项 + 右列地图预览：步时/局时/加时竖排三行、复选框与计时都只占左半，右半留给预览（窄屏同样两栏） */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:gap-x-6">
+            <div className="min-w-0 space-y-4">
+              <div>
+                <label className={labelCls} htmlFor="room-name">房间名</label>
+                <input id="room-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required maxLength={20} />
+              </div>
+              <div>
+                <label className={labelCls} htmlFor="room-password">密码（留空为无密码）</label>
+                <input id="room-password" className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={32} />
+              </div>
+              <div>
+                <label className={labelCls} htmlFor="map-select">地图</label>
+                <MapPicker id="map-select" maps={maps} value={mapId} onChange={setMapId} />
+              </div>
 
-          <label className={labelCls} htmlFor="room-password">密码（留空为无密码）</label>
-          <input id="room-password" className={`${inputCls} mb-4`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={32} />
+              {/* 允许观战/战争迷雾/随机出生点：宽屏在左列一行三列；窄屏移入右列预览图下方 */}
+              <div className="hidden gap-2 pt-2 sm:grid sm:grid-cols-3">
+                <label className="flex items-center gap-1.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={allowSpectate} onChange={(e) => setAllowSpectate(e.target.checked)} />
+                  允许观战
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={fogMode} onChange={(e) => setFogMode(e.target.checked)} />
+                  战争迷雾
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={randomSpawn} onChange={(e) => setRandomSpawn(e.target.checked)} />
+                  随机出生点
+                </label>
+              </div>
 
-          <label className={labelCls} htmlFor="map-select">地图</label>
-          <div className="mb-4">
-            <MapPicker id="map-select" maps={maps} value={mapId} onChange={setMapId} />
-          </div>
+              {/* 步时/局时/加时：足够宽时一行三列，过窄则一行一个 */}
+              <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-3">
+                <div>
+                  <label className={labelCls} htmlFor="step-time">步时(秒)</label>
+                  <select id="step-time" className={inputCls} value={stepTime} onChange={(e) => setStepTime(Number(e.target.value))}>
+                    {TIME_OPTIONS.stepTime.map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="game-time">局时(秒)</label>
+                  <select id="game-time" className={inputCls} value={gameTime} onChange={(e) => setGameTime(Number(e.target.value))}>
+                    {TIME_OPTIONS.gameTime.map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="add-time">加时(秒)</label>
+                  <select id="add-time" className={inputCls} value={additionalTime} onChange={(e) => setAdditionalTime(Number(e.target.value))}>
+                    {TIME_OPTIONS.additionalTime.map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-          <div className="mb-4 space-y-2">
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={allowSpectate} onChange={(e) => setAllowSpectate(e.target.checked)} />
-              允许观战
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={fogMode} onChange={(e) => setFogMode(e.target.checked)} />
-              战争迷雾
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={randomSpawn} onChange={(e) => setRandomSpawn(e.target.checked)} />
-              随机出生点
-            </label>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className={labelCls} htmlFor="step-time">步时(秒)</label>
-              <select id="step-time" className={inputCls} value={stepTime} onChange={(e) => setStepTime(Number(e.target.value))}>
-                {TIME_OPTIONS.stepTime.map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
+              <button
+                type="submit"
+                disabled={busy}
+                className="mt-2 w-full rounded bg-emerald-600 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {busy ? '创建中…' : '创建并进入'}
+              </button>
             </div>
-            <div>
-              <label className={labelCls} htmlFor="game-time">局时(秒)</label>
-              <select id="game-time" className={inputCls} value={gameTime} onChange={(e) => setGameTime(Number(e.target.value))}>
-                {TIME_OPTIONS.gameTime.map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="add-time">加时(秒)</label>
-              <select id="add-time" className={inputCls} value={additionalTime} onChange={(e) => setAdditionalTime(Number(e.target.value))}>
-                {TIME_OPTIONS.additionalTime.map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
+
+            {/* 右列：地图预览（占满右半高度） */}
+            <div className="min-w-0">
+              <h2 className="mb-2 text-sm font-bold text-slate-400">地图预览</h2>
+              {preview ? (
+                <HexMapPreview battlefield={preview.battlefield} column={preview.column} row={preview.row} height={280} />
+              ) : mapId ? (
+                <div className="flex h-56 items-center justify-center text-slate-500">加载中…</div>
+              ) : (
+                <div className="flex h-56 items-center justify-center text-slate-500">请选择地图以查看预览</div>
+              )}
+              {(() => {
+                const meta = maps.find((m) => m.id === mapId);
+                return meta ? (
+                  <p className="mt-2 text-sm text-slate-400">
+                    {meta.title} · {meta.playerNum} 人 · {meta.description}
+                  </p>
+                ) : null;
+              })()}
+
+              {/* 窄屏：观战/迷雾/出生点选项放在预览图下方 */}
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:hidden">
+                <label className="flex items-center gap-1.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={allowSpectate} onChange={(e) => setAllowSpectate(e.target.checked)} />
+                  允许观战
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={fogMode} onChange={(e) => setFogMode(e.target.checked)} />
+                  战争迷雾
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={randomSpawn} onChange={(e) => setRandomSpawn(e.target.checked)} />
+                  随机出生点
+                </label>
+              </div>
             </div>
           </div>
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-6 w-full rounded bg-emerald-600 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {busy ? '创建中…' : '创建并进入'}
-          </button>
         </form>
-
-        <section className="rounded-lg bg-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-bold">地图预览</h2>
-          {preview ? (
-            <HexMapPreview battlefield={preview.battlefield} column={preview.column} row={preview.row} height={320} />
-          ) : mapId ? (
-            <div className="flex h-64 items-center justify-center text-slate-500">加载中…</div>
-          ) : (
-            <div className="flex h-64 items-center justify-center text-slate-500">请选择地图以查看预览</div>
-          )}
-          {(() => {
-            const meta = maps.find((m) => m.id === mapId);
-            return meta ? (
-              <p className="mt-4 text-sm text-slate-400">
-                {meta.title} · {meta.playerNum} 人 · {meta.description}
-              </p>
-            ) : null;
-          })()}
-        </section>
       </main>
     </div>
   );

@@ -254,6 +254,28 @@ export class RoomManager {
     return this.toRoomData(room);
   }
 
+  /** 房主将某势力上的玩家移出（无论其是否已准备；被移者回落"未选择势力·未准备"状态） */
+  kickForce(hostUserId: number, roomId: string, seat: number): RoomData {
+    const room = this.mustGet(roomId);
+    this.touch(room);
+    if (room.hostId !== hostUserId) throw new RoomError('NOT_HOST', '仅房主可执行此操作');
+    if (room.status === 'IN_GAME') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    if (room.status === 'GAME_OVER') throw new RoomError('INVALID_PARAMS', '对局已结束，结算展示中，稍后可再来一局');
+    const force = room.forces.find((f) => f.seat === seat);
+    if (!force) throw new RoomError('INVALID_PARAMS', '势力不存在');
+    if (force.playerId === null) throw new RoomError('INVALID_PARAMS', '该势力没有玩家');
+    if (force.playerId === hostUserId) throw new RoomError('INVALID_PARAMS', '不能移出自己，请使用取消');
+    const targetId = force.playerId;
+    force.playerId = null;
+    this.emit({ type: 'FORCE_SELECT', roomId: room.id, seat: force.seat, playerId: null });
+    const target = room.players.get(targetId);
+    if (target && target.state === 'prepared') {
+      target.state = 'unready';
+      this.emit({ type: 'PLAYER_READY', roomId: room.id, playerId: targetId, ready: false });
+    }
+    return this.toRoomData(room);
+  }
+
   /** WS 连接/断开 → 在线标记（变化才广播 ROOM_UPDATE） */
   setOnline(userId: number, roomId: string, online: boolean): void {
     const room = this.rooms.get(roomId);
