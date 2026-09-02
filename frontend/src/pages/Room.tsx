@@ -21,6 +21,7 @@ import { useLobby } from '../stores/lobby';
 import { useRoom } from '../stores/room';
 import { useGame } from '../stores/game';
 import { WsClient } from '../ws/client';
+import { avatarUrl, flagImgUrl } from '../lib/flags';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
 import Chat from '../components/Chat';
@@ -286,7 +287,7 @@ export default function Room() {
               {players.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 rounded bg-slate-700/50 px-2 py-1.5">
                   <img
-                    src={`/static/flags/flag_${p.flag}.png`}
+                    src={avatarUrl(p.id, p.flag, p.hasSkin)}
                     alt=""
                     className="h-7 w-6 object-contain"
                     onError={(e) => {
@@ -326,7 +327,7 @@ export default function Room() {
                 {spectators.map((p) => (
                   <li key={p.id} className="flex items-center gap-2 rounded bg-slate-700/50 px-2 py-1.5">
                     <img
-                      src={`/static/flags/flag_${p.flag}.png`}
+                      src={avatarUrl(p.id, p.flag, p.hasSkin)}
                       alt=""
                       className="h-7 w-6 object-contain"
                       onError={(e) => {
@@ -381,7 +382,7 @@ export default function Room() {
                 <li key={f.seat} className={`${FORCE_ROW_COLS} rounded bg-slate-700/30 px-1.5 py-1.5 sm:px-2`}>
                   <span className="text-sm text-slate-400">{f.seat}</span>
                   <img
-                    src={`/static/flags/flag_${f.flag}.png`}
+                    src={flagImgUrl(f.flag)}
                     alt=""
                     className="h-7 w-6 object-contain"
                     onError={(e) => {
@@ -529,6 +530,18 @@ export default function Room() {
                   checked={room.aiTakeover}
                   disabled={!isHost}
                   onChange={(e) => handleSettingsPatch({ aiTakeover: e.target.checked })}
+                />
+              </label>
+              <label
+                className="flex items-center justify-between"
+                title="勾选后，对局初始化时各势力旗帜替换为扮演玩家的个人皮肤（未上传皮肤的玩家保持原旗帜）"
+              >
+                <span className="text-slate-300">使用个人皮肤</span>
+                <input
+                  type="checkbox"
+                  checked={room.usePersonalSkin}
+                  disabled={!isHost}
+                  onChange={(e) => handleSettingsPatch({ usePersonalSkin: e.target.checked })}
                 />
               </label>
               {isHost && (

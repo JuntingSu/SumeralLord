@@ -27,6 +27,7 @@ interface RoomPlayerInternal {
   id: number;
   username: string;
   flag: number;
+  hasSkin: boolean;
   state: 'unready' | 'prepared' | 'spectating' | 'in_game';
   online: boolean;
   joinedAt: number;
@@ -41,6 +42,7 @@ interface Room {
   fogMode: boolean;
   randomSpawn: boolean;
   aiTakeover: boolean;
+  usePersonalSkin: boolean;
   mapId: string;
   mapTitle: string;
   mapPlayerNum: number;
@@ -61,6 +63,8 @@ export interface RoomUser {
   id: number;
   username: string;
   flag: number;
+  /** 是否已上传个人皮肤（头像展示 / 开局换肤判定用） */
+  hasSkin: boolean;
 }
 
 /** 玩家战绩统计（房间玩家列表展示用；由调用方从 DB 读取，实时序列化） */
@@ -111,6 +115,7 @@ export class RoomManager {
       fogMode: boolean;
       randomSpawn: boolean;
       aiTakeover?: boolean;
+      usePersonalSkin?: boolean;
       timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
     },
     map: MapFullData,
@@ -126,6 +131,7 @@ export class RoomManager {
       fogMode: body.fogMode,
       randomSpawn: body.randomSpawn,
       aiTakeover: body.aiTakeover ?? false,
+      usePersonalSkin: body.usePersonalSkin ?? false,
       mapId: map.id,
       mapTitle: map.title,
       mapPlayerNum: map.player_num,
@@ -359,6 +365,7 @@ export class RoomManager {
       fogMode?: boolean;
       randomSpawn?: boolean;
       aiTakeover?: boolean;
+      usePersonalSkin?: boolean;
       timeSettings?: { stepTime: number; gameTime: number; additionalTime: number };
     },
   ): RoomData {
@@ -371,6 +378,7 @@ export class RoomManager {
     if (patch.fogMode !== undefined) room.fogMode = patch.fogMode;
     if (patch.randomSpawn !== undefined) room.randomSpawn = patch.randomSpawn;
     if (patch.aiTakeover !== undefined) room.aiTakeover = patch.aiTakeover;
+    if (patch.usePersonalSkin !== undefined) room.usePersonalSkin = patch.usePersonalSkin;
     if (patch.timeSettings !== undefined) room.timeSettings = patch.timeSettings;
     const data = this.toRoomData(room);
     this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: data });
@@ -483,6 +491,7 @@ export class RoomManager {
       id: p.id,
       username: p.username,
       flag: p.flag,
+      hasSkin: p.hasSkin,
       state: p.state,
       online: p.online,
       joinedAt: p.joinedAt,
@@ -512,6 +521,7 @@ export class RoomManager {
       fogMode: room.fogMode,
       randomSpawn: room.randomSpawn,
       aiTakeover: room.aiTakeover,
+      usePersonalSkin: room.usePersonalSkin,
       mapId: room.mapId,
       mapTitle: room.mapTitle,
       playerNum: room.mapPlayerNum,

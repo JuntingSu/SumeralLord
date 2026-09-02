@@ -11,6 +11,9 @@ import Game from './pages/Game';
 import Replay from './pages/Replay';
 import History from './pages/History';
 import Leaderboard from './pages/Leaderboard';
+import Profile from './pages/Profile';
+import ProfileSettings from './pages/ProfileSettings';
+import SkinStudio from './pages/SkinStudio';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
@@ -90,6 +93,30 @@ export default function App() {
         element={
           <RequireAuth>
             <Leaderboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <RequireAuth>
+            <Profile />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile/settings"
+        element={
+          <RequireAuth>
+            <ProfileSettings />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile/skin"
+        element={
+          <RequireAuth>
+            <SkinStudio />
           </RequireAuth>
         }
       />

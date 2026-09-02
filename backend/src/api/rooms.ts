@@ -14,6 +14,7 @@ import {
 } from '@dl/shared';
 import type { CreateRoomResult, JoinRoomResult, SeatAssignment } from '@dl/shared';
 import { users } from '../db/schema.js';
+import { hasSkin } from '../skin.js';
 import { RoomError, type RoomUser } from '../room/manager.js';
 import { authPreHandler } from '../auth/guard.js';
 import { config } from '../config.js';
@@ -49,7 +50,12 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
     const auth = request.user;
     if (!auth) throw new RoomError('AUTH_FAILED', '未认证');
     const row = app.db.select().from(users).where(eq(users.id, auth.userId)).get();
-    return { id: auth.userId, username: auth.username, flag: row?.defaultFlag ?? 1 };
+    return {
+      id: auth.userId,
+      username: auth.username,
+      flag: row?.defaultFlag ?? 1,
+      hasSkin: hasSkin(app.skinDir, auth.userId),
+    };
   }
 
   function parseBody<T>(
@@ -157,6 +163,25 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
       const map = app.maps.get(roomData.mapId);
       if (!map) return fail(reply, 400, ERROR_CODES.MAP_NOT_FOUND, '地图不存在');
 
+      // 使用个人皮肤：开局把「有玩家扮演且已上传皮肤」的势力旗帜替换为该玩家的皮肤。
+      // 皮肤用负数 flag 编码（-playerId → /static/skin/usr_{playerId}.png），由前端按 flag 派生 URL；
+      // AI / 无玩家 / 未上传皮肤的势力保持地图原旗帜。只改副本，不动地图目录缓存。
+      let gameMap = map;
+      if (roomData.usePersonalSkin) {
+        const skinPlayerOfSeat = new Map<number, number>();
+        for (const f of roomData.forces) {
+          if (f.playerId !== null && hasSkin(app.skinDir, f.playerId)) skinPlayerOfSeat.set(f.seat, f.playerId);
+        }
+        if (skinPlayerOfSeat.size > 0) {
+          gameMap = {
+            ...map,
+            player_list: map.player_list.map((p) =>
+              skinPlayerOfSeat.has(p.seat) ? { ...p, flag: -skinPlayerOfSeat.get(p.seat)! } : p,
+            ),
+          };
+        }
+      }
+
       // M4 备忘：isAI = 开启 AI 接管且无玩家扮演；未接管且无玩家的势力开局时由前端删兵
       const seatAssignments: SeatAssignment[] = roomData.forces.map((f) => ({
         seat: f.seat,
@@ -166,7 +191,7 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
 
       const { game, startMsg } = app.games.create({
         roomId: id,
-        map,
+        map: gameMap,
         seatAssignments,
         aiTakeover: roomData.aiTakeover,
         randomSpawn: roomData.randomSpawn,
@@ -180,7 +205,7 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
         spawnAssignments: startMsg.spawnAssignments,
         seed: game.seed,
         reducerVersion: config.reducerVersion,
-        map,
+        map: gameMap,
         timeSettings: roomData.timeSettings,
       });
       return ok(reply, { gameId: game.id });

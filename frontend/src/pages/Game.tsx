@@ -18,6 +18,7 @@ import type { GameResultData } from '@dl/shared';
 import { computeFog, type FogLevel } from '../game/fog';
 import { formatClock } from '../game/timer';
 import { EventAnimator } from '../canvas/animator';
+import { flagImgUrl } from '../lib/flags';
 import BoardCanvas from '../components/BoardCanvas';
 import GameChat from '../components/GameChat';
 import ResultModal from './Result';
@@ -447,7 +448,7 @@ export default function Game() {
                   {/* 行1：旗帜 + 势力名（"我"保留绿色标记） */}
                   <div className="flex items-center gap-1.5">
                     <img
-                      src={`/static/flags/flag_${f.flag}.png`}
+                      src={flagImgUrl(f.flag)}
                       alt=""
                       className="h-5 w-4 object-contain"
                       onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
@@ -519,7 +520,7 @@ export default function Game() {
                     className={`flex items-center gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 ${!f.alive ? 'opacity-40' : ''}`}
                   >
                     <img
-                      src={`/static/flags/flag_${f.flag}.png`}
+                      src={flagImgUrl(f.flag)}
                       alt=""
                       className="h-5 w-4 object-contain"
                       onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}

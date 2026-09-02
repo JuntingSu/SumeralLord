@@ -5,6 +5,7 @@ import { AUTH, ERROR_CODES, LoginBodySchema, RegisterBodySchema } from '@dl/shar
 import type { LoginResult, UserPublic } from '@dl/shared';
 import { users, type UserRow } from '../db/schema.js';
 import { authenticateBearer, signAuthToken } from '../auth/jwt.js';
+import { hasSkin } from '../skin.js';
 import { createRateLimiter } from '../utils/rateLimit.js';
 import { ok, fail } from '../utils/respond.js';
 
@@ -13,7 +14,7 @@ export interface AuthPluginOptions {
   loginPerMin?: number;
 }
 
-export function toUserPublic(row: UserRow): UserPublic {
+export function toUserPublic(row: UserRow, hasSkin = false): UserPublic {
   return {
     id: row.id,
     username: row.username,
@@ -21,6 +22,7 @@ export function toUserPublic(row: UserRow): UserPublic {
     wins: row.wins,
     flag: row.defaultFlag,
     score: row.score,
+    hasSkin,
   };
 }
 
@@ -65,7 +67,7 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (app, opt
     }
     const data: LoginResult = {
       token: signAuthToken({ userId: row.id, username: row.username }),
-      user: toUserPublic(row),
+      user: toUserPublic(row, hasSkin(app.skinDir, row.id)),
     };
     return ok(reply, data);
   });

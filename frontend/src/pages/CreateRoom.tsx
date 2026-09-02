@@ -23,6 +23,7 @@ export default function CreateRoom() {
   const [allowSpectate, setAllowSpectate] = useState(true);
   const [fogMode, setFogMode] = useState(false);
   const [randomSpawn, setRandomSpawn] = useState(true);
+  const [usePersonalSkin, setUsePersonalSkin] = useState(false);
   const [stepTime, setStepTime] = useState<number>(TIME_DEFAULTS.stepTime);
   const [gameTime, setGameTime] = useState<number>(TIME_DEFAULTS.gameTime);
   const [additionalTime, setAdditionalTime] = useState<number>(TIME_DEFAULTS.additionalTime);
@@ -61,6 +62,7 @@ export default function CreateRoom() {
         allowSpectate,
         fogMode,
         randomSpawn,
+        usePersonalSkin,
         mapId,
         timeSettings: { stepTime, gameTime, additionalTime },
       };
@@ -109,8 +111,8 @@ export default function CreateRoom() {
                 <MapPicker id="map-select" maps={maps} value={mapId} onChange={setMapId} />
               </div>
 
-              {/* 允许观战/战争迷雾/随机出生点：宽屏在左列一行三列；窄屏移入右列预览图下方 */}
-              <div className="hidden gap-2 pt-2 sm:grid sm:grid-cols-3">
+              {/* 允许观战/战争迷雾/随机出生点/使用个人皮肤：宽屏在左列一行四列；窄屏移入右列预览图下方 */}
+              <div className="hidden gap-2 pt-2 sm:grid sm:grid-cols-4">
                 <label className="flex items-center gap-1.5 text-sm text-slate-300">
                   <input type="checkbox" checked={allowSpectate} onChange={(e) => setAllowSpectate(e.target.checked)} />
                   允许观战
@@ -122,6 +124,13 @@ export default function CreateRoom() {
                 <label className="flex items-center gap-1.5 text-sm text-slate-300">
                   <input type="checkbox" checked={randomSpawn} onChange={(e) => setRandomSpawn(e.target.checked)} />
                   随机出生点
+                </label>
+                <label
+                  className="flex items-center gap-1.5 text-sm text-slate-300"
+                  title="勾选后，对局初始化时各势力旗帜替换为扮演玩家的个人皮肤（未上传皮肤的玩家保持原旗帜）"
+                >
+                  <input type="checkbox" checked={usePersonalSkin} onChange={(e) => setUsePersonalSkin(e.target.checked)} />
+                  使用个人皮肤
                 </label>
               </div>
 
@@ -181,7 +190,7 @@ export default function CreateRoom() {
                 ) : null;
               })()}
 
-              {/* 窄屏：观战/迷雾/出生点选项放在预览图下方 */}
+              {/* 窄屏：观战/迷雾/出生点/个人皮肤选项放在预览图下方 */}
               <div className="mt-4 grid grid-cols-1 gap-2 sm:hidden">
                 <label className="flex items-center gap-1.5 text-sm text-slate-300">
                   <input type="checkbox" checked={allowSpectate} onChange={(e) => setAllowSpectate(e.target.checked)} />
@@ -194,6 +203,13 @@ export default function CreateRoom() {
                 <label className="flex items-center gap-1.5 text-sm text-slate-300">
                   <input type="checkbox" checked={randomSpawn} onChange={(e) => setRandomSpawn(e.target.checked)} />
                   随机出生点
+                </label>
+                <label
+                  className="flex items-center gap-1.5 text-sm text-slate-300"
+                  title="勾选后，对局初始化时各势力旗帜替换为扮演玩家的个人皮肤（未上传皮肤的玩家保持原旗帜）"
+                >
+                  <input type="checkbox" checked={usePersonalSkin} onChange={(e) => setUsePersonalSkin(e.target.checked)} />
+                  使用个人皮肤
                 </label>
               </div>
             </div>

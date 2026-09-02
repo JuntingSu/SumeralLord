@@ -9,6 +9,7 @@ import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
 import type { FogLevel } from '../game/fog';
 import type { EventAnimator } from '../canvas/animator';
+import { flagImgUrl, flagHollowImgUrl } from '../lib/flags';
 
 const TERRAIN_COLORS: Record<number, string> = {
   [TERRAIN.PLAIN]: '#7cb342',
@@ -336,18 +337,19 @@ export default function BoardCanvas({
     }
   }, [board, fogEnabled, fogLevels, view, canvasSize]);
 
-  // 旗帜 sprite 预加载（实心 + 镂空）
+  // 旗帜 sprite 预加载（实心 + 镂空；flag 为负数 → 个人皮肤 usr_{-flag}，加载失败自然走色块/擦边兜底）
   useEffect(() => {
     const load = (n: number) => {
       if (spritesRef.current[String(n)] !== undefined) return;
       const solid = new Image();
-      solid.src = `/static/flags/flag_${n}.png`;
+      solid.src = flagImgUrl(n);
       const hollow = new Image();
-      hollow.src = `/static/flags/flag_${n}_hollow.png`;
+      hollow.src = flagHollowImgUrl(n);
       spritesRef.current[String(n)] = { solid, hollow };
     };
     for (let n = 1; n <= 30; n++) load(n);
-  }, []);
+    for (const f of board.forces) load(f.flag);
+  }, [board.forces]);
 
   /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；hollow=true 用镂空 sprite 露出地形，未加载时擦边回退） */
   const drawSoldier = useCallback(

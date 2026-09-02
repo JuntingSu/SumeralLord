@@ -17,6 +17,8 @@ declare module 'fastify' {
     mapsDir: string;
     /** 地图编辑器保存目录（maps-uncensored 审查队列，审查后移入 maps） */
     mapsUncensoredDir: string;
+    /** 个人皮肤目录（static/skin；usr_{id}.png / usr_{id}_hollow.png） */
+    skinDir: string;
   }
 
   interface FastifyRequest {

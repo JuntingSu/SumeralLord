@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import type { LeaderboardResult } from '@dl/shared';
 import { fetchLeaderboard } from '../api/leaderboard';
 import { useAuth } from '../stores/auth';
+import { avatarUrl } from '../lib/flags';
 
 type BoardType = 'score' | 'matches';
 
@@ -77,7 +78,7 @@ export default function Leaderboard() {
                       <td className="px-4 py-2">
                         <span className="flex items-center gap-2">
                           <img
-                            src={`/static/flags/flag_${entry.flag}.png`}
+                            src={avatarUrl(entry.id, entry.flag, entry.hasSkin)}
                             alt="旗帜"
                             className="h-5 w-5 object-contain"
                             onError={(e) => {

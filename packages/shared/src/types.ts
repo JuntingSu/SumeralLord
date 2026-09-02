@@ -16,6 +16,8 @@ export interface UserPublic {
   flag: number;
   /** 当前积分（一位小数；注册默认 100） */
   score: number;
+  /** 是否已上传个人皮肤（backend/static/skin/usr_{id}.png 存在） */
+  hasSkin: boolean;
 }
 
 /** 单玩家单局积分结算明细（match_history.score_changes 数组元素） */
@@ -56,6 +58,8 @@ export interface LeaderboardEntry {
   flag: number;
   score: number;
   matches: number;
+  /** 是否已上传个人皮肤 */
+  hasSkin: boolean;
   /** 榜单内为行号 1..100；me 为严格大于计数 + 1（允许并列同名次） */
   rank: number;
 }
@@ -171,6 +175,8 @@ export interface RoomPlayer {
   id: number;
   username: string;
   flag: number;
+  /** 是否已上传个人皮肤（头像展示用） */
+  hasSkin: boolean;
   state: RoomPlayerState;
   joinedAt: number;
   /** 是否已连接房间 WS（false = 离线显示） */
@@ -207,6 +213,8 @@ export interface RoomData {
   randomSpawn: boolean;
   /** 开启后，开局时无玩家扮演的势力由 AI 接管（难度取地图 player_list[].computer）；关闭则开局删除其所有兵 */
   aiTakeover: boolean;
+  /** 开启后，对局初始化时势力旗帜替换为扮演玩家的个人皮肤（未上传皮肤则保持原旗帜） */
+  usePersonalSkin: boolean;
   mapId: string;
   mapTitle: string;
   playerNum: number; // maxPlayers，来自地图

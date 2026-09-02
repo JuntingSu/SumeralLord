@@ -4,6 +4,7 @@ import type { RoomListItem } from '@dl/shared';
 import { useAuth } from '../stores/auth';
 import { useLobby } from '../stores/lobby';
 import { ApiError } from '../api/client';
+import { avatarUrl } from '../lib/flags';
 
 export default function Lobby() {
   const navigate = useNavigate();
@@ -82,7 +83,7 @@ export default function Lobby() {
         {user && (
           <div className="flex items-center gap-3">
             <img
-              src={`/static/flags/flag_${user.flag}.png`}
+              src={avatarUrl(user.id, user.flag, user.hasSkin)}
               alt="旗帜"
               className="h-8 w-7 object-contain"
               onError={(e) => {
@@ -90,6 +91,12 @@ export default function Lobby() {
               }}
             />
             <span className="text-slate-300">{user.username}</span>
+            <Link
+              to="/profile"
+              className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
+            >
+              个人中心
+            </Link>
             <button
               onClick={() => {
                 // 保留 dl_room_id：重新登录后由 refreshJoined 按服务器成员身份恢复

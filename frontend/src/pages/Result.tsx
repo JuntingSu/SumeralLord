@@ -4,6 +4,7 @@
 import { Link } from 'react-router-dom';
 import type { GameOverMsg, GameResultData, GameState } from '@dl/shared';
 import type { FatalError } from '../stores/game';
+import { flagImgUrl } from '../lib/flags';
 
 interface ResultModalProps {
   gameOver: GameOverMsg | null;
@@ -94,7 +95,7 @@ export default function ResultModal({
                   <td className="py-1.5">
                     <span className="flex items-center gap-2">
                       <img
-                        src={`/static/flags/flag_${f.flag}.png`}
+                        src={flagImgUrl(f.flag)}
                         alt=""
                         className="h-5 w-4 object-contain"
                         onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}

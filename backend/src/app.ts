@@ -61,6 +61,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   const staticRoot = opts.staticRoot ?? path.join(__dirname, '../static');
   app.decorate('mapsDir', path.join(staticRoot, 'maps'));
   app.decorate('mapsUncensoredDir', path.join(staticRoot, 'maps-uncensored'));
+  app.decorate('skinDir', path.join(staticRoot, 'skin'));
   if (existsSync(staticRoot)) {
     await app.register(fastifyStatic, { root: staticRoot, prefix: '/static/' });
     maps.loadFromDir(path.join(staticRoot, 'maps'));

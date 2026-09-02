@@ -4,6 +4,7 @@ import { ERROR_CODES } from '@dl/shared';
 import type { LeaderboardEntry, LeaderboardResult } from '@dl/shared';
 import { authPreHandler } from '../auth/guard.js';
 import { users } from '../db/schema.js';
+import { hasSkin } from '../skin.js';
 import { ok, fail } from '../utils/respond.js';
 
 type LeaderboardType = 'score' | 'matches';
@@ -25,6 +26,7 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
       flag: r.defaultFlag,
       score: r.score,
       matches: r.matches,
+      hasSkin: hasSkin(app.skinDir, r.id),
       rank: i + 1,
     }));
 
@@ -44,6 +46,7 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
           flag: myRow.defaultFlag,
           score: myRow.score,
           matches: myRow.matches,
+          hasSkin: hasSkin(app.skinDir, myRow.id),
           rank: (better?.n ?? 0) + 1,
         };
       }

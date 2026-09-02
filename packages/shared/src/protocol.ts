@@ -35,6 +35,27 @@ export const LoginBodySchema = z.object({
 });
 export type LoginBody = z.infer<typeof LoginBodySchema>;
 
+// ---------- REST：个人资料 / 皮肤 ----------
+
+/** 修改用户名 / 密码（改密码必须带 oldPassword 且正确；username 与 newPassword 至少一项） */
+export const UpdateProfileBodySchema = z
+  .object({
+    username: z.string().min(3).max(20).optional(),
+    oldPassword: z.string().min(1).max(32).optional(),
+    newPassword: z.string().min(6).max(32).optional(),
+  })
+  .refine((b) => b.username !== undefined || b.newPassword !== undefined, {
+    message: '至少提供一项要修改的内容',
+  });
+export type UpdateProfileBody = z.infer<typeof UpdateProfileBodySchema>;
+
+/** 皮肤上传：solid/hollow 各为一张 192×216 RGBA PNG 的 base64（data URL 或裸 base64） */
+export const SkinUploadBodySchema = z.object({
+  solid: z.string().min(1).max(4_000_000),
+  hollow: z.string().min(1).max(4_000_000),
+});
+export type SkinUploadBody = z.infer<typeof SkinUploadBodySchema>;
+
 // ---------- REST：房间管理（BM2） ----------
 
 export const CreateRoomBodySchema = z.object({
@@ -44,6 +65,7 @@ export const CreateRoomBodySchema = z.object({
   fogMode: z.boolean(),
   randomSpawn: z.boolean(),
   aiTakeover: z.boolean().optional(),
+  usePersonalSkin: z.boolean().optional(),
   mapId: z.string().min(1),
   timeSettings: TimeSettingsSchema,
 });
@@ -62,6 +84,7 @@ export const RoomSettingsPatchSchema = z.object({
   fogMode: z.boolean().optional(),
   randomSpawn: z.boolean().optional(),
   aiTakeover: z.boolean().optional(),
+  usePersonalSkin: z.boolean().optional(),
   timeSettings: TimeSettingsSchema.optional(),
 });
 export type RoomSettingsPatch = z.infer<typeof RoomSettingsPatchSchema>;
