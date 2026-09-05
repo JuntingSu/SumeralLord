@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { applyIntent } from '@dl/shared';
-import type { GameEvent, GameState, PlayerIntent, RoomServerMsg } from '@dl/shared';
+import type { GameEvent, GameState, PlayerIntent, RoomData, RoomServerMsg } from '@dl/shared';
 import { useAuth } from '../stores/auth';
 import { useGame, attachTransport } from '../stores/game';
 import { useRoom } from '../stores/room';
@@ -62,9 +62,13 @@ export default function Game() {
   });
   /** 侧边栏简略模式（默认开启：仅旗帜+势力名+点数+倒计时进度条，浮在棋盘上） */
   const [compactSidebar, setCompactSidebar] = useState(true);
+  /** 击杀飘字：xxx已被击败（白色黑描边，屏幕中偏下，上浮 2s 后消失） */
+  const [killFloats, setKillFloats] = useState<{ id: number; text: string }[]>([]);
+  const killFloatIdRef = useRef(0);
 
   // ---------- 回合/阶段提示浮层（我的回合/行动/加点开始时居中展示，0.7s 后淡出） ----------
   const phaseAnnouncements = useGame((s) => s.phaseAnnouncements);
+  const systemNotices = useGame((s) => s.systemNotices);
   const [announceText, setAnnounceText] = useState<string | null>(null);
   const [announceFading, setAnnounceFading] = useState(false);
   const announceQueueRef = useRef<string[]>([]);
@@ -103,6 +107,30 @@ export default function Game() {
       window.clearTimeout(t2);
     };
   }, [announceText]);
+
+  // ---------- 局内系统通知消费：回合开始/被击败/大杀四方 → 聊天；被击败 → 飘字 ----------
+  useEffect(() => {
+    if (systemNotices.length === 0) return;
+    const drained = useGame.getState().drainSystemNotices();
+    if (drained.length === 0) return;
+    const s = useGame.getState();
+    const b = s.board;
+    for (const n of drained) {
+      if (n.kind === 'turnStart') {
+        s.pushSystemChat(formatSystemTurnStart(b, room, n.seat));
+      } else if (n.kind === 'forceCleared') {
+        s.pushSystemChat(formatSystemCleared(b, room, n.seat, n.killerSeat, n.reason));
+        const f = b?.forces.find((x) => x.seat === n.seat);
+        if (f) {
+          const id = ++killFloatIdRef.current;
+          setKillFloats((prev) => [...prev, { id, text: `${f.name}已被击败` }]);
+          window.setTimeout(() => setKillFloats((prev) => prev.filter((k) => k.id !== id)), 2000);
+        }
+      } else if (n.kind === 'killStreak') {
+        s.pushSystemChat(formatSystemKillStreak(b, room, n.seat));
+      }
+    }
+  }, [systemNotices, room]);
 
   // ---------- 动画播放器（M5.1）：驱动 eventQueue 逐链演出；board 权威不变。固定 4 倍速，无倍速调节 ----------
   const animatorRef = useRef<EventAnimator | null>(null);
@@ -358,6 +386,8 @@ export default function Game() {
   // ---------- 阶段/投降按钮 ----------
   const phase = board?.phase ?? 'PREPARE';
   const isMyActionTurn = myTurn && (phase === 'ACTION' || phase === 'ADD_POINT');
+  /** 步时/局时任一低于 10 秒 → 结束行动/加点按钮每秒闪烁提示 */
+  const lowActionTime = isMyActionTurn && (timer.stepTimeRemain < 10 || timer.gameTimeRemain < 10);
   const handleSwitchPhase = () => {
     const s = useGame.getState();
     if (!s.board) return;
@@ -507,6 +537,7 @@ export default function Game() {
             <div className="pointer-events-none absolute left-2 top-10 z-10 space-y-1.5">
               {aliveForces.map((f) => {
                 const isCurrent = f.seat === board.currentSeat;
+                const isMine = f.seat === mySeat;
                 const clock =
                   f.seat === mySeat
                     ? { stepTimeRemain: timer.stepTimeRemain, gameTimeRemain: timer.gameTimeRemain }
@@ -525,16 +556,26 @@ export default function Game() {
                       className="h-5 w-4 object-contain"
                       onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
                     />
-                    {/* 名称+点数 与进度条合计高度 = 旗帜高度（h-5） */}
-                    <div className="flex w-28 flex-col justify-between" style={{ height: '1.25rem' }}>
+                    {/* 名称+（我）+点数(+N) 与进度条合计高度 = 旗帜高度（h-5） */}
+                    <div className="flex w-32 flex-col justify-between" style={{ height: '1.25rem' }}>
                       <div className="flex items-baseline gap-1">
                         <span
-                          className={`truncate text-xs leading-none ${isCurrent ? 'font-bold' : 'font-medium'}`}
+                          className={`min-w-0 truncate text-xs leading-none ${isCurrent ? 'font-bold' : 'font-medium'}`}
                           style={{ color: seatColor(f.seat) }}
                         >
                           {f.name}
                         </span>
-                        <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
+                        {isMine && <span className="shrink-0 text-[10px] leading-none text-emerald-400">（我）</span>}
+                        {f.alive ? (
+                          <>
+                            <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
+                            <span className="shrink-0 text-[10px] leading-none text-pink-400">
+                              (+{board.tiles.filter((t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked).length})
+                            </span>
+                          </>
+                        ) : (
+                          <span className="shrink-0 text-[10px] leading-none text-slate-400">已清除</span>
+                        )}
                       </div>
                       <div className="h-1 w-full overflow-hidden rounded bg-white/20">
                         <div className="h-full bg-white" style={{ width: `${stepPct}%` }} />
@@ -565,11 +606,13 @@ export default function Game() {
             animatorRef={animatorRef}
             className="h-full w-full"
           />
-          {/* 结束行动/加点：浮在地图区正下方、距底边一段距离 */}
+          {/* 结束行动/加点：浮在地图区正下方、距底边一段距离（步时/局时任一 <10s 时每秒闪烁） */}
           {isMyActionTurn && (
             <button
               onClick={handleSwitchPhase}
-              className="absolute bottom-14 left-1/2 z-10 -translate-x-1/2 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500"
+              className={`absolute bottom-14 left-1/2 z-10 -translate-x-1/2 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500 ${
+                lowActionTime ? 'low-time-blink' : ''
+              }`}
             >
               {phase === 'ACTION' ? '结束行动' : '结束加点'}
             </button>
@@ -636,6 +679,21 @@ export default function Game() {
         </div>
       )}
 
+      {/* 击杀飘字：屏幕中偏下，白色黑描边，上浮 2s 后消失 */}
+      {killFloats.length > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-[30%] z-40 flex flex-col items-center gap-2">
+          {killFloats.map((k) => (
+            <div
+              key={k.id}
+              className="float-up-kill rounded px-3 py-1 text-2xl font-bold text-white"
+              style={{ textShadow: '0 0 3px #000, 1px 1px 2px #000, -1px 1px 2px #000, 0 2px 3px #000' }}
+            >
+              {k.text}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 结算/中止弹窗 */}
       {(gameOver !== null || fatal !== null) && (
         <ResultModal
@@ -675,6 +733,37 @@ function nextSelectedTile(board: GameState, intent: PlayerIntent): number | null
 function seatColor(seat: number | undefined): string {
   const COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#8e44ad', '#d35400', '#16a085', '#c0392b'];
   return seat === undefined ? '#94a3b8' : COLORS[(seat - 1) % COLORS.length];
+}
+
+// ---------- 局内系统通知文案（[势力名（玩家名）]；AI/无玩家时省略（玩家名）） ----------
+
+/** 势力显示名：有玩家扮演 → 「势力名（玩家名）」，AI/无主 → 仅势力名 */
+function forceLabel(board: GameState | null, room: RoomData | null, seat: number): string {
+  const f = board?.forces.find((x) => x.seat === seat);
+  if (!f) return `#${seat}`;
+  const player = room?.players.find((p) => p.id === f.playerId);
+  return player ? `${f.name}（${player.username}）` : f.name;
+}
+
+function formatSystemTurnStart(board: GameState | null, room: RoomData | null, seat: number): string {
+  return `现在是[${forceLabel(board, room, seat)}]的回合`;
+}
+
+function formatSystemCleared(
+  board: GameState | null,
+  room: RoomData | null,
+  seat: number,
+  killerSeat: number | null,
+  reason: 'no_stronghold' | 'surrender' | 'timeout',
+): string {
+  const killed = forceLabel(board, room, seat);
+  if (killerSeat !== null) return `刚刚[${killed}]被[${forceLabel(board, room, killerSeat)}]击杀了。`;
+  if (reason === 'surrender') return `刚刚[${killed}]已投降。`;
+  return `刚刚[${killed}]已超时。`;
+}
+
+function formatSystemKillStreak(board: GameState | null, room: RoomData | null, seat: number): string {
+  return `[${forceLabel(board, room, seat)}]正在大杀四方！`;
 }
 
 // 供 Game 页面使用的类型引用（避免未使用告警）

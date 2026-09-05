@@ -94,6 +94,10 @@ interface GameStore {
 
   /** 我方回合/行动阶段/加点阶段开始提示队列（实时路径收集；重连重放不触发） */
   phaseAnnouncements: string[];
+  /** 局内系统通知队列（实时路径收集；重连重放不触发；页面 drain 后转聊天/飘字） */
+  systemNotices: SystemNotice[];
+  /** 本局击杀计数（seat → 击杀数；驱动「大杀四方」通知） */
+  killCounts: Record<number, number>;
 
   startGame(params: { roomId: string; startMsg: GameStartMsg; myUserId: number | null; fogMode: boolean }): void;
   onServerMessage(msg: RoomServerMsg): void;
@@ -112,6 +116,10 @@ interface GameStore {
   reconnectCatchUp(): void;
   /** 原子取出并清空阶段提示队列（消费与追加不竞态） */
   drainPhaseAnnouncements(): string[];
+  /** 原子取出并清空系统通知队列（消费与追加不竞态） */
+  drainSystemNotices(): SystemNotice[];
+  /** 追加一条本地系统聊天（kind:'system'，橙色渲染） */
+  pushSystemChat(text: string): void;
   reset(): void;
 }
 
@@ -127,6 +135,42 @@ function collectPhaseAnnouncements(chain: GameEvent[], mySeat: number | null): s
     else if (e.kind === 'SWITCH_PHASE' && e.seat === mySeat && e.to === 'ADD_POINT') out.push('加点阶段');
   }
   return out;
+}
+
+/** 局内系统通知（本地生成，由页面 drain 后转聊天/飘字；重连重放不触发） */
+export type SystemNotice =
+  | { kind: 'turnStart'; seat: number }
+  | {
+      kind: 'forceCleared';
+      seat: number;
+      killerSeat: number | null;
+      reason: 'no_stronghold' | 'surrender' | 'timeout';
+    }
+  | { kind: 'killStreak'; seat: number; kills: number };
+
+/** 从事件链收集局内系统通知并更新击杀计数（纯函数，供 store 与单测共用）。
+ *  击杀者 = 意图发起者（no_stronghold 清除必由进攻产生）；击杀数 ≥ 3 后每次击杀都发 killStreak。 */
+export function collectSystemNotices(
+  chain: GameEvent[],
+  fromSeat: number,
+  prevKillCounts: Record<number, number>,
+): { notices: SystemNotice[]; killCounts: Record<number, number> } {
+  const notices: SystemNotice[] = [];
+  const killCounts = { ...prevKillCounts };
+  for (const e of chain) {
+    if (e.kind === 'FORCE_CLEAR') {
+      const killerSeat = e.reason === 'no_stronghold' ? fromSeat : null;
+      notices.push({ kind: 'forceCleared', seat: e.seat, killerSeat, reason: e.reason });
+      if (killerSeat !== null) {
+        killCounts[killerSeat] = (killCounts[killerSeat] ?? 0) + 1;
+        const kills = killCounts[killerSeat];
+        if (kills >= 3) notices.push({ kind: 'killStreak', seat: killerSeat, kills });
+      }
+    } else if (e.kind === 'END_TURN' && e.toSeat !== e.fromSeat) {
+      notices.push({ kind: 'turnStart', seat: e.toSeat });
+    }
+  }
+  return { notices, killCounts };
 }
 
 /** 严格按 eventId 序应用一条对局流消息（纯逻辑，供 store 与补发共用） */
@@ -169,6 +213,8 @@ function applyStreamMessage(
   const beforeTiles: Array<SoldierState | null> = board.tiles.map((t) => (t.soldier ? { ...t.soldier } : null));
   // 实时路径（非重放）收集我方回合/阶段开始提示
   const announcements = replay ? [] : collectPhaseAnnouncements(r.chain, s.mySeat);
+  // 实时路径（非重放）收集局内系统通知（回合开始/被击败/大杀四方）并更新击杀计数
+  const sys = replay ? null : collectSystemNotices(r.chain, fromSeat, s.killCounts);
   set({
     board: r.state,
     appliedEventId: eventId,
@@ -178,6 +224,9 @@ function applyStreamMessage(
     timer,
     phaseAnnouncements:
       announcements.length > 0 ? [...s.phaseAnnouncements, ...announcements] : s.phaseAnnouncements,
+    killCounts: sys ? sys.killCounts : s.killCounts,
+    systemNotices:
+      sys && sys.notices.length > 0 ? [...s.systemNotices, ...sys.notices] : s.systemNotices,
   });
   return 'applied';
 }
@@ -233,6 +282,8 @@ export const useGame = create<GameStore>((set, get) => {
     submitting: false,
     chat: [],
     phaseAnnouncements: [],
+    systemNotices: [],
+    killCounts: {},
 
     startGame: ({ roomId, startMsg, myUserId, fogMode }) => {
       const init = initState({
@@ -245,6 +296,9 @@ export const useGame = create<GameStore>((set, get) => {
       // 开局首个回合若即我方：收集开局链中的阶段提示（回合开始补「你的回合」）
       const initAnnouncements = collectPhaseAnnouncements(init.chain, mySeat);
       if (mySeat !== null && mySeat === init.state.currentSeat) initAnnouncements.unshift('你的回合');
+      // 开局首个回合：补「现在是[势力]的回合」系统通知（开局链不含 END_TURN）
+      const initNotices: SystemNotice[] = [];
+      if (init.state.currentSeat > 0) initNotices.push({ kind: 'turnStart', seat: init.state.currentSeat });
       set({
         gameId: startMsg.gameId,
         roomId,
@@ -269,6 +323,8 @@ export const useGame = create<GameStore>((set, get) => {
         opponentClocks: {},
         chat: [],
         phaseAnnouncements: initAnnouncements,
+        systemNotices: initNotices,
+        killCounts: {},
       });
       // 首个回合的计时基准（initState 已自动完成首势力准备 → 行动）
       const seat = init.state.currentSeat;
@@ -461,6 +517,19 @@ export const useGame = create<GameStore>((set, get) => {
       return drained;
     },
 
+    drainSystemNotices: () => {
+      const drained = get().systemNotices;
+      set({ systemNotices: [] });
+      return drained;
+    },
+
+    pushSystemChat: (text) => {
+      const s = get();
+      set({
+        chat: [...s.chat, { from: 0, username: '', text, ts: Date.now(), kind: 'system' as const }].slice(-200),
+      });
+    },
+
     reset: () => {
       hasOpenedOnce = false;
       set({
@@ -487,6 +556,8 @@ export const useGame = create<GameStore>((set, get) => {
         submitting: false,
         chat: [],
         phaseAnnouncements: [],
+        systemNotices: [],
+        killCounts: {},
       });
     },
   };

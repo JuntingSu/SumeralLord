@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+/* 步时/局时任一低于 10 秒：结束行动/结束加点按钮每秒闪烁一次 */
+@keyframes low-time-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+.low-time-blink {
+  animation: low-time-blink 1s ease-in-out infinite;
+}
+
+/* 击杀飘字：xxx已被击败，上浮并淡出，展示 2s 后消失 */
+@keyframes float-up-kill {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-48px);
+  }
+}
+.float-up-kill {
+  animation: float-up-kill 2s ease-out forwards;
+}

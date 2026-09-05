@@ -7,6 +7,8 @@ export interface ChatEntry {
   username: string;
   text: string;
   ts: number;
+  /** 系统通知（局内本地生成，非玩家发言；聊天为橙色样式） */
+  kind?: 'system';
 }
 
 const CHAT_LIMIT = 200;

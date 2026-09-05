@@ -53,10 +53,18 @@ export default function GameChat({ chat, onSend, className = 'absolute bottom-12
           </div>
           <div ref={chatListRef} className="max-h-48 space-y-1 overflow-y-auto px-3 py-2 text-xs">
             {chat.length === 0 && <p className="text-slate-500">暂无消息</p>}
-            {chat.map((m) => (
-              <p key={`${m.ts}-${m.from}`}>
-                <span className="text-emerald-400">{m.username}：</span>
-                <span className="text-slate-200">{m.text}</span>
+            {chat.map((m, i) => (
+              <p key={`${m.kind ?? 'c'}-${m.ts}-${m.from}-${i}`}>
+                {m.kind === 'system' ? (
+                  <span className="text-orange-400">
+                    <span aria-hidden="true">📢</span> [系统通知]：{m.text}
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-emerald-400">{m.username}：</span>
+                    <span className="text-slate-200">{m.text}</span>
+                  </>
+                )}
               </p>
             ))}
           </div>
@@ -87,10 +95,18 @@ export default function GameChat({ chat, onSend, className = 'absolute bottom-12
         >
           <span className="min-w-0 flex-1 space-y-0.5">
             {chat.length > 0 ? (
-              chat.slice(-3).map((m) => (
-                <span key={`${m.ts}-${m.from}`} className="block truncate">
-                  <span className="text-emerald-400">{m.username}：</span>
-                  <span className="text-slate-200">{m.text}</span>
+              chat.slice(-3).map((m, i) => (
+                <span key={`${m.kind ?? 'c'}-${m.ts}-${m.from}-${i}`} className="block truncate">
+                  {m.kind === 'system' ? (
+                    <span className="text-orange-400">
+                      <span aria-hidden="true">📢</span> [系统通知]：{m.text}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-emerald-400">{m.username}：</span>
+                      <span className="text-slate-200">{m.text}</span>
+                    </>
+                  )}
                 </span>
               ))
             ) : (
