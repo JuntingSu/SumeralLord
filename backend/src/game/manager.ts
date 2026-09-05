@@ -59,9 +59,9 @@ export interface Game {
 export interface StartGameInput {
   roomId: string;
   map: MapFullData;
+  /** 玩家-势力最终映射（rooms.ts 在 randomSpawn 时已按需重排，本层视为定稿） */
   seatAssignments: SeatAssignment[];
   aiTakeover: boolean;
-  randomSpawn: boolean;
   timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
   reducerVersion: string;
 }
@@ -93,10 +93,11 @@ export class GameManager {
 
   create(input: StartGameInput): StartGameResult {
     const gameId = 'g' + randomUUID().replace(/-/g, '').slice(0, 8);
-    const kingdoms = input.map.player_list.map((p) => ({ seat: p.seat, index: findKingdom(input.map, p.seat) }));
-    const spawnAssignments: SpawnAssignment[] = input.randomSpawn
-      ? this.shuffleKingdoms(kingdoms)
-      : kingdoms.map((k) => ({ seat: k.seat, spawnIndex: k.index }));
+    // 出生点恒等映射：随机化发生在玩家-势力分配（seatAssignments），出生点跟随势力不动
+    const spawnAssignments: SpawnAssignment[] = input.map.player_list.map((p) => ({
+      seat: p.seat,
+      spawnIndex: findKingdom(input.map, p.seat),
+    }));
 
     const game: Game = {
       id: gameId,
@@ -303,14 +304,21 @@ export class GameManager {
   dispose(): void {
     this.games.clear();
   }
+}
 
-  /** Fisher-Yates 洗牌（服务器一次性随机，结果随 GAME_START 下发，前端无需重演） */
-  private shuffleKingdoms(kingdoms: Array<{ seat: number; index: number }>): SpawnAssignment[] {
-    const arr = [...kingdoms];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = randomInt(0, i + 1);
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr.map((k) => ({ seat: k.seat, spawnIndex: k.index }));
+/** 玩家-势力随机重排（randomSpawn）：把已选势力（playerId!==null）的玩家在已占 seat 集合内
+ *  Fisher-Yates 洗牌，每个已占 seat 恰好分到一名玩家（不重复；可能保留原分配）；
+ *  未选势力（含 AI 接管位）原样保留。服务器开局一次性随机，结果随 GAME_START 的
+ *  seatAssignments 下发，前端无需重演。返回新数组，不改动入参。 */
+export function shuffleAssignments(assignments: SeatAssignment[]): SeatAssignment[] {
+  const occupied = assignments.filter((a) => a.playerId !== null).sort((a, b) => a.seat - b.seat);
+  if (occupied.length <= 1) return assignments;
+  const players = occupied.map((a) => a.playerId!);
+  for (let i = players.length - 1; i > 0; i--) {
+    const j = randomInt(0, i + 1);
+    [players[i], players[j]] = [players[j], players[i]];
   }
+  const playerBySeat = new Map<number, number>();
+  occupied.forEach((a, i) => playerBySeat.set(a.seat, players[i]));
+  return assignments.map((a) => (a.playerId !== null ? { ...a, playerId: playerBySeat.get(a.seat)! } : a));
 }

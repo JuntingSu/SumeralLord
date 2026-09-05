@@ -16,6 +16,7 @@ import type { CreateRoomResult, JoinRoomResult, SeatAssignment } from '@dl/share
 import { users } from '../db/schema.js';
 import { hasSkin } from '../skin.js';
 import { RoomError, type RoomUser } from '../room/manager.js';
+import { shuffleAssignments } from '../game/manager.js';
 import { authPreHandler } from '../auth/guard.js';
 import { config } from '../config.js';
 import { ok, fail } from '../utils/respond.js';
@@ -163,14 +164,27 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
       const map = app.maps.get(roomData.mapId);
       if (!map) return fail(reply, 400, ERROR_CODES.MAP_NOT_FOUND, '地图不存在');
 
+      // M4 备忘：isAI = 开启 AI 接管且无玩家扮演；未接管且无玩家的势力开局时由前端删兵
+      let seatAssignments: SeatAssignment[] = roomData.forces.map((f) => ({
+        seat: f.seat,
+        playerId: f.playerId,
+        isAI: roomData.aiTakeover && f.playerId === null,
+      }));
+      // 随机出生：在已选势力（有玩家扮演）集合内随机重排玩家-势力分配，未选势力/AI 位不参与。
+      // 重排结果为最终分配，随 GAME_START 的 seatAssignments 下发；出生点恒等、跟随势力不动。
+      if (roomData.randomSpawn) {
+        seatAssignments = shuffleAssignments(seatAssignments);
+      }
+
       // 使用个人皮肤：开局把「有玩家扮演且已上传皮肤」的势力旗帜替换为该玩家的皮肤。
       // 皮肤用负数 flag 编码（-playerId → /static/skin/usr_{playerId}.png），由前端按 flag 派生 URL；
       // AI / 无玩家 / 未上传皮肤的势力保持地图原旗帜。只改副本，不动地图目录缓存。
+      // 必须在 randomSpawn 重排之后执行：旗帜跟随玩家最终落到的 seat，而非房间内的原始选择。
       let gameMap = map;
       if (roomData.usePersonalSkin) {
         const skinPlayerOfSeat = new Map<number, number>();
-        for (const f of roomData.forces) {
-          if (f.playerId !== null && hasSkin(app.skinDir, f.playerId)) skinPlayerOfSeat.set(f.seat, f.playerId);
+        for (const a of seatAssignments) {
+          if (a.playerId !== null && hasSkin(app.skinDir, a.playerId)) skinPlayerOfSeat.set(a.seat, a.playerId);
         }
         if (skinPlayerOfSeat.size > 0) {
           gameMap = {
@@ -182,19 +196,11 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // M4 备忘：isAI = 开启 AI 接管且无玩家扮演；未接管且无玩家的势力开局时由前端删兵
-      const seatAssignments: SeatAssignment[] = roomData.forces.map((f) => ({
-        seat: f.seat,
-        playerId: f.playerId,
-        isAI: roomData.aiTakeover && f.playerId === null,
-      }));
-
       const { game, startMsg } = app.games.create({
         roomId: id,
         map: gameMap,
         seatAssignments,
         aiTakeover: roomData.aiTakeover,
-        randomSpawn: roomData.randomSpawn,
         timeSettings: roomData.timeSettings,
         reducerVersion: config.reducerVersion,
       });

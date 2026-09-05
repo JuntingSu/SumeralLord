@@ -36,7 +36,6 @@ function setup(seats: number[], timeoutMs = 1000) {
     map: makeMap(seats),
     seatAssignments: seats.map((seat) => ({ seat, playerId: 100 + seat, isAI: false })),
     aiTakeover: false,
-    randomSpawn: false,
     timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
     reducerVersion: 'test',
   });

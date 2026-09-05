@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { matchHistory } from '../src/db/schema.js';
 import { buildApp } from '../src/app.js';
+import { shuffleAssignments } from '../src/game/manager.js';
 
 // 断线/共识时间线加速（须在 config 求值前设置）
 vi.hoisted(() => {
@@ -546,6 +547,139 @@ describe('BM4：AI 接管与无主势力混编开局', () => {
     const assignments = gs.seatAssignments as Array<{ seat: number; playerId: number | null; isAI: boolean }>;
     expect(assignments.find((a) => a.seat === 1)).toMatchObject({ playerId: users.get('ivy')!.id, isAI: false });
     expect(assignments.find((a) => a.seat === 2)).toMatchObject({ playerId: null, isAI: true });
+    c.close();
+  });
+});
+
+// ---------- randomSpawn：已选势力集合内随机重排玩家分配 ----------
+
+/** 构造最小合法 PNG（签名 + IHDR 宽高），decodePngDataUrl 只校验这两处（同 profile.test.ts） */
+function fakePng(w = 192, h = 216): Buffer {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0); // IHDR 长度
+  ihdr.write('IHDR', 4, 'ascii');
+  ihdr.writeUInt32BE(w, 8); // 绝对偏移 16 = width
+  ihdr.writeUInt32BE(h, 12); // 绝对偏移 20 = height
+  return Buffer.concat([sig, ihdr]);
+}
+
+const pngDataUrl = (buf: Buffer) => `data:image/png;base64,${buf.toString('base64')}`;
+
+describe('randomSpawn：已选势力集合内随机重排玩家分配', () => {
+  it('shuffleAssignments 单测：已占 seat 集合内玩家重排，未选势力不动、入参不篡改', () => {
+    const input: Array<{ seat: number; playerId: number | null; isAI: boolean }> = [
+      { seat: 1, playerId: 101, isAI: false },
+      { seat: 3, playerId: 103, isAI: false },
+      { seat: 5, playerId: 105, isAI: false },
+      { seat: 2, playerId: null, isAI: true }, // 未选势力（AI 位）不参与
+    ];
+    const out = shuffleAssignments(input);
+    expect(out.map((a) => a.seat).sort()).toEqual([1, 2, 3, 5]);
+    expect(
+      out
+        .filter((a) => a.playerId !== null)
+        .map((a) => a.playerId)
+        .sort(),
+    ).toEqual([101, 103, 105]);
+    expect(out.find((a) => a.seat === 2)).toMatchObject({ playerId: null, isAI: true });
+    // 每个已占 seat 恰好一名玩家（不重复）
+    const occupied = out.filter((a) => a.playerId !== null);
+    expect(new Set(occupied.map((a) => a.playerId)).size).toBe(3);
+    // 入参未被修改
+    expect(input[0]).toEqual({ seat: 1, playerId: 101, isAI: false });
+  });
+
+  it('randomSpawn=true：双人开局 seatAssignments 是玩家在已选势力内的合法重排', async () => {
+    const roomId = await setupRoom('alice', 'bob', false, true);
+    const c = await wsConnect(roomId, 'alice');
+    await startGame(roomId);
+    const gs = await c.waitFor('GAME_START');
+    const assignments = gs.seatAssignments as Array<{ seat: number; playerId: number | null; isAI: boolean }>;
+    expect(assignments).toHaveLength(2);
+    expect(assignments.map((a) => a.seat).sort()).toEqual([1, 2]);
+    expect(
+      assignments
+        .map((a) => a.playerId)
+        .filter((p): p is number => p !== null)
+        .sort(),
+    ).toEqual([users.get('alice')!.id, users.get('bob')!.id].sort());
+    expect(new Set(assignments.map((a) => a.playerId)).size).toBe(2);
+    c.close();
+  });
+
+  it('randomSpawn=true + 未选势力排除：AI 接管位不参与重排', async () => {
+    await leaveAllRooms('ivy');
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('ivy'),
+      payload: {
+        name: '随机AI房',
+        allowSpectate: false,
+        fogMode: false,
+        randomSpawn: true,
+        aiTakeover: true,
+        mapId: 'map_duo_plain',
+        timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('ivy'), payload: { seat: 1 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('ivy'), payload: { ready: true } });
+    const c = await wsConnect(roomId, 'ivy');
+    const res = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/start`, headers: auth('ivy'), payload: {} });
+    expect(res.statusCode).toBe(200);
+    const gs = await c.waitFor('GAME_START');
+    const assignments = gs.seatAssignments as Array<{ seat: number; playerId: number | null; isAI: boolean }>;
+    expect(assignments.find((a) => a.seat === 1)).toMatchObject({ playerId: users.get('ivy')!.id, isAI: false });
+    expect(assignments.find((a) => a.seat === 2)).toMatchObject({ playerId: null, isAI: true });
+    c.close();
+  });
+
+  it('randomSpawn=true + usePersonalSkin：皮肤旗帜跟随玩家重排后的 seat', async () => {
+    await leaveAllRooms('alice');
+    await leaveAllRooms('bob');
+    // alice 上传个人皮肤
+    const skin = await app.inject({
+      method: 'POST',
+      url: '/api/users/me/skin',
+      headers: auth('alice'),
+      payload: { solid: pngDataUrl(fakePng()), hollow: pngDataUrl(fakePng()) },
+    });
+    expect(skin.statusCode).toBe(200);
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: {
+        name: '随机皮肤房',
+        allowSpectate: false,
+        fogMode: false,
+        randomSpawn: true,
+        usePersonalSkin: true,
+        mapId: 'map_duo_plain',
+        timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth('bob'), payload: {} });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('alice'), payload: { seat: 1 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('bob'), payload: { seat: 2 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('alice'), payload: { ready: true } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('bob'), payload: { ready: true } });
+    const c = await wsConnect(roomId, 'alice');
+    await startGame(roomId);
+    const gs = await c.waitFor('GAME_START');
+    const assignments = gs.seatAssignments as Array<{ seat: number; playerId: number | null; isAI: boolean }>;
+    const aliceSeat = assignments.find((a) => a.playerId === users.get('alice')!.id)!.seat;
+    const players = (gs.map as { player_list: Array<{ seat: number; flag: number }> }).player_list;
+    expect(players.find((p) => p.seat === aliceSeat)!.flag).toBe(-users.get('alice')!.id);
+    // bob 无皮肤 → 其 seat 保持地图原旗帜（正数）
+    const bobSeat = assignments.find((a) => a.playerId === users.get('bob')!.id)!.seat;
+    expect(players.find((p) => p.seat === bobSeat)!.flag).toBeGreaterThan(0);
     c.close();
   });
 });
