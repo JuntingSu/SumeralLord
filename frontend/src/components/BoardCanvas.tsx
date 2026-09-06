@@ -192,15 +192,21 @@ export default function BoardCanvas({
       ro.observe(el);
     }
     window.addEventListener('resize', update);
-    // 移动端浏览器 UI 收起/展开或缩放时 devicePixelRatio 可能变化（尺寸不变时 ResizeObserver 不触发），单独监听
+    // 移动端浏览器 UI 收起/展开或缩放时 devicePixelRatio 可能变化（尺寸不变时 ResizeObserver 不触发），单独监听；
+    // 旧 iOS Safari(<14)/部分 WebView 只支持 addListener，addEventListener 会静默失效
     const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
-    mq.addEventListener?.('change', update);
+    if (mq.addEventListener) mq.addEventListener('change', update);
+    else mq.addListener?.(update);
     window.visualViewport?.addEventListener('resize', update);
+    // 个别 WebView 旋转/浏览器 UI 变化不触发 ResizeObserver，补 orientationchange 驱动重算
+    window.addEventListener('orientationchange', update);
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', update);
-      mq.removeEventListener?.('change', update);
+      if (mq.removeEventListener) mq.removeEventListener('change', update);
+      else mq.removeListener?.(update);
       window.visualViewport?.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
     };
   }, []);
 
@@ -414,9 +420,13 @@ export default function BoardCanvas({
       if (canvas && ctx) {
         const { w: cssW, h: cssH, dpr } = canvasSize;
         if (cssW === 0 || cssH === 0) return; // 尺寸未就绪，下一帧再画
-        if (canvas.width !== Math.round(cssW * dpr)) {
-          canvas.width = Math.round(cssW * dpr);
-          canvas.height = Math.round(cssH * dpr);
+        // 位图宽或高任一与目标不匹配即同时重置：移动端竖屏地址栏收起/浏览器 UI 变化时
+        // 容器「高度变、宽度不变」，若只判宽度会停留在旧高度位图被 CSS 纵向拉伸，与静态层地块错位
+        const bw = Math.round(cssW * dpr);
+        const bh = Math.round(cssH * dpr);
+        if (canvas.width !== bw || canvas.height !== bh) {
+          canvas.width = bw;
+          canvas.height = bh;
         }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cssW, cssH);
