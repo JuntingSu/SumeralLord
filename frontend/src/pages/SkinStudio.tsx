@@ -355,16 +355,39 @@ export default function SkinStudio() {
   const skinPreviewSrc = me?.hasSkin ? `/static/skin/usr_${me.id}.png?t=${Date.now()}` : null;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
-      <header className="flex items-center justify-between border-b border-slate-700 px-6 py-3">
+    <div className="flex h-dvh flex-col overflow-hidden bg-slate-900 text-white">
+      <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-2.5 lg:px-6 lg:py-3">
         <h1 className="text-lg font-bold">个性皮肤</h1>
         <Link to="/profile" className="rounded bg-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-600">
           ← 返回个人中心
         </Link>
       </header>
-      <main className="mx-auto grid w-full max-w-6xl gap-4 px-6 py-6 lg:h-[calc(100dvh-4.5rem)] lg:grid-cols-[320px_1fr] lg:overflow-hidden">
-        {/* 左列：上传 / 当前皮肤 / 裁剪结果与确认（高屏内自行滚动，避免撑高右列预览区） */}
-        <div className="space-y-4 lg:min-h-0 lg:overflow-y-auto">
+
+      {/* 窄屏：上传图片改为一行（左侧按钮上传，右侧显示当前文件名）；桌面端仍用左栏的大块上传区 */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-700 px-3 py-2 lg:hidden">
+        <button
+          onClick={() => document.getElementById('skin-file-input')?.click()}
+          className="shrink-0 rounded bg-slate-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-600"
+        >
+          📁 上传图片
+        </button>
+        {fileName ? (
+          <span className="min-w-0 flex-1 truncate text-xs text-slate-300">
+            {fileName} · {fileInfo}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-xs text-slate-500">支持 JPG / PNG / GIF / BMP / WEBP 等格式</span>
+        )}
+      </div>
+      {(error || success) && (
+        <div className="shrink-0 px-3 py-1.5 text-xs lg:hidden">
+          {error ? <span className="text-red-200">⚠ {error}</span> : <span className="text-emerald-200">✓ {success}</span>}
+        </div>
+      )}
+
+      <main className="flex min-h-0 flex-1 flex-col gap-4 lg:mx-auto lg:w-full lg:max-w-6xl lg:grid lg:grid-cols-[320px_1fr] lg:overflow-hidden lg:px-6 lg:py-6">
+        {/* 左列：上传 / 当前皮肤 / 裁剪结果与确认（仅桌面；窄屏下省略，改用顶部单行上传 + 右下角控制条） */}
+        <div className="hidden space-y-4 lg:block lg:min-h-0 lg:overflow-y-auto">
           {error && (
             <div className="rounded bg-red-900/50 px-3 py-2 text-sm text-red-200" role="alert">
               {error}
@@ -459,8 +482,8 @@ export default function SkinStudio() {
           </section>
         </div>
 
-        {/* 右列：预览画布 + 控制栏 */}
-        <div className="flex flex-col overflow-hidden rounded-lg bg-slate-800">
+        {/* 右列：裁切预览 + 控制栏（窄屏时占满剩余屏幕） */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-800 lg:rounded-lg">
           <div ref={containerRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
             <canvas
               ref={previewCanvasRef}
@@ -474,12 +497,25 @@ export default function SkinStudio() {
               onWheel={onWheel}
             />
             {!img && (
-              <p className="text-center text-sm text-slate-500">
-                🖼️ 请先在左侧上传图片
+              <p className="px-4 text-center text-sm text-slate-500">
+                🖼️ <span className="lg:hidden">请先点击上方按钮上传图片</span>
+                <span className="hidden lg:inline">请先在左侧上传图片</span>
               </p>
             )}
+            {/* 窄屏：裁剪一次后，在裁切界面右上角展示当前裁切预览 */}
+            {resultReady && resultDataUrl && (
+              <div className="absolute right-2 top-2 z-10 rounded-lg border border-slate-600 bg-slate-900/90 p-1.5 lg:hidden">
+                <p className="mb-1 text-[10px] text-slate-400">当前裁切预览</p>
+                <img
+                  src={resultDataUrl}
+                  alt="当前裁切预览"
+                  className="h-24 w-auto rounded border border-slate-700"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              </div>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 p-3">
+          <div className="hidden flex-wrap items-center gap-3 border-t border-slate-700 p-3 lg:flex">
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-400">缩放</span>
               <button
@@ -514,6 +550,48 @@ export default function SkinStudio() {
             >
               确认裁剪
             </button>
+          </div>
+
+          {/* 窄屏：右下角浮动控制条（缩放 / 重置 / 裁剪 / 确认上传） */}
+          <div className="pointer-events-none absolute bottom-2 right-2 z-20 lg:hidden">
+            <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-slate-600 bg-slate-800/95 p-1.5 shadow-lg">
+              <button
+                onClick={() => applyZoom(1 / 1.25)}
+                className="h-9 w-9 rounded-lg bg-slate-700 text-lg leading-none text-white hover:bg-slate-600"
+                title="缩小"
+              >
+                −
+              </button>
+              <span className="min-w-[44px] text-center text-xs text-slate-400 tabular-nums">{zoomText}</span>
+              <button
+                onClick={() => applyZoom(1.25)}
+                className="h-9 w-9 rounded-lg bg-slate-700 text-lg leading-none text-white hover:bg-slate-600"
+                title="放大"
+              >
+                +
+              </button>
+              <button
+                onClick={fitImage}
+                className="h-9 w-9 rounded-lg bg-slate-700 text-white hover:bg-slate-600"
+                title="重置位置"
+              >
+                ↻
+              </button>
+              <button
+                onClick={doCrop}
+                disabled={!img}
+                className="h-9 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
+              >
+                裁剪
+              </button>
+              <button
+                onClick={() => void doConfirm()}
+                disabled={!resultReady || busy}
+                className="h-9 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
+              >
+                {busy ? '上传中…' : '确认上传'}
+              </button>
+            </div>
           </div>
         </div>
       </main>
