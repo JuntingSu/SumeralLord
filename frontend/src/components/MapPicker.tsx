@@ -43,6 +43,7 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
         placeholder={placeholder ?? '按地图名 / 作者 / 标签搜索'}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
+        onClick={() => setOpen(true)}
         onChange={(e) => {
           const text = e.target.value;
           setQuery(text);
@@ -58,7 +59,7 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
           onClick={() => {
             setQuery('');
             onChange('');
-            setOpen(false);
+            setOpen(true);
           }}
           className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full bg-slate-500/70 text-slate-200 transition-colors hover:bg-slate-400"
         >

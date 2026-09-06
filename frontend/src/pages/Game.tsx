@@ -610,7 +610,7 @@ export default function Game() {
           {isMyActionTurn && (
             <button
               onClick={handleSwitchPhase}
-              className={`absolute bottom-14 left-1/2 z-10 -translate-x-1/2 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500 ${
+              className={`absolute bottom-14 left-3 z-10 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500 lg:left-1/2 lg:-translate-x-1/2 ${
                 lowActionTime ? 'low-time-blink' : ''
               }`}
             >
