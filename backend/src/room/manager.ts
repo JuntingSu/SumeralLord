@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { GAME, ROOMS } from '@dl/shared';
+import { GAME, ROOMS, AI_LEVEL } from '@dl/shared';
 import type {
   ErrorCode,
   GameStartMsg,
@@ -87,9 +87,16 @@ export interface RoomManagerOptions {
   statsOf?: (userId: number) => PlayerStats;
 }
 
-/** 地图 player_list → 房间势力（出生王城在 battlefield 中，房间层只关心元信息） */
+/** 地图 player_list → 房间势力（出生王城在 battlefield 中，房间层只关心元信息；aiLevel 初始未指定） */
 function toRoomForces(map: MapFullData): RoomForce[] {
-  return map.player_list.map((p) => ({ seat: p.seat, team: p.team, name: p.name, flag: p.flag, playerId: null }));
+  return map.player_list.map((p) => ({
+    seat: p.seat,
+    team: p.team,
+    name: p.name,
+    flag: p.flag,
+    playerId: null,
+    aiLevel: null,
+  }));
 }
 
 /** 房间内存状态机（单进程；WS 推送在 BM3 接入，本层只管状态与校验） */
@@ -245,6 +252,7 @@ export class RoomManager {
     }
     const force = room.forces.find((f) => f.seat === seat);
     if (!force) throw new RoomError('INVALID_PARAMS', '势力不存在');
+    if (force.aiLevel !== null) throw new RoomError('FORCE_AI_LOCKED', '该势力已指定 AI 难度，不可选择');
     if (force.playerId !== null && force.playerId !== userId) {
       throw new RoomError('FORCE_TAKEN', '该势力已被其他玩家选择');
     }
@@ -280,6 +288,37 @@ export class RoomManager {
       this.emit({ type: 'PLAYER_READY', roomId: room.id, playerId: targetId, ready: false });
     }
     return this.toRoomData(room);
+  }
+
+  /**
+   * 房主为势力指定/清除 AI 难度（AI 接管开启时可用；aiLevel=null 清除指定）。
+   * 指定后该势力 AI 专属、玩家不可选取（selectForce 拦截）；已被玩家占据的势力不可指定（先移出）。
+   */
+  assignForceAiLevel(hostUserId: number, roomId: string, seat: number, aiLevel: number | null): RoomData {
+    const room = this.mustGet(roomId);
+    this.touch(room);
+    if (room.hostId !== hostUserId) throw new RoomError('NOT_HOST', '仅房主可执行此操作');
+    if (room.status === 'IN_GAME') throw new RoomError('INVALID_PARAMS', '对局已开始');
+    if (room.status === 'GAME_OVER') throw new RoomError('INVALID_PARAMS', '对局已结束，结算展示中，稍后可再来一局');
+    if (!room.aiTakeover) throw new RoomError('AI_TAKEOVER_OFF', '请先开启 AI 接管');
+    if (
+      aiLevel !== null &&
+      aiLevel !== AI_LEVEL.EASY &&
+      aiLevel !== AI_LEVEL.MEDIUM &&
+      aiLevel !== AI_LEVEL.HARD &&
+      aiLevel !== AI_LEVEL.LEISURE
+    ) {
+      throw new RoomError('INVALID_PARAMS', 'AI 难度仅允许 1/2/3/255');
+    }
+    const force = room.forces.find((f) => f.seat === seat);
+    if (!force) throw new RoomError('INVALID_PARAMS', '势力不存在');
+    if (force.playerId !== null) {
+      throw new RoomError('FORCE_OCCUPIED', '该势力已有玩家，请先将其移出再指定 AI 难度');
+    }
+    force.aiLevel = aiLevel;
+    const data = this.toRoomData(room);
+    this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: data });
+    return data;
   }
 
   /** WS 连接/断开 → 在线标记（变化才广播 ROOM_UPDATE） */
@@ -377,7 +416,13 @@ export class RoomManager {
     if (patch.allowSpectate !== undefined) room.allowSpectate = patch.allowSpectate;
     if (patch.fogMode !== undefined) room.fogMode = patch.fogMode;
     if (patch.randomSpawn !== undefined) room.randomSpawn = patch.randomSpawn;
-    if (patch.aiTakeover !== undefined) room.aiTakeover = patch.aiTakeover;
+    if (patch.aiTakeover !== undefined) {
+      room.aiTakeover = patch.aiTakeover;
+      // 关闭 AI 接管：清除全部势力的 AI 难度指定（势力恢复可选取；重新开启后需重新指定）
+      if (!patch.aiTakeover) {
+        for (const f of room.forces) f.aiLevel = null;
+      }
+    }
     if (patch.usePersonalSkin !== undefined) room.usePersonalSkin = patch.usePersonalSkin;
     if (patch.timeSettings !== undefined) room.timeSettings = patch.timeSettings;
     const data = this.toRoomData(room);

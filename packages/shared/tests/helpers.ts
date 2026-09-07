@@ -65,8 +65,12 @@ export function assignments(...list: Array<{ seat: number; playerId?: number | n
   return list.map((a) => ({ seat: a.seat, playerId: a.playerId ?? null, isAI: a.isAI ?? false }));
 }
 
-export function startGame(map: MapFullData, seatAssignments: SeatAssignment[] = assignments({ seat: 1, playerId: 1 }, { seat: 2, playerId: 2 })): InitStateResult {
-  return initState({ map, seatAssignments, timeSettings: DEFAULT_TIME });
+export function startGame(
+  map: MapFullData,
+  seatAssignments: SeatAssignment[] = assignments({ seat: 1, playerId: 1 }, { seat: 2, playerId: 2 }),
+  seed = 'test-seed',
+): InitStateResult {
+  return initState({ map, seatAssignments, timeSettings: DEFAULT_TIME, seed });
 }
 
 export function act(state: GameState, seat: number, intent: PlayerIntent): ApplyResult {

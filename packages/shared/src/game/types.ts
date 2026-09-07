@@ -43,6 +43,8 @@ export interface GameState {
   columns: number;
   /** 滚筒地图（左右连通） */
   cylindrical: boolean;
+  /** 服务器开局下发的随机种子（AI 决策确定性随机源；双端一致） */
+  seed: string;
   /** 全局轮次，从 1 起（末位回绕 +1） */
   turn: number;
   currentSeat: number;
@@ -120,6 +122,8 @@ export interface SeatAssignment {
   seat: number;
   playerId: number | null;
   isAI: boolean;
+  /** AI 难度覆盖（房主为势力指定；缺省用地图 player_list[].computer） */
+  computer?: number;
 }
 
 export interface SpawnAssignment {
@@ -130,6 +134,8 @@ export interface SpawnAssignment {
 export interface InitStateInput {
   map: MapFullData;
   seatAssignments: SeatAssignment[];
+  /** 随机种子（GAME_START.seed 透传；AI 决策与确定性随机使用，双端一致） */
+  seed: string;
   /** 恒等映射（randomSpawn 洗玩家分配而非出生点，2026-08-16 拍板）；reducer 仅透传签名，不参与演算 */
   spawnAssignments?: SpawnAssignment[];
   timeSettings: RoomTimeSettings;

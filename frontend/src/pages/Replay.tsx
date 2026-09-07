@@ -63,6 +63,7 @@ export default function Replay() {
         map: start.map,
         seatAssignments: start.seatAssignments,
         timeSettings: start.timeSettings,
+        seed: start.seed,
       }).state;
       let cur = b;
       const intents = intentsRef.current;
@@ -106,6 +107,7 @@ export default function Replay() {
           map: log.start.map,
           seatAssignments: log.start.seatAssignments,
           timeSettings: log.start.timeSettings,
+          seed: log.start.seed,
         }).state;
         boardRef.current = b;
         setBoard(b);

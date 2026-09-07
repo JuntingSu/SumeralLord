@@ -91,26 +91,31 @@ describe('§6.4 无主势力删兵', () => {
     expect(r2.state.currentSeat).toBe(1);
   });
 
-  it('AI 接管的势力：兵保留、进入轮转、轮到即自动跳过（D1）', () => {
+  it('AI 接管的势力：兵保留、进入轮转、回合由提交方意图推进（reducer 不自动完成）', () => {
     const { state } = startGame(map, assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: null, isAI: true }));
     const f2 = force(state, 2);
     expect(f2.exists).toBe(true);
     expect(f2.alive).toBe(true);
     expect(soldierAt(state, 12)).not.toBeNull();
     expect(soldierAt(state, 13)).not.toBeNull();
-    // seat1 结束回合 → 轮到 seat2(AI) → 同一事件链内自动完成其整回合 → 回到 seat1
+    // seat1 结束回合 → 轮到 seat2(AI)：停在行动阶段
     const r = act(state, 1, { intentType: 'SWITCH_PHASE' });
     const r2 = act(r.state, 1, { intentType: 'SWITCH_PHASE' });
-    expect(r2.state.currentSeat).toBe(1);
-    expect(r2.state.turn).toBe(2);
+    expect(r2.state.currentSeat).toBe(2);
     expect(r2.state.phase).toBe('ACTION');
-    // AI 跳过不产生意图，仅派生事件（SWITCH_PHASE / END_TURN 等）
-    const kinds = chainKinds(r2);
-    expect(kinds).toContain('END_TURN');
-    expect(kinds.filter((k) => k === 'END_TURN').length).toBe(2); // seat1 → seat2 → seat1
+    // 以 PLAYER seat=2 提交跳过意图可推进其回合（ACTION → ADD_POINT → END → 回到 seat1）
+    const a = act(r2.state, 2, { intentType: 'SWITCH_PHASE' });
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const b = act(a.state, 2, { intentType: 'SWITCH_PHASE' });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    expect(b.state.currentSeat).toBe(1);
+    expect(b.state.turn).toBe(2);
+    expect(b.state.phase).toBe('ACTION');
   });
 
-  it('computer 1~3 在 M4 按 255 处理（D2）：同样轮到即跳过', () => {
+  it('computer 值不影响 reducer：AI 回合一律停在行动阶段等待意图提交', () => {
     const map3 = makeMap({
       players: [
         { seat: 1, team: 1 },
@@ -124,8 +129,30 @@ describe('§6.4 无主势力删兵', () => {
     const { state } = startGame(map3, assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: null, isAI: true }));
     const r = act(state, 1, { intentType: 'SWITCH_PHASE' });
     const r2 = act(r.state, 1, { intentType: 'SWITCH_PHASE' });
-    expect(r2.state.currentSeat).toBe(1);
-    expect(r2.state.turn).toBe(2);
+    expect(r2.state.currentSeat).toBe(2);
+    expect(r2.state.phase).toBe('ACTION');
+    // 难度决策在提交方（planAiTurn），reducer 对 AI 与玩家意图一视同仁
+    const a = act(r2.state, 2, { intentType: 'SWITCH_PHASE' });
+    const b = act(a.state, 2, { intentType: 'SWITCH_PHASE' });
+    expect(b.state.currentSeat).toBe(1);
+    expect(b.state.turn).toBe(2);
+  });
+
+  it('seatAssignment.computer 覆盖地图默认难度（房主指定 AI 难度落地）', () => {
+    const map = makeMap({
+      players: [
+        { seat: 1, team: 1, computer: 255 },
+        { seat: 2, team: 2, computer: 255 },
+      ],
+      tiles: { 6: [CITY, 1, 2], 12: [CITY, 2, 2] },
+    });
+    // seat2 由房主指定难度 1（isAI + computer 覆盖）；seat1 未指定
+    const { state } = startGame(map, [
+      { seat: 1, playerId: 101, isAI: false },
+      { seat: 2, playerId: null, isAI: true, computer: 1 },
+    ]);
+    expect(force(state, 2).computer).toBe(1);
+    expect(force(state, 1).computer).toBe(255); // 未指定 → 地图默认
   });
 });
 

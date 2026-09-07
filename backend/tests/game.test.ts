@@ -549,6 +549,108 @@ describe('BM4：AI 接管与无主势力混编开局', () => {
     expect(assignments.find((a) => a.seat === 2)).toMatchObject({ playerId: null, isAI: true });
     c.close();
   });
+
+  it('aiTakeover + 房主指定势力 AI 难度：GAME_START.seatAssignments 携带 computer 覆盖（未指定缺省）', async () => {
+    await leaveAllRooms('ivy');
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('ivy'),
+      payload: {
+        name: 'AI 难度房',
+        allowSpectate: false,
+        fogMode: false,
+        randomSpawn: false,
+        aiTakeover: true,
+        mapId: 'map_duo_plain',
+        timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('ivy'), payload: { seat: 1 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('ivy'), payload: { ready: true } });
+    // 房主为 seat2 指定难度 1（AI 专属）
+    const set = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('ivy'),
+      payload: { seat: 2, aiLevel: 1 },
+    });
+    expect(set.statusCode).toBe(200);
+    const c = await wsConnect(roomId, 'ivy');
+    const res = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/start`, headers: auth('ivy'), payload: {} });
+    expect(res.statusCode).toBe(200);
+    const gs = await c.waitFor('GAME_START');
+    const assignments = gs.seatAssignments as Array<{
+      seat: number;
+      playerId: number | null;
+      isAI: boolean;
+      computer?: number;
+    }>;
+    // 指定难度的 AI 席位：isAI=true 且 computer=指定值
+    expect(assignments.find((a) => a.seat === 2)).toMatchObject({ playerId: null, isAI: true, computer: 1 });
+    // 有玩家的席位不携带 computer 覆盖
+    const seat1 = assignments.find((a) => a.seat === 1);
+    expect(seat1).toMatchObject({ playerId: users.get('ivy')!.id, isAI: false });
+    expect(seat1?.computer).toBeUndefined();
+    c.close();
+  });
+
+  it('AI_INTENT_SUBMIT：AI 席位意图中继（from=AI、fromSeat=aiSeat、eventId 入流、ACK 回发送者）；非 AI 席位/观战拒绝', async () => {
+    await leaveAllRooms('ivy');
+    await leaveAllRooms('carol');
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('ivy'),
+      payload: {
+        name: 'AI 中继房',
+        allowSpectate: true,
+        fogMode: false,
+        randomSpawn: false,
+        aiTakeover: true,
+        mapId: 'map_duo_plain',
+        timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('ivy'), payload: { seat: 1 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/ready`, headers: auth('ivy'), payload: { ready: true } });
+    const ivyC = await wsConnect(roomId, 'ivy');
+    // 观战者（接收广播；服务器中继不回环发送者）
+    const join = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth('carol'), payload: { asSpectator: true } });
+    expect(join.statusCode).toBe(200);
+    const spec = await wsConnect(roomId, 'carol');
+    const res = await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/start`, headers: auth('ivy'), payload: {} });
+    expect(res.statusCode).toBe(200);
+    const gs = await ivyC.waitFor('GAME_START');
+    expect((gs.seatAssignments as Array<{ seat: number; isAI: boolean }>).find((a) => a.seat === 2)?.isAI).toBe(true);
+
+    // 合法：AI 席位意图中继（不校验当前回合——由各端 reducer 确定性拒绝，服务器零游戏逻辑）
+    ivyC.send({ type: 'AI_INTENT_SUBMIT', clientTempId: 'ai1', aiSeat: 2, intent: { intentType: 'SWITCH_PHASE' } });
+    const ack = await ivyC.waitFor('INTENT_ACK');
+    expect(ack).toMatchObject({ clientTempId: 'ai1', eventId: 1 });
+    const bcast = await spec.waitFor('INTENT_BROADCAST');
+    expect(bcast).toMatchObject({ eventId: 1, from: 'AI', fromSeat: 2, intent: { intentType: 'SWITCH_PHASE' } });
+    // 发送者不回环
+    await new Promise((r) => setTimeout(r, 200));
+    expect(ivyC.messages.filter((m) => m.type === 'INTENT_BROADCAST')).toHaveLength(0);
+
+    // 非法：aiSeat 非 AI 席位 → ERROR INVALID_INTENT，不中继
+    ivyC.send({ type: 'AI_INTENT_SUBMIT', clientTempId: 'bad1', aiSeat: 1, intent: { intentType: 'SWITCH_PHASE' } });
+    const err = await ivyC.waitFor((m) => m.type === 'ERROR' && String(m.code) === 'INVALID_INTENT');
+    expect(String(err.code)).toBe('INVALID_INTENT');
+
+    // 非法：观战提交 AI 意图 → SPECTATOR_CANNOT_ACT
+    spec.send({ type: 'AI_INTENT_SUBMIT', clientTempId: 'bad2', aiSeat: 2, intent: { intentType: 'SWITCH_PHASE' } });
+    const err2 = await spec.waitFor((m) => m.type === 'ERROR' && String(m.code) === 'SPECTATOR_CANNOT_ACT');
+    expect(String(err2.code)).toBe('SPECTATOR_CANNOT_ACT');
+
+    ivyC.close();
+    spec.close();
+  });
 });
 
 // ---------- randomSpawn：已选势力集合内随机重排玩家分配 ----------

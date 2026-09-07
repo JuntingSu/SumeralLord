@@ -4,6 +4,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { CHAT, WS_CLOSE_CODES } from '@dl/shared';
 import {
+  AiIntentSubmitSchema,
   ChatSendSchema,
   ConsensusResultSchema,
   IntentSubmitSchema,
@@ -252,6 +253,10 @@ export class WsGateway {
       this.onIntentSubmit(conn, parsed);
       return;
     }
+    if (msg?.type === 'AI_INTENT_SUBMIT') {
+      this.onAiIntentSubmit(conn, parsed);
+      return;
+    }
     if (msg?.type === 'CONSENSUS_RESULT') {
       this.onConsensusResult(conn, parsed);
       return;
@@ -297,6 +302,46 @@ export class WsGateway {
       type: 'INTENT_BROADCAST',
       from: String(conn.userId),
       fromSeat,
+      intent: submit.data.intent,
+      eventId,
+    };
+    this.games.appendEvent(game, broadcast);
+    this.send(conn, { type: 'INTENT_ACK', clientTempId: submit.data.clientTempId, eventId });
+    this.broadcast(conn.roomId, broadcast, conn.userId);
+  }
+
+  /** AI 席位意图中继（AI 决策进入意图流）：校验 aiSeat 为 AI 席位 → 分配 eventId → 持久化 → 广播（from:'AI'）
+   *  会话/中继逻辑（服务器不跑 reducer）：不校验目标是否当前回合（由各端 reducer 确定性拒绝） */
+  private onAiIntentSubmit(conn: RoomConnection, parsed: unknown): void {
+    const submit = AiIntentSubmitSchema.safeParse(parsed);
+    if (!submit.success) {
+      this.send(conn, { type: 'ERROR', code: 'INVALID_INTENT', message: 'AI 意图结构非法', fatal: false });
+      return;
+    }
+    const gameId = this.rooms.gameIdOf(conn.roomId);
+    const game = gameId ? this.games.get(gameId) : undefined;
+    if (!game || game.status !== 'in_game') {
+      this.log.warn({ roomId: conn.roomId, userId: conn.userId }, 'AI_INTENT_SUBMIT 对局未在进行，丢弃');
+      return;
+    }
+    const fromSeat = this.rooms.seatOf(conn.roomId, conn.userId);
+    if (fromSeat === -1) {
+      this.log.warn({ roomId: conn.roomId, userId: conn.userId }, '观战/无席位玩家尝试提交 AI 意图');
+      this.send(conn, { type: 'ERROR', code: 'SPECTATOR_CANNOT_ACT', message: '观战中，无法影响对局', fatal: false });
+      return;
+    }
+    const aiSeat = submit.data.aiSeat;
+    const participant = game.seatAssignments.find((sa) => sa.seat === aiSeat);
+    if (!participant || !participant.isAI) {
+      this.log.warn({ roomId: conn.roomId, userId: conn.userId, aiSeat }, 'aiSeat 非 AI 席位，丢弃');
+      this.send(conn, { type: 'ERROR', code: 'INVALID_INTENT', message: '目标席位非 AI', fatal: false });
+      return;
+    }
+    const eventId = this.games.allocateEventId(game);
+    const broadcast: IntentBroadcastMsg = {
+      type: 'INTENT_BROADCAST',
+      from: 'AI',
+      fromSeat: aiSeat,
       intent: submit.data.intent,
       eventId,
     };

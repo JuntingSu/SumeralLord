@@ -195,6 +195,8 @@ export interface RoomForce {
   name: string;
   flag: number;
   playerId: number | null;
+  /** 房主指定的 AI 难度（1/2/3/255；null=未指定，开局按地图默认 computer）；指定后该势力 AI 专属、玩家不可选取 */
+  aiLevel: number | null;
 }
 
 export interface RoomTimeSettings {

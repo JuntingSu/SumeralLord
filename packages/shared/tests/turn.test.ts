@@ -103,8 +103,8 @@ describe('§6.2 阶段切换与回合轮转', () => {
   });
 });
 
-describe('AI(255) 自动跳过（D1）', () => {
-  it('连续多个 AI 依次跳过，事件链确定', () => {
+describe('AI 回合（意图入流：reducer 不自动完成）', () => {
+  it('轮到 AI 席位停在行动阶段；以 PLAYER seat=AI 的 SWITCH_PHASE 逐段推进', () => {
     const map = makeMap({
       players: [
         { seat: 1, team: 1 },
@@ -118,18 +118,36 @@ describe('AI(255) 自动跳过（D1）', () => {
       assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: null, isAI: true }, { seat: 3, playerId: null, isAI: true }),
     );
     const t = endTurnOf(state, 1);
-    // seat2、seat3 均为 AI：同一事件链内连续跳过，回到 seat1，轮次 +1
-    expect(t.state.currentSeat).toBe(1);
-    expect(t.state.turn).toBe(2);
+    // seat2(AI) 回合：停在行动阶段，不再自动完成
+    expect(t.state.currentSeat).toBe(2);
     expect(t.state.phase).toBe('ACTION');
-    const ends = chainKinds(t).filter((k) => k === 'END_TURN');
-    expect(ends.length).toBe(3); // seat1→2, 2→3, 3→1
-    // AI 回合不产生玩家意图（链中无 MOVE/ATTACK/ADD_POINT）
-    expect(chainKinds(t)).not.toContain('MOVE');
-    expect(chainKinds(t)).not.toContain('ADD_POINT');
+    // 提交方以 PLAYER seat=2 逐段切换：ACTION → ADD_POINT → END → seat3
+    const a = act(t.state, 2, { intentType: 'SWITCH_PHASE' });
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    expect(a.state.phase).toBe('ADD_POINT');
+    expect(a.state.currentSeat).toBe(2);
+    const b = act(a.state, 2, { intentType: 'SWITCH_PHASE' });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    // seat3(AI) 回合：同样停在行动阶段
+    expect(b.state.currentSeat).toBe(3);
+    expect(b.state.phase).toBe('ACTION');
+    const c = act(b.state, 3, { intentType: 'SWITCH_PHASE' });
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+    const d = act(c.state, 3, { intentType: 'SWITCH_PHASE' });
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    // 回到 seat1，轮次 +1
+    expect(d.state.currentSeat).toBe(1);
+    expect(d.state.turn).toBe(2);
+    expect(d.state.phase).toBe('ACTION');
+    // AI 回合的跳过由显式 SWITCH_PHASE 意图驱动（链中出现，不再派生）
+    expect(chainKinds(d).filter((k) => k === 'SWITCH_PHASE').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('首势力为 AI：initState 后自动跳过到首个玩家势力', () => {
+  it('首势力为 AI：initState 停在 AI 行动阶段（不再自动跳到首个玩家势力）', () => {
     const map = makeMap({
       players: [
         { seat: 1, team: 1 },
@@ -138,9 +156,9 @@ describe('AI(255) 自动跳过（D1）', () => {
       tiles: { 6: [CITY, 1, 2], 12: [CITY, 2, 2] },
     });
     const { state, chain } = startGame(map, assignments({ seat: 1, playerId: null, isAI: true }, { seat: 2, playerId: 102 }));
-    expect(state.currentSeat).toBe(2);
+    expect(state.currentSeat).toBe(1);
     expect(state.phase).toBe('ACTION');
-    expect(chainKinds({ chain })).toContain('END_TURN');
+    expect(chainKinds({ chain })).not.toContain('END_TURN');
   });
 
   it('AI seat 因据点归零被清除后轮转正确继续；仅剩 AI 时胜利判定结束对局', () => {

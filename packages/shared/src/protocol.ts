@@ -1,6 +1,6 @@
 // REST 请求体 / WS 消息的 Zod schema：前后端共享的协议契约
 import { z } from 'zod';
-import { TIME_OPTIONS } from './constants.js';
+import { TIME_OPTIONS, AI_LEVEL } from './constants.js';
 import type { MapFullData, RoomData, RoomPlayer } from './types.js';
 import type { SeatAssignment, SpawnAssignment } from './game/types.js';
 
@@ -108,6 +108,15 @@ export type SelectForceBody = z.infer<typeof SelectForceBodySchema>;
 export const ForceRemoveBodySchema = z.object({ seat: z.number().int().min(0).max(127) });
 export type ForceRemoveBody = z.infer<typeof ForceRemoveBodySchema>;
 
+/** 房主为势力指定 AI 难度（aiLevel: 1/2/3/255 或 null=清除；仅 AI 接管开启时可用；指定后该势力 AI 专属、玩家不可选取） */
+export const ForceAiBodySchema = z.object({
+  seat: z.number().int().min(0).max(127),
+  aiLevel: z
+    .union([z.literal(AI_LEVEL.EASY), z.literal(AI_LEVEL.MEDIUM), z.literal(AI_LEVEL.HARD), z.literal(AI_LEVEL.LEISURE)])
+    .nullable(),
+});
+export type ForceAiBody = z.infer<typeof ForceAiBodySchema>;
+
 // ---------- WS 房间阶段（BM3）：客户端 → 服务器 ----------
 
 export const ChatSendSchema = z.object({
@@ -124,6 +133,7 @@ export type RoomClientMsg =
   | PingMsg
   | ChatSendMsg
   | z.infer<typeof IntentSubmitSchema>
+  | z.infer<typeof AiIntentSubmitSchema>
   | z.infer<typeof ConsensusResultSchema>
   | z.infer<typeof ReconnectMsgSchema>
   | z.infer<typeof TimeSyncMsgSchema>
@@ -296,6 +306,15 @@ export const IntentSubmitSchema = z.object({
   intent: PlayerIntentSchema,
 });
 
+/** AI 席位意图提交（AI 决策进入意图流）：aiSeat 为该局 AI 席位，服务器以 from:'AI' 中继广播 */
+export const AiIntentSubmitSchema = z.object({
+  type: z.literal('AI_INTENT_SUBMIT'),
+  clientTempId: z.string().min(1).max(64),
+  aiSeat: z.number().int().min(1).max(127),
+  intent: PlayerIntentSchema,
+});
+export type AiIntentSubmitMsg = z.infer<typeof AiIntentSubmitSchema>;
+
 export const ConsensusResultSchema = z.object({
   type: z.literal('CONSENSUS_RESULT'),
   consensusId: z.string().regex(CONSENSUS_ID_PATTERN),
@@ -328,7 +347,8 @@ export type SettlementDismissedMsg = z.infer<typeof SettlementDismissedSchema>;
 
 export interface IntentBroadcastMsg {
   type: 'INTENT_BROADCAST';
-  from: string; // playerId 或 'SERVER'（代发投降专用）
+  /** playerId 字符串、'SERVER'（代发投降专用）或 'AI'（AI 席位意图） */
+  from: string;
   fromSeat: number;
   intent: PlayerIntent;
   eventId: number;

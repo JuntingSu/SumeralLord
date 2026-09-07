@@ -75,6 +75,14 @@ export function kickFromForce(id: string, seat: number): Promise<RoomData> {
   });
 }
 
+/** 房主为势力指定/清除 AI 难度（aiLevel: 1/2/3/255 或 null=清除；需开启 AI 接管） */
+export function setForceAiLevel(id: string, seat: number, aiLevel: number | null): Promise<RoomData> {
+  return api<RoomData>(`/api/rooms/${id}/force-ai`, {
+    method: 'POST',
+    body: JSON.stringify({ seat, aiLevel }),
+  });
+}
+
 export function updateRoomSettings(id: string, patch: RoomSettingsPatch): Promise<RoomData> {
   return api<RoomData>(`/api/rooms/${id}/settings`, {
     method: 'PATCH',

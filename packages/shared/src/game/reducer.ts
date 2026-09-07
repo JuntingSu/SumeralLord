@@ -26,7 +26,6 @@ import {
 import type { BoardGeometry } from './coord.js';
 import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
-import { planAiTurn } from './ai.js';
 
 // ---------- 内部上下文 ----------
 
@@ -507,19 +506,8 @@ function runPreparePhaseContent(ctx: Ctx): void {
   switchPhaseEventCore(ctx);
   // 补充规则：进入行动阶段后当前势力无任何可行动兵 → 代玩家切换至加点阶段（复用统一判定）
   autoSkipActionPhase(ctx, seat);
-  // AI 回合处理（D1/D3 拍板）：由策略层决策。v1 难度 1~3/255 统一跳过——
-  // 等效连续切阶段至本回合结束（可能已由自动切换进入加点阶段；结束后递归下一势力）。
-  // 未来难度策略返回 intents 计划时在此按序演算（策略意图不入流，重放仍是派生行为）。
-  if (force.isAI) {
-    const plan = planAiTurn(ctx.state, seat);
-    if (plan.kind === 'skip') {
-      let guard = 0;
-      while (ctx.state.currentSeat === seat && ctx.state.phase !== 'END' && guard++ < 8) {
-        switchPhaseEventCore(ctx);
-      }
-    }
-    // plan.kind === 'intents'：难度策略接入点（预留，未来按序应用策略意图）
-  }
+  // AI 回合（难度 1~3 / 255）：不再由 reducer 派生完成——回合停在 ACTION / ADD_POINT，
+  // 由提交方客户端（planAiTurn）以显式意图提交推进（AI 意图入流，回放直接应用记录意图）。
 }
 
 // ---------- 意图入口（P5 契约 §11.2） ----------
@@ -634,7 +622,7 @@ export function initState(input: InitStateInput): InitStateResult {
         flag: p.flag,
         playerId: assign?.playerId ?? null,
         isAI: assign?.isAI ?? false,
-        computer: p.computer,
+        computer: assign?.computer ?? p.computer,
         exists: true,
         alive: true,
         points: 0,
@@ -658,6 +646,7 @@ export function initState(input: InitStateInput): InitStateResult {
     rows: map.row,
     columns: map.column,
     cylindrical: map.cylindrical_map,
+    seed: input.seed,
     turn: 1,
     currentSeat: 0,
     phase: 'PREPARE',

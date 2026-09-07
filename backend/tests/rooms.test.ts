@@ -407,3 +407,139 @@ describe('房主移出势力（/force-remove）', () => {
     await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
   });
 });
+
+describe('房主指定势力 AI 难度（/force-ai）', () => {
+  it('开启 AI 接管后，房主可为无主势力指定/清除 AI 难度', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: createPayload({ name: 'AI 难度测试', aiTakeover: true }),
+    });
+    const roomId = create.json().data.roomId as string;
+    const set = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 2, aiLevel: 1 },
+    });
+    expect(set.statusCode).toBe(200);
+    const force = (set.json().data.forces as Array<{ seat: number; aiLevel: number | null }>).find((f) => f.seat === 2);
+    expect(force?.aiLevel).toBe(1);
+    // 清除指定 → 恢复可选
+    const clear = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 2, aiLevel: null },
+    });
+    expect(clear.statusCode).toBe(200);
+    const force2 = (clear.json().data.forces as Array<{ seat: number; aiLevel: number | null }>).find((f) => f.seat === 2);
+    expect(force2?.aiLevel).toBeNull();
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
+  });
+
+  it('非房主 → 403 NOT_HOST；未开启 AI 接管 → 400 AI_TAKEOVER_OFF；非法难度 → 400', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: createPayload({ name: 'AI 难度测试2' }), // aiTakeover 默认 false
+    });
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth('bob'), payload: { asSpectator: false } });
+    // 未开启 AI 接管
+    const off = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 2, aiLevel: 1 },
+    });
+    expect(off.statusCode).toBe(400);
+    expect(off.json().code).toBe('AI_TAKEOVER_OFF');
+    // 非法难度（5 不在 1/2/3/255）
+    const bad = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 2, aiLevel: 5 },
+    });
+    expect(bad.statusCode).toBe(400);
+    // 非房主
+    const notHost = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('bob'),
+      payload: { seat: 2, aiLevel: 1 },
+    });
+    expect(notHost.statusCode).toBe(403);
+    expect(notHost.json().code).toBe('NOT_HOST');
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
+  });
+
+  it('已占势力指定 → 400 FORCE_OCCUPIED；AI 锁定势力玩家不可选取 → 409 FORCE_AI_LOCKED', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: createPayload({ name: 'AI 锁定测试', aiTakeover: true }),
+    });
+    const roomId = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/join`, headers: auth('bob'), payload: { asSpectator: false } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('bob'), payload: { seat: 1 } });
+    // 已占势力不可指定（提示先移出）
+    const occupied = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 1, aiLevel: 2 },
+    });
+    expect(occupied.statusCode).toBe(400);
+    expect(occupied.json().code).toBe('FORCE_OCCUPIED');
+    // 指定 seat2 为 AI 难度 3
+    const set = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 2, aiLevel: 3 },
+    });
+    expect(set.statusCode).toBe(200);
+    // bob 取消 seat1 后尝试选取 AI 专属的 seat2 → 拒绝
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/select-force`, headers: auth('bob'), payload: { seat: -1 } });
+    const locked = await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/select-force`,
+      headers: auth('bob'),
+      payload: { seat: 2 },
+    });
+    expect(locked.statusCode).toBe(409);
+    expect(locked.json().code).toBe('FORCE_AI_LOCKED');
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
+  });
+
+  it('关闭 AI 接管 → 清除全部势力 AI 难度指定', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: createPayload({ name: 'AI 清空测试', aiTakeover: true }),
+    });
+    const roomId = create.json().data.roomId as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/rooms/${roomId}/force-ai`,
+      headers: auth('alice'),
+      payload: { seat: 2, aiLevel: 255 },
+    });
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${roomId}/settings`,
+      headers: auth('alice'),
+      payload: { aiTakeover: false },
+    });
+    expect(patch.statusCode).toBe(200);
+    const forces = patch.json().data.forces as Array<{ seat: number; aiLevel: number | null }>;
+    expect(forces.every((f) => f.aiLevel === null)).toBe(true);
+    await app.inject({ method: 'POST', url: `/api/rooms/${roomId}/disband`, headers: auth('alice') });
+  });
+});

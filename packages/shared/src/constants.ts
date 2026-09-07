@@ -17,6 +17,12 @@ export const ERROR_CODES = {
   GAME_IN_PROGRESS: 'GAME_IN_PROGRESS',
   FORCE_TAKEN: 'FORCE_TAKEN',
   FORCE_NOT_SELECTED: 'FORCE_NOT_SELECTED',
+  /** 势力已由房主指定 AI 难度（AI 专属），玩家不可选取 */
+  FORCE_AI_LOCKED: 'FORCE_AI_LOCKED',
+  /** 势力已被玩家占据，需先移出才能指定 AI 难度 */
+  FORCE_OCCUPIED: 'FORCE_OCCUPIED',
+  /** 未开启 AI 接管，不能为势力指定 AI 难度 */
+  AI_TAKEOVER_OFF: 'AI_TAKEOVER_OFF',
   NOT_HOST: 'NOT_HOST',
   PLAYERS_NOT_READY: 'PLAYERS_NOT_READY',
   SEATS_UNASSIGNED: 'SEATS_UNASSIGNED',
@@ -104,3 +110,11 @@ export const AI_LEVEL = {
   HARD: 3,
   LEISURE: 255,
 } as const;
+
+/** AI 难度中文标签（房间势力 AI 徽标等展示用） */
+export const AI_LEVEL_LABEL: Record<number, string> = {
+  [AI_LEVEL.EASY]: '简单',
+  [AI_LEVEL.MEDIUM]: '普通',
+  [AI_LEVEL.HARD]: '困难',
+  [AI_LEVEL.LEISURE]: '休闲',
+};

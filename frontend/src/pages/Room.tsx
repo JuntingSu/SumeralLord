@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { MapFullData, MapMeta, RoomPlayer, RoomSettingsPatch } from '@dl/shared';
-import { TIME_OPTIONS } from '@dl/shared';
+import { TIME_OPTIONS, AI_LEVEL, AI_LEVEL_LABEL } from '@dl/shared';
 import { getMap, listMaps } from '../api/map';
 import {
   changeRoomMap,
@@ -11,6 +11,7 @@ import {
   kickPlayer,
   leaveRoom,
   selectForce,
+  setForceAiLevel,
   setReady,
   startRoomGame,
   updateRoomSettings,
@@ -390,9 +391,15 @@ export default function Room() {
                     }}
                   />
                   <span className="truncate text-sm font-medium">{f.name}</span>
-                  <span className={`truncate text-sm ${occupant ? (occupant.online ? 'text-slate-200' : 'text-slate-500') : 'text-slate-600'}`}>
-                    {occupant?.username ?? '—'}
-                  </span>
+                  {f.aiLevel !== null ? (
+                    <span className="truncate text-sm text-sky-400" title={`AI 难度：${AI_LEVEL_LABEL[f.aiLevel] ?? f.aiLevel}（该势力不可选取）`}>
+                      AI·{AI_LEVEL_LABEL[f.aiLevel] ?? f.aiLevel}
+                    </span>
+                  ) : (
+                    <span className={`truncate text-sm ${occupant ? (occupant.online ? 'text-slate-200' : 'text-slate-500') : 'text-slate-600'}`}>
+                      {occupant?.username ?? '—'}
+                    </span>
+                  )}
                   <span className="text-sm text-slate-400">{f.team}</span>
                   <span className="hidden text-xs text-slate-400 sm:block">{seatStateText(f.playerId)}</span>
                   <span className="text-right">
@@ -417,12 +424,34 @@ export default function Room() {
                     ) : isSpectator ? (
                       <span className="text-xs text-slate-600">不可选</span>
                     ) : (
-                      <button
-                        onClick={() => guard(() => selectForce(room.id, f.seat))}
-                        className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-500"
-                      >
-                        选择
-                      </button>
+                      <span className="flex flex-wrap items-center justify-end gap-1.5">
+                        {isHost && room.aiTakeover && (
+                          <select
+                            value={f.aiLevel ?? ''}
+                            onChange={(e) =>
+                              guard(() => setForceAiLevel(room.id, f.seat, e.target.value === '' ? null : Number(e.target.value)))
+                            }
+                            className="rounded bg-slate-700 px-1.5 py-1 text-xs text-white"
+                            title="为势力指定 AI 难度：指定后该势力由 AI 扮演、玩家不可选取；选择「未指定」可恢复可选"
+                          >
+                            <option value="">未指定</option>
+                            <option value={AI_LEVEL.EASY}>简单</option>
+                            <option value={AI_LEVEL.MEDIUM}>普通</option>
+                            <option value={AI_LEVEL.HARD}>困难</option>
+                            <option value={AI_LEVEL.LEISURE}>休闲</option>
+                          </select>
+                        )}
+                        {f.aiLevel === null ? (
+                          <button
+                            onClick={() => guard(() => selectForce(room.id, f.seat))}
+                            className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-500"
+                          >
+                            选择
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-500">AI 专属</span>
+                        )}
+                      </span>
                     )}
                   </span>
                 </li>
@@ -523,7 +552,7 @@ export default function Room() {
                   onChange={(e) => handleSettingsPatch({ allowSpectate: e.target.checked })}
                 />
               </label>
-              <label className="flex items-center justify-between" title="开启后，开局时无玩家扮演的势力由 AI 接管（难度随地图）">
+              <label className="flex items-center justify-between" title="开启后，开局时无玩家扮演的势力由 AI 接管（房主可为势力指定 AI 难度；指定后该势力玩家不可选取）">
                 <span className="text-slate-300">开启 AI 接管</span>
                 <input
                   type="checkbox"

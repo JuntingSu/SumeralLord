@@ -142,6 +142,25 @@ export class MockWsServer implements GameTransport {
     this.emit(broadcast);
   }
 
+  /** AI 席位意图中继（与真实后端同构）：fromSeat = aiSeat、from = 'AI' */
+  submitAiIntent(clientTempId: string, aiSeat: number, intent: PlayerIntent): void {
+    if (this.closed) return;
+    const eventId = ++this.eventId;
+    const ack: RoomServerMsg = { type: 'INTENT_ACK', clientTempId, eventId };
+    this.log.push({ eventId, msg: ack });
+    this.emit(ack);
+    const broadcast: RoomServerMsg = {
+      type: 'INTENT_BROADCAST',
+      from: 'AI',
+      fromSeat: aiSeat,
+      intent,
+      eventId,
+    };
+    if (this.opts.dropBroadcastEventId === eventId) return;
+    this.log.push({ eventId, msg: broadcast });
+    this.emit(broadcast);
+  }
+
   /** 共识上报（P2）：延迟回 CONSENSUS_CONFIRMED（refId = "{触发意图eventId}*"，不占意图序） */
   submitConsensus(consensusId: string, result: unknown): void {
     if (this.closed) return;
