@@ -45,6 +45,8 @@ export interface GameState {
   cylindrical: boolean;
   /** 服务器开局下发的随机种子（AI 决策确定性随机源；双端一致） */
   seed: string;
+  /** 训练模式标志（透传 initState 输入；线上对局恒为 false） */
+  allowAiOnly: boolean;
   /** 全局轮次，从 1 起（末位回绕 +1） */
   turn: number;
   currentSeat: number;
@@ -136,6 +138,8 @@ export interface InitStateInput {
   seatAssignments: SeatAssignment[];
   /** 随机种子（GAME_START.seed 透传；AI 决策与确定性随机使用，双端一致） */
   seed: string;
+  /** 训练模式：允许纯 AI 对局轮转与判胜（默认 false；线上对局不得开启） */
+  allowAiOnly?: boolean;
   /** 恒等映射（randomSpawn 洗玩家分配而非出生点，2026-08-16 拍板）；reducer 仅透传签名，不参与演算 */
   spawnAssignments?: SpawnAssignment[];
   timeSettings: RoomTimeSettings;

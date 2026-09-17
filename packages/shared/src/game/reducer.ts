@@ -305,8 +305,9 @@ function victoryJudgeEvent(ctx: Ctx): void {
   const aliveForces = ctx.state.forces.filter((f) => f.exists && f.alive);
   const teams = [...new Set(aliveForces.map((f) => f.team))];
   // 规则 §8.4.3：存活势力全为同队 → 结束。
-  // M4 扩展（防 AI 卡死）：无存活人类势力时也结束（仅剩 AI 的轮转无法推进；单队则照常判胜，否则平局 -1）
-  if (teams.length > 1 && hasAliveHumanForce(ctx.state)) return;
+  // M4 扩展（防 AI 卡死）：无存活人类势力时也结束（仅剩 AI 的轮转无法推进；单队则照常判胜，否则平局 -1）。
+  // 训练模式（allowAiOnly）：AI-only 对局继续轮转，由实际胜负收尾，不在此处判平。
+  if (teams.length > 1 && (hasAliveHumanForce(ctx.state) || ctx.state.allowAiOnly)) return;
   const winningTeam = teams.length === 1 ? teams[0] : -1;
   const winners: string[] = [];
   const losers: string[] = [];
@@ -473,8 +474,9 @@ function endTurnEvent(ctx: Ctx): void {
   ctx.state.currentSeat = next;
   ctx.state.phase = 'PREPARE';
   ctx.chain.push({ level: 1, kind: 'END_TURN', fromSeat, toSeat: next, turn: ctx.state.turn });
-  if (!hasAliveHumanForce(ctx.state)) {
-    // 仅剩 AI/无存活人类：轮转无法推进（AI 即时完成回合会死循环），留给胜利判定结束对局
+  if (!hasAliveHumanForce(ctx.state) && !ctx.state.allowAiOnly) {
+    // 仅剩 AI/无存活人类：轮转无法推进（AI 即时完成回合会死循环），留给胜利判定结束对局。
+    // 训练模式（allowAiOnly）：放行轮转，由外部驱动（如 AI bot/训练脚本）推进各 AI 回合。
     ctx.state.phase = 'END';
     return;
   }
@@ -647,6 +649,7 @@ export function initState(input: InitStateInput): InitStateResult {
     columns: map.column,
     cylindrical: map.cylindrical_map,
     seed: input.seed,
+    allowAiOnly: input.allowAiOnly ?? false,
     turn: 1,
     currentSeat: 0,
     phase: 'PREPARE',
