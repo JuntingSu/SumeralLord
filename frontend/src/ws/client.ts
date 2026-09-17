@@ -103,10 +103,6 @@ export class WsClient implements GameTransport {
     this.sendJson({ type: 'INTENT_SUBMIT', clientTempId, intent });
   }
 
-  submitAiIntent(clientTempId: string, aiSeat: number, intent: PlayerIntent): void {
-    this.sendJson({ type: 'AI_INTENT_SUBMIT', clientTempId, aiSeat, intent });
-  }
-
   submitConsensus(consensusId: string, result: ConsensusPayload): void {
     this.sendJson({ type: 'CONSENSUS_RESULT', consensusId, result });
   }

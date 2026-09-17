@@ -399,11 +399,12 @@ function astarFirstStep(state: GameState, from: number, to: number, seat: number
   return null;
 }
 
-// 步骤5 移动判定（正序）：断兵且可到达最近敌对据点 → 沿 A* 路径移动一格
+// 步骤5 移动判定（正序）：断兵、不接敌（周围无非友方势力兵）且可到达最近敌对据点 → 沿 A* 路径移动一格
 function march(state: GameState, seat: number, pool: number[]): PlayerIntent | null {
   for (const t of pool) {
     const s = state.tiles[t].soldier!;
     if (s.isLinked) continue;
+    if (adjacentEnemies(state, t, seat).length > 0) continue; // 判据1：断兵接敌不移动（规则 AI行动规则.md 步骤5）
     const target = nearestReachableStronghold(state, t, seat);
     if (target === null) continue;
     const first = astarFirstStep(state, t, target, seat);

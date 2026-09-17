@@ -31,6 +31,8 @@ import type { Game, GameManager } from '../game/manager.js';
 import { ConsensusManager, type ConsensusFatalCode } from '../game/consensus.js';
 import { DisconnectWatch } from '../game/disconnectWatch.js';
 import type { TicketService } from '../auth/ticket.js';
+import type { BotSessionService } from './botSession.js';
+import type { AiBotManager } from '../ai-bot/manager.js';
 import { config } from '../config.js';
 import { settleMatch } from '../stats/settlement.js';
 
@@ -42,6 +44,8 @@ interface RoomConnection {
   roomId: string;
   userId: number;
   username: string;
+  /** bot 连接（ai-bot 子进程）：userId 恒 -1，不进 room.players，不参与断线/共识/结算 */
+  role?: 'bot';
   /** 握手 URL 上报的 reducer 版本（重连时与对局记录比对，不一致关闭码 4003） */
   reducerVersion?: string;
   lastSeen: number;
@@ -67,6 +71,8 @@ export class WsGateway {
     private readonly rooms: RoomManager,
     private readonly games: GameManager,
     private readonly tickets: TicketService,
+    private readonly botSessions: BotSessionService,
+    private readonly aiBots: AiBotManager,
     private readonly log: FastifyBaseLogger,
   ) {
     this.wss = new WebSocketServer({ noServer: true });
@@ -126,6 +132,12 @@ export class WsGateway {
       return;
     }
     if (event.type === 'ROOM_DISBANDED') {
+      // 房间销毁（对局进行中/结束后）：对局级 ai-bot 一并终止
+      const gameId = this.rooms.gameIdOf(event.roomId);
+      if (gameId) {
+        this.aiBots.kill(gameId);
+        this.botSessions.revokeByGame(gameId);
+      }
       for (const conn of this.conns) {
         if (conn.roomId !== event.roomId) continue;
         this.remove(conn);
@@ -136,6 +148,10 @@ export class WsGateway {
 
   private handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = new URL(request.url ?? '/', 'http://localhost');
+    if (url.pathname === '/ws-bot') {
+      this.handleBotUpgrade(request, socket, head, url);
+      return;
+    }
     if (url.pathname !== '/ws') {
       socket.destroy();
       return;
@@ -153,6 +169,25 @@ export class WsGateway {
 
     this.wss.handleUpgrade(request, socket, head, (ws) => {
       this.onConnection(ws, roomId, info.userId, info.username, reducerVersion);
+    });
+  }
+
+  /** ai-bot 专用升级路径：bot token 核销 + 对局存在性校验；不要求房间成员身份 */
+  private handleBotUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, url: URL): void {
+    const token = url.searchParams.get('token') ?? '';
+    const roomId = url.searchParams.get('roomId') ?? '';
+    const gameId = url.searchParams.get('gameId') ?? '';
+    const reducerVersion = url.searchParams.get('reducerVersion') ?? undefined;
+    const session = this.botSessions.consume(token);
+    if (!session || session.gameId !== gameId || session.roomId !== roomId) {
+      return this.reject(request, socket, head, WS_CLOSE_CODES.TICKET_INVALID, 'bot token 无效');
+    }
+    const game = this.games.get(gameId);
+    if (!game || game.status !== 'in_game') {
+      return this.reject(request, socket, head, WS_CLOSE_CODES.ROOM_NOT_FOUND, '对局不存在或未进行');
+    }
+    this.wss.handleUpgrade(request, socket, head, (ws) => {
+      this.onBotConnection(ws, roomId, game, reducerVersion);
     });
   }
 
@@ -193,7 +228,37 @@ export class WsGateway {
       }
       this.broadcast(roomId, { type: 'PLAYER_RECONNECT', gameId: game.id, seat } satisfies PlayerReconnectMsg, userId);
     }
+    this.wireWsHandlers(conn);
+  }
 
+  /** ai-bot 连接：userId=-1、不进 room.players、不标记在线、不触发断线时间线/共识/重连广播 */
+  private onBotConnection(ws: WebSocket, roomId: string, game: Game, reducerVersion?: string): void {
+    // 重启场景：同房间旧 bot 连接顶替
+    for (const conn of this.conns) {
+      if (conn.roomId === roomId && conn.role === 'bot') {
+        this.remove(conn);
+        conn.ws.close(WS_CLOSE_CODES.DUPLICATE_CONNECTION, 'bot 已被新连接顶替');
+      }
+    }
+    const conn: RoomConnection = {
+      ws,
+      roomId,
+      userId: -1,
+      username: '',
+      role: 'bot',
+      reducerVersion,
+      lastSeen: Date.now(),
+      alive: true,
+    };
+    this.conns.add(conn);
+    this.log.info({ roomId, gameId: game.id }, 'ai-bot connected');
+    this.send(conn, { type: 'CONNECT_ACK', roomId, gameId: game.id, lastEventId: game.eventIdCounter });
+    this.wireWsHandlers(conn);
+  }
+
+  /** 共享的 WS 消息/关闭/错误接线（bot 的 userId=-1 在 setOnline/seatOf/断线时间线中天然豁免） */
+  private wireWsHandlers(conn: RoomConnection): void {
+    const { ws, roomId, userId } = conn;
     ws.on('message', (raw) => {
       conn.lastSeen = Date.now();
       this.onMessage(conn, raw.toString());
@@ -324,8 +389,9 @@ export class WsGateway {
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, 'AI_INTENT_SUBMIT 对局未在进行，丢弃');
       return;
     }
-    const fromSeat = this.rooms.seatOf(conn.roomId, conn.userId);
-    if (fromSeat === -1) {
+    const isBot = conn.role === 'bot';
+    const fromSeat = isBot ? -1 : this.rooms.seatOf(conn.roomId, conn.userId);
+    if (fromSeat === -1 && !isBot) {
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, '观战/无席位玩家尝试提交 AI 意图');
       this.send(conn, { type: 'ERROR', code: 'SPECTATOR_CANNOT_ACT', message: '观战中，无法影响对局', fatal: false });
       return;
@@ -507,10 +573,12 @@ export class WsGateway {
     // VICTORY：对局结束 + 结算记录 + 积分结算 + GAME_OVER（refId 固定 "end"）
     this.disconnectWatch.clearGame(game.id);
     this.games.markFinished(game);
+    this.aiBots.kill(game.id);
+    this.botSessions.revokeByGame(game.id);
     const finishedAt = Date.now();
     this.games.recordMatchHistory(game, payload.winners, payload.winningTeam, finishedAt);
     // 结算在 recordMatchHistory 之后（回填其 score_changes 行）；此时对局流已含全部 INTENT_BROADCAST，步数统计准确
-    settleMatch(this.app.db, this.games, game, payload.winners);
+    settleMatch(this.app.db, this.games, game, payload.winners, payload.winningTeam);
     const over: GameOverMsg = {
       type: 'GAME_OVER',
       gameId,
@@ -536,6 +604,8 @@ export class WsGateway {
     if (!game || game.status !== 'in_game') return;
     this.disconnectWatch.clearGame(game.id);
     this.games.markAborted(game);
+    this.aiBots.kill(game.id);
+    this.botSessions.revokeByGame(game.id);
     this.broadcast(game.roomId, {
       type: 'ERROR',
       code,

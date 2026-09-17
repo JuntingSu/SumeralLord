@@ -110,3 +110,35 @@ describe('computeScoreChanges（0 和制 + 保底）', () => {
     expect(c.get(1)!.newScore).toBe(100);
   });
 });
+
+describe('D7：AI 胜局人类记败（emptyWinnersAsLoss）', () => {
+  it('AI 胜局（无人类胜者）：全员按支付侧扣分（获胜池作废），result=lose', () => {
+    const c = computeScoreChanges(
+      [
+        { playerId: 1, score: 100, isWinner: false, offline: false },
+        { playerId: 2, score: 100, isWinner: false, offline: false },
+      ],
+      { emptyWinnersAsLoss: true },
+    );
+    const m = new Map(c.map((x) => [x.playerId, x]));
+    // S=200 → pay = -10 各；无胜者，支付作废
+    expect(m.get(1)).toMatchObject({ delta: -10, newScore: 90, result: 'lose' });
+    expect(m.get(2)).toMatchObject({ delta: -10, newScore: 90, result: 'lose' });
+  });
+
+  it('AI 胜局与真平局的区分：emptyWinnersAsLoss=false（真平局）→ 全部 delta=0 不结算', () => {
+    const c = computeScoreChanges([
+      { playerId: 1, score: 100, isWinner: false, offline: false },
+      { playerId: 2, score: 100, isWinner: false, offline: false },
+    ]);
+    expect(c.every((x) => x.delta === 0)).toBe(true);
+  });
+
+  it('AI 胜局离线玩家同样记败（离线不豁免支付侧）', () => {
+    const c = computeScoreChanges(
+      [{ playerId: 1, score: 100, isWinner: false, offline: true }],
+      { emptyWinnersAsLoss: true },
+    );
+    expect(c[0]).toMatchObject({ delta: -20, newScore: 80, result: 'lose', offline: true });
+  });
+});

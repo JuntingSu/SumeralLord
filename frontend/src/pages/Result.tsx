@@ -49,6 +49,8 @@ export default function ResultModal({
   if (!gameOver) return null;
 
   const winners = gameOver.winners ?? [];
+  // D7：无人类胜者但有获胜队伍 = 仅 AI 势力获胜（人类记败）
+  const aiWon = (gameOver.winningTeam ?? 0) > 0 && winners.length === 0;
   const forces = board.forces.filter((f) => f.exists);
   const participantBySeat = new Map((result?.participants ?? []).map((p) => [p.seat, p]));
   const changeByPlayerId = new Map((result?.scoreChanges ?? []).map((c) => [c.playerId, c]));
@@ -68,10 +70,16 @@ export default function ResultModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-[32rem] rounded-xl bg-slate-800 p-6 shadow-2xl">
         <h2 className="text-center text-xl font-bold text-amber-300">
-          {winners.length > 0 ? '🎉 对局结束' : '对局结束（平局）'}
+          {winners.length > 0 ? '🎉 对局结束' : aiWon ? '🤖 AI 势力获胜' : '对局结束（平局）'}
         </h2>
         <p className="mt-2 text-center text-sm text-slate-300">
-          胜利：<span className="font-medium text-emerald-300">{winnerNames.length > 0 ? winnerNames.join('、') : '无'}</span>
+          胜利：<span className="font-medium text-emerald-300">
+            {winnerNames.length > 0
+              ? winnerNames.join('、')
+              : aiWon
+                ? 'AI 势力'
+                : '无'}
+          </span>
           {gameOver.winningTeam > 0 && <span className="ml-2 text-xs text-slate-500">（队伍 {gameOver.winningTeam}）</span>}
         </p>
 

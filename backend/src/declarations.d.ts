@@ -1,6 +1,8 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as schema from './db/schema.js';
 import type { TicketService } from './auth/ticket.js';
+import type { BotSessionService } from './ws/botSession.js';
+import type { AiBotManager } from './ai-bot/manager.js';
 import type { RoomManager } from './room/manager.js';
 import type { MapCatalog } from './maps/catalog.js';
 import type { GameManager } from './game/manager.js';
@@ -10,6 +12,8 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: BetterSQLite3Database<typeof schema>;
     tickets: TicketService;
+    botSessions: BotSessionService;
+    aiBots: AiBotManager;
     rooms: RoomManager;
     maps: MapCatalog;
     games: GameManager;

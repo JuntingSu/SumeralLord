@@ -37,12 +37,18 @@ export function round1(x: number): number {
  * 0 和制结算纯函数：
  * - S = 全员积分和（一次快照）；S <= 0 → 全员 delta = 0（防除零）
  * - pay_i = round1(-20 * score_i / S)（全员支付总额恒 -20）
- * - W = { isWinner && !offline }（结算时在线的获胜方）；W 为空 → 视同平局不结算
+ * - W = { isWinner && !offline }（结算时在线的获胜方）；W 为空且非 AI 胜局 → 视同平局不结算
  * - 剩余积分池 remaining = 战败方与离线获胜者的支付总和（恒 ≥ 0）
  * - 获胜者按 omega = 1/(score+100) 归一化分配，并保底 delta = max(5, delta)（超出部分系统注入）
  * - 战败方/离线获胜者：delta = pay（只支付不获得）
+ * - D7（AI 胜局人类记败）：emptyWinnersAsLoss=true 且 W 为空 → 全员按支付侧扣分，获胜池作废
  */
-export function computeScoreChanges(players: SettlePlayerInput[]): ScoreChange[] {
+export interface ScoreSettleOptions {
+  /** AI 胜局（无人类胜者）：按支付侧记败，不再视同平局 */
+  emptyWinnersAsLoss?: boolean;
+}
+
+export function computeScoreChanges(players: SettlePlayerInput[], opts: ScoreSettleOptions = {}): ScoreChange[] {
   const S = players.reduce((sum, p) => sum + p.score, 0);
   const zeroChanges = (): ScoreChange[] =>
     players.map((p) => ({
@@ -60,8 +66,22 @@ export function computeScoreChanges(players: SettlePlayerInput[]): ScoreChange[]
   for (const p of players) pay.set(p.playerId, round1((-20 * p.score) / S));
 
   const W = players.filter((p) => p.isWinner && !p.offline);
-  // 防御：无在线获胜者（正常 VICTORY 下必有一名在线获胜者上报共识，不应触发）
-  if (W.length === 0) return zeroChanges();
+  // 真平局（无获胜队伍）：不结算积分（D7 前语义）
+  if (W.length === 0 && !opts.emptyWinnersAsLoss) return zeroChanges();
+  // AI 胜局（D7：AI 胜局人类记败）：无人类胜者，全员按支付侧扣分，获胜池无人领取作废
+  if (W.length === 0) {
+    return players.map((p) => {
+      const delta = pay.get(p.playerId) ?? 0;
+      return {
+        playerId: p.playerId,
+        result: 'lose' as const,
+        offline: p.offline,
+        oldScore: p.score,
+        delta,
+        newScore: Math.max(0, round1(p.score + delta)),
+      };
+    });
+  }
 
   const omegaSum = W.reduce((sum, w) => sum + 1 / (w.score + 100), 0);
   const remaining = players
@@ -103,7 +123,8 @@ export interface SettlementResult {
 /**
  * 编排：读结算时刻积分快照 → 算结算明细 → 回填 score_changes + 更新积分/对局数（同一事务）。
  * 口径（用户拍板）：不计入对局数（steps ≤ 25）的对局**不结算积分**；
- * 计入对局数（steps > 25）时才结算积分，且在线获胜方 wins +1；平局（winners 为空）只加对局数不结算积分。
+ * 计入对局数（steps > 25）时才结算积分，且在线获胜方 wins +1；平局（winners 为空且无获胜队伍）只加对局数不结算积分。
+ * D7：AI 胜局（winningTeam != -1 且 winners 为空 = 仅 AI 势力获胜）→ 人类按战败结算积分（支付侧扣分），wins 不授予任何人。
  * 观战者/AI 不计入。
  */
 export function settleMatch(
@@ -111,6 +132,7 @@ export function settleMatch(
   games: GameManager,
   game: Game,
   winners: string[],
+  winningTeam = -1,
 ): SettlementResult | null {
   // 真人参战者（playerId !== null && !isAI；观战者/AI 无账号不计入）
   const seats = [...game.participants.entries()].filter(([, p]) => p.playerId !== null && !p.isAI);
@@ -129,10 +151,15 @@ export function settleMatch(
     offline: !p.connected,
   }));
 
-  // 不计入对局数（steps ≤ 25）或平局（winners 为空）→ 不结算积分，score_changes = []
+  // 不计入对局数（steps ≤ 25）或真平局（winners 为空且无获胜队伍）→ 不结算积分，score_changes = []
+  // D7：AI 胜局（winners 空但存在获胜队伍，即仅 AI 势力获胜）→ 人类按战败结算
   const steps = games.countReplaySteps(game);
   const matchCounted = steps > 25;
-  const scoreChanges = !matchCounted || winners.length === 0 ? [] : computeScoreChanges(players);
+  const aiWon = winningTeam !== -1 && winners.length === 0;
+  const scoreChanges =
+    !matchCounted || (winners.length === 0 && !aiWon)
+      ? []
+      : computeScoreChanges(players, { emptyWinnersAsLoss: aiWon });
 
   // 回填与更新同事务：失败整体回滚，避免「对局数加了但积分没写」半截状态
   db.transaction((tx) => {

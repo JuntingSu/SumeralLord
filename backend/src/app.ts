@@ -6,6 +6,8 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { openDb } from './db/client.js';
 import { TicketService } from './auth/ticket.js';
+import { BotSessionService } from './ws/botSession.js';
+import { AiBotManager } from './ai-bot/manager.js';
 import { MapCatalog } from './maps/catalog.js';
 import { config } from './config.js';
 import { RoomManager } from './room/manager.js';
@@ -31,14 +33,18 @@ export interface BuildAppOptions {
   authRate?: { registerPerMin?: number; loginPerMin?: number };
   roomOpts?: { idleMs?: number; sweepIntervalMs?: number; gameHardCapMs?: number; gameOverRetainMs?: number };
   mapsReloadMs?: number;
+  /** AI 子进程管理配置（测试可注入 enabled:false / bootDir / onOutput） */
+  aiBotOpts?: import('./ai-bot/manager.js').AiBotManagerOptions;
 }
 
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? true });
   const { db, sqlite } = openDb(opts.dbPath);
   const tickets = new TicketService(opts.ticketTtlMs);
+  const botSessions = new BotSessionService();
   const maps = new MapCatalog();
   const games = new GameManager(undefined, db);
+  const aiBots = new AiBotManager(botSessions, opts.aiBotOpts);
   // 房间状态事件 → WS 网关广播（网关在下方创建后开始生效）
   let gatewayRef: WsGateway | null = null;
   const rooms = new RoomManager({
@@ -52,6 +58,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
   app.decorate('db', db);
   app.decorate('tickets', tickets);
+  app.decorate('botSessions', botSessions);
+  app.decorate('aiBots', aiBots);
   app.decorate('rooms', rooms);
   app.decorate('maps', maps);
   app.decorate('games', games);
@@ -88,10 +96,12 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(userRoutes);
   await app.register(leaderboardRoutes);
 
-  gatewayRef = new WsGateway(app, rooms, games, tickets, app.log);
+  gatewayRef = new WsGateway(app, rooms, games, tickets, botSessions, aiBots, app.log);
 
   app.addHook('onClose', async () => {
     gatewayRef?.close();
+    aiBots.dispose();
+    botSessions.dispose();
     tickets.dispose();
     rooms.dispose();
     games.dispose();

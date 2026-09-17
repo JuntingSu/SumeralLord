@@ -142,7 +142,7 @@ export class MockWsServer implements GameTransport {
     this.emit(broadcast);
   }
 
-  /** AI 席位意图中继（与真实后端同构）：fromSeat = aiSeat、from = 'AI' */
+  /** AI 席位意图中继（保留：本地 dev 可经脚本对手模拟 AI 回合；真实对局由服务端 ai-bot 驱动） */
   submitAiIntent(clientTempId: string, aiSeat: number, intent: PlayerIntent): void {
     if (this.closed) return;
     const eventId = ++this.eventId;

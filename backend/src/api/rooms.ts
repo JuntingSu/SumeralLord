@@ -231,6 +231,11 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
         map: gameMap,
         timeSettings: roomData.timeSettings,
       });
+      // 对局正式启动：含 AI 席位的对局拉起 ai-bot 子进程（生命周期由 AiBotManager 维护）
+      // wsUrl 必须指向实际监听端口（测试/部署可能非 config.port）
+      const addr = app.server.address();
+      const wsPort = typeof addr === 'object' && addr ? addr.port : config.port;
+      app.aiBots.spawn(game, wsPort);
       return ok(reply, { gameId: game.id });
     } catch (err) {
       return sendRoomError(reply, err);

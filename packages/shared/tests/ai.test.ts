@@ -155,15 +155,15 @@ describe('难度1 行动阶段（状态Ⅰ）', () => {
     expect(plan.intents[0]).toMatchObject({ intentType: 'ATTACK', from: 0, to: 1 });
   });
 
-  it('移动判定（步骤5）：断兵向最近敌对据点 A* 路径移动一格（目标为敌兵格时 MOVE 转进攻）', () => {
+  it('移动判定（步骤5）：断兵不接敌且可到达最近敌对据点 → 沿 A* 路径移动一格', () => {
     const map = makeMap({
       players: [
         { seat: 1, team: 1, computer: 1 },
         { seat: 2, team: 2 },
       ],
       tiles: {
-        0: [PLAIN, 1, 3], // AI 断兵（进攻力 3 < 敌兵力 4，无法正攻）
-        1: [CITY, 2, 4], // 敌对据点
+        0: [PLAIN, 1, 3], // AI 断兵（进攻力 3 < 敌兵力 4，无法正攻；周围无敌兵 → 不接敌）
+        2: [CITY, 2, 4], // 敌对据点（隔一格，0→1→2 连通可达）
       },
     });
     const { state } = startGame(map, assignments({ seat: 1, playerId: null, isAI: true }, { seat: 2, playerId: 102 }));
@@ -171,6 +171,27 @@ describe('难度1 行动阶段（状态Ⅰ）', () => {
     expect(plan.kind).toBe('intents');
     if (plan.kind !== 'intents') return;
     expect(plan.intents[0]).toMatchObject({ intentType: 'MOVE', from: 0, to: 1 });
+  });
+
+  it('移动判定（步骤5）判据1：断兵接敌（周围有非友方势力兵）→ 不移动，跳过行动阶段', () => {
+    const map = makeMap({
+      players: [
+        { seat: 1, team: 1, computer: 1 },
+        { seat: 2, team: 2 },
+      ],
+      tiles: {
+        0: [PLAIN, 1, 3], // AI 断兵（进攻力 3 < 敌兵力 4，无法正攻）
+        1: [PLAIN, 2, 4], // 敌断兵（相邻 → 接敌；有反击）
+        2: [CITY, 2, 4], // 敌对据点（0 可达，但因接敌不移动）
+      },
+    });
+    const { state } = startGame(map, assignments({ seat: 1, playerId: null, isAI: true }, { seat: 2, playerId: 102 }));
+    const plan = planAiTurn(state, 1);
+    expect(plan.kind).toBe('intents');
+    if (plan.kind !== 'intents') return;
+    // 无进攻/移动可执行：直接跳过行动阶段
+    expect(plan.intents[0]).toMatchObject({ intentType: 'SWITCH_PHASE' });
+    expect(plan.intents.some((i) => i.intentType === 'MOVE')).toBe(false);
   });
 
   it('夹击判定（步骤6）：友兵合力可击败最强相邻敌兵 → 进攻该敌兵', () => {

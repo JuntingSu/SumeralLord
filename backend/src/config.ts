@@ -24,6 +24,12 @@ export const config = {
   gameOverRetainMs: num(process.env.DL_GAME_OVER_RETAIN_MS, 5 * 60 * 1000),
   /** 地图目录元数据刷新间隔（完整地图按需读盘，仅小字段周期重扫） */
   mapsReloadMs: num(process.env.DL_MAPS_RELOAD_MS, 5000),
+  /** AI 服务端托管：每局含 AI 席位的对局拉起 ai-bot 子进程（测试可关） */
+  aiBotEnabled: process.env.AI_BOT_ENABLED !== '0',
+  /** bot 崩溃重启退避（首次等待毫秒数，每次翻倍） */
+  aiBotRestartBackoffMs: num(process.env.AI_BOT_RESTART_BACKOFF_MS, 1000),
+  /** bot 崩溃重启次数上限（超出后放弃，等待对局结束） */
+  aiBotRestartMax: num(process.env.AI_BOT_RESTART_MAX, 8),
 };
 
 if (config.isProd && config.jwtSecret === 'dev-secret-do-not-use-in-prod') {

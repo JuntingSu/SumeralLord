@@ -16,13 +16,12 @@ import type {
   SeatAssignment,
   SoldierState,
 } from '@dl/shared';
-import { applyIntent, initState, planAiTurn } from '@dl/shared';
+import { applyIntent, initState } from '@dl/shared';
 import type { GameState } from '@dl/shared';
 import { collectConsensusNodes, sameConsensus } from '../game/consensus';
 import { initialTimer, onTurnChange, tick, type TimerState } from '../game/timer';
 import type { EventQueueItem } from '../canvas/animator';
 import type { ChatEntry } from './room';
-import { useRoom } from './room';
 import type { WsStatus } from '../ws/client';
 
 export interface GameTransport {
@@ -31,8 +30,6 @@ export interface GameTransport {
   connect(): Promise<void>;
   close(): void;
   submitIntent(clientTempId: string, intent: PlayerIntent): void;
-  /** AI 席位意图提交（AI 决策进入意图流；aiSeat 为该局 AI 席位） */
-  submitAiIntent(clientTempId: string, aiSeat: number, intent: PlayerIntent): void;
   submitConsensus(consensusId: string, result: ConsensusPayload): void;
   sendTimeSync(gameId: string, seat: number, stepTimeRemain: number, gameTimeRemain: number): void;
   sendReconnect(lastEventId: number, gameId: string): void;
@@ -74,14 +71,10 @@ interface GameStore {
   lastChain: GameEvent[];
   /** clientTempId → eventId（ACK 关联表） */
   ackMap: Record<string, number>;
-  /** 本端已提交待 ACK 的意图（clientTempId → 意图 + 所属席位；AI 意图席位为 aiSeat） */
+  /** 本端已提交待 ACK 的意图（clientTempId → 意图 + 所属席位） */
   localIntents: Record<string, { intent: PlayerIntent; seat: number }>;
   /** 已上报待确认的共识（consensusId → payload） */
   pendingConsensus: Record<string, ConsensusPayload>;
-  /** AI 驱动：当前 AI 席位的计划（逐条提交，ACK 后推进） */
-  aiPlan: { seat: number; intents: PlayerIntent[]; next: number } | null;
-  /** AI 驱动：是否正等待上一条 AI 意图的 ACK */
-  aiWaitingAck: boolean;
   /** 加点长按当前目标地块（UI 交互状态） */
   lastPointTile: number | null;
 
@@ -235,70 +228,7 @@ function applyStreamMessage(
     systemNotices:
       sys && sys.notices.length > 0 ? [...s.systemNotices, ...sys.notices] : s.systemNotices,
   });
-  // 实时路径：状态更新后驱动 AI（轮到 AI 席位且本端为提交方时提交下一步意图）
-  if (!replay) driveAi(get, set);
   return 'applied';
-}
-
-/** 本端是否为 AI 提交方：在线参战玩家中 userId 最小者（各端按房间数据确定性推导） */
-function isAiSubmitter(seatAssignments: SeatAssignment[] | null, mySeat: number | null): boolean {
-  if (!seatAssignments || mySeat === null) return false;
-  const room = useRoom.getState().room;
-  if (!room) return false;
-  const myPlayerId = seatAssignments.find((a) => a.seat === mySeat)?.playerId;
-  if (myPlayerId === null || myPlayerId === undefined) return false;
-  const onlineIds = seatAssignments
-    .filter((a) => a.playerId !== null)
-    .map((a) => a.playerId as number)
-    .filter((id) => room.players.some((p) => p.id === id && p.online));
-  if (onlineIds.length === 0) return false;
-  return Math.min(...onlineIds) === myPlayerId;
-}
-
-/** skip 计划展开：休闲语义 = 连续切换阶段至回合结束（与旧 reducer 跳过循环等价） */
-function skipIntents(board: GameState, seat: number): PlayerIntent[] {
-  if (board.currentSeat === seat && board.phase === 'ACTION') {
-    return [{ intentType: 'SWITCH_PHASE' }, { intentType: 'SWITCH_PHASE' }];
-  }
-  return [{ intentType: 'SWITCH_PHASE' }];
-}
-
-/**
- * AI 驱动（提交方）：当前轮到 AI 席位（ACTION/ADD_POINT）时，用 planAiTurn 生成该回合意图序列，
- * 逐条提交（收到 ACK 后经 applyStreamMessage 应用再提交下一条）；计划耗尽后等待回合推进。
- */
-function driveAi(get: () => GameStore, set: (partial: Partial<GameStore>) => void): void {
-  const s = get();
-  if (s.gameOver || s.fatal || s.isSpectator || s.board === null || s.transport === null) return;
-  if (!isAiSubmitter(s.seatAssignments, s.mySeat)) return;
-  const board = s.board;
-  const seat = board.currentSeat;
-  const isAiSeat = s.seatAssignments?.some((a) => a.seat === seat && a.isAI) ?? false;
-  if (!isAiSeat) {
-    if (s.aiPlan) set({ aiPlan: null, aiWaitingAck: false });
-    return;
-  }
-  if (board.phase !== 'ACTION' && board.phase !== 'ADD_POINT') return;
-  if (s.aiWaitingAck) return;
-  // 计划过期（席位变更，如上一 AI 回合结束轮到新的 AI 席位）→ 清空后继续为当前席位规划
-  if (s.aiPlan && s.aiPlan.seat !== seat) set({ aiPlan: null });
-  // 计划耗尽但席位未变 → 等待回合推进（防御：不重复规划）
-  if (s.aiPlan && s.aiPlan.seat === seat && s.aiPlan.next >= s.aiPlan.intents.length) return;
-  if (!s.aiPlan) {
-    const plan = planAiTurn(board, seat);
-    const intents = plan.kind === 'intents' ? plan.intents : skipIntents(board, seat);
-    if (intents.length === 0) return;
-    set({ aiPlan: { seat, intents, next: 0 } });
-  }
-  const plan = get().aiPlan!;
-  const intent = plan.intents[plan.next];
-  const clientTempId = nextTempId();
-  set({
-    aiPlan: { ...plan, next: plan.next + 1 },
-    aiWaitingAck: true,
-    localIntents: { ...get().localIntents, [clientTempId]: { intent, seat } },
-  });
-  s.transport.submitAiIntent(clientTempId, seat, intent);
 }
 
 export const useGame = create<GameStore>((set, get) => {
@@ -316,9 +246,8 @@ export const useGame = create<GameStore>((set, get) => {
         if (typeof msg.eventId !== 'number' || !msg.intent) continue;
         applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat ?? 0, transport, true);
       }
-      // 追平全部结束（无后续分页）：若轮到 AI 席位且本端为提交方，驱动 AI（重连前可能漏提交）
+      // 追平全部结束（无后续分页）
       if (nextCursor > 0) void catchUp();
-      else driveAi(get, set);
     } catch {
       // 补发失败：保持游标不动，等待下一条消息再次触发
     }
@@ -342,8 +271,6 @@ export const useGame = create<GameStore>((set, get) => {
     ackMap: {},
     localIntents: {},
     pendingConsensus: {},
-    aiPlan: null,
-    aiWaitingAck: false,
     lastPointTile: null,
 
     connection: 'connecting',
@@ -390,8 +317,6 @@ export const useGame = create<GameStore>((set, get) => {
         ackMap: {},
         localIntents: {},
         pendingConsensus: {},
-        aiPlan: null,
-        aiWaitingAck: false,
         lastPointTile: null,
         timer: initialTimer(startMsg.timeSettings),
         gameOver: null,
@@ -408,8 +333,6 @@ export const useGame = create<GameStore>((set, get) => {
       if (seat > 0) {
         set({ timer: onTurnChange(initialTimer(startMsg.timeSettings), seat, startMsg.timeSettings) });
       }
-      // 首势力为 AI 且本端为提交方：立即驱动
-      driveAi(get, set);
     },
 
     onServerMessage: (msg) => {
@@ -420,15 +343,8 @@ export const useGame = create<GameStore>((set, get) => {
           const localIntents = { ...s.localIntents };
           delete localIntents[msg.clientTempId];
           const ackMap = { ...s.ackMap, [msg.clientTempId]: msg.eventId };
-          // AI 意图 ACK：解除等待，applyStreamMessage 的实时路径会驱动下一条
-          const isAiIntent = local !== undefined && s.mySeat !== null && local.seat !== s.mySeat;
-          set({
-            ackMap,
-            localIntents,
-            submitting: false,
-            aiWaitingAck: isAiIntent ? false : s.aiWaitingAck,
-          });
-          // 自己的意图（含提交方提交的 AI 意图）：ACK 后按 eventId 序应用（服务器不回环广播）
+          set({ ackMap, localIntents, submitting: false });
+          // 自己的意图：ACK 后按 eventId 序应用（服务器不回环广播）
           if (local && s.mySeat !== null) {
             const outcome = applyStreamMessage(get, set, msg.eventId, local.intent, local.seat, s.transport);
             if (outcome === 'gap') void catchUp();
@@ -504,7 +420,6 @@ export const useGame = create<GameStore>((set, get) => {
             }
           }
           if (msg.nextBatchCursor && msg.nextBatchCursor > 0) void catchUp();
-          else driveAi(get, set); // 追平完成：轮到 AI 且本端为提交方则驱动
           return;
         }
         case 'ERROR': {
@@ -634,8 +549,6 @@ export const useGame = create<GameStore>((set, get) => {
         ackMap: {},
         localIntents: {},
         pendingConsensus: {},
-        aiPlan: null,
-        aiWaitingAck: false,
         lastPointTile: null,
         gameOver: null,
         fatal: null,
@@ -657,8 +570,6 @@ export function attachTransport(t: GameTransport): () => void {
   useGame.setState({ transport: t });
   const offMsg = t.onMessage((msg) => useGame.getState().onServerMessage(msg));
   const offStatus = t.onStatus((status) => useGame.getState().onStatus(status));
-  // transport 就绪后立即驱动一次（Room 跳转路径：board 已初始化，可能正轮到 AI 席位）
-  driveAi(useGame.getState, useGame.setState);
   return () => {
     offMsg();
     offStatus();
