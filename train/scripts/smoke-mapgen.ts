@@ -33,6 +33,12 @@ for (let i = 0; i < N; i++) {
     if (c1 !== strongholdsPerSide || c2 !== strongholdsPerSide) {
       throw new Error(`据点数 seat1=${c1} seat2=${c2} 期望=${strongholdsPerSide}`);
     }
+    // 后手补偿：先手据点兵力 3、后手 4
+    const str1 = state.tiles.filter((t) => t.soldier?.owner === 1 && t.terrain === 1).map((t) => t.soldier!.strength);
+    const str2 = state.tiles.filter((t) => t.soldier?.owner === 2 && t.terrain === 1).map((t) => t.soldier!.strength);
+    if (str1.some((s) => s !== 3) || str2.some((s) => s !== 4)) {
+      throw new Error(`据点兵力不符 seat1=${str1.join(',')} seat2=${str2.join(',')}（期望 3/4）`);
+    }
     sh1 += c1;
     sh2 += c2;
     // 出生点距离（跨队据点的最小 hex 距离）

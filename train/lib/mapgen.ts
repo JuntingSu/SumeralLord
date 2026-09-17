@@ -103,8 +103,10 @@ export interface GenOptions {
   minSpawnDistance?: number;
   /** 出生点周围(距离≤2)可走格数下限（默认 6，防出生点被山地/海洋围死） */
   minSpawnSurrounding?: number;
-  /** 据点初始兵力（默认 5，与 mapeditor 生成器一致） */
-  strongholdStrength?: number;
+  /** 先手（座1）据点初始兵力（默认 3；后手补偿设计） */
+  firstStrength?: number;
+  /** 后手（座2）据点初始兵力（默认 4；补偿先手优势） */
+  secondStrength?: number;
 }
 
 /** 生成一张均衡随机 1v1 图（确定性：同 seed 同图） */
@@ -114,7 +116,8 @@ export function generateBalancedMap(opts: GenOptions): MapFullData {
   const strongholdsPerSide = opts.strongholdsPerSide ?? 1;
   const minSpawnDistance = opts.minSpawnDistance ?? 6;
   const minSpawnSurrounding = opts.minSpawnSurrounding ?? 6;
-  const strength = opts.strongholdStrength ?? 5;
+  const firstStrength = opts.firstStrength ?? 3;
+  const secondStrength = opts.secondStrength ?? 4;
   const size = rows * columns;
   const geo = { rows, columns, cylindrical: false };
 
@@ -179,11 +182,11 @@ export function generateBalancedMap(opts: GenOptions): MapFullData {
     clusters[side] = cluster;
   }
 
-  // 落盘 MapFullData
+  // 落盘 MapFullData（先手据点兵力 3、后手 4：后手补偿，抵消先手优势）
   const battlefield: BattlefieldTile[] = terrain.map((t) => [t, OWNER_EMPTY, 0]);
   for (let side = 0; side < 2; side++) {
     for (const idx of clusters[side]) {
-      battlefield[idx] = [TERRAIN.CITY, side + 1, strength];
+      battlefield[idx] = [TERRAIN.CITY, side + 1, side === 0 ? firstStrength : secondStrength];
     }
   }
   const map: MapFullData = {
