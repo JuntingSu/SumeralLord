@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数字领主地块皮肤生成器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --panel-light: #232733;
+    --border: #2d3140;
+    --accent: #4a9eff;
+    --accent-hover: #6bb0ff;
+    --text: #e0e0e0;
+    --text-dim: #808896;
+    --success: #4caf50;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+  .header .subtitle {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /* ── Main layout ── */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Left panel ── */
+  .left-panel {
+    width: 320px;
+    min-width: 320px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .section {
+    padding: 16px;
+  }
+  .section + .section {
+    border-top: 1px solid var(--border);
+  }
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .section-title::before {
+    content: '';
+    width: 3px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  /* ── Upload zone ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 32px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--panel-light);
+  }
+  .upload-zone:hover,
+  .upload-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(74, 158, 255, 0.06);
+  }
+  .upload-zone .icon {
+    font-size: 36px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .upload-zone .text {
+    font-size: 14px;
+    color: var(--text);
+  }
+  .upload-zone .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .file-info {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: var(--panel-light);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+    display: none;
+  }
+  .file-info.visible { display: block; }
+  .file-info .name { color: var(--text); word-break: break-all; margin-bottom: 2px; }
+
+  /* ── Result area ── */
+  .result-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .result-preview-wrapper {
+    position: relative;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: #0f1115;
+    background-image:
+      linear-gradient(45deg, #2a2d35 25%, transparent 25%),
+      linear-gradient(-45deg, #2a2d35 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2d35 75%),
+      linear-gradient(-45deg, transparent 75%, #2a2d35 75%);
+    background-size: 12px 12px;
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+    display: none;
+  }
+  .result-preview-wrapper.visible { display: block; }
+
+  .result-preview-wrapper canvas {
+    display: block;
+    width: 288px;   /* 1.5× display for visibility */
+    height: 324px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+
+  .result-placeholder {
+    color: var(--text-dim);
+    font-size: 12px;
+    text-align: center;
+    padding: 24px 0;
+    line-height: 1.6;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    font-weight: 500;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn-primary:disabled { background: #2a3040; color: #555c6e; cursor: not-allowed; }
+
+  .btn-success {
+    background: var(--success);
+    color: #fff;
+    width: 100%;
+    padding: 10px;
+  }
+  .btn-success:hover:not(:disabled) { background: #5cb85c; }
+  .btn-success:disabled { background: #2a3040; color: #555c6e; cursor: not-allowed; }
+
+  /* ── Right panel ── */
+  .right-panel {
+    flex: 1;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .preview-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #previewCanvas {
+    cursor: grab;
+    display: none;
+  }
+  #previewCanvas.dragging { cursor: grabbing; }
+
+  .preview-empty {
+    color: var(--text-dim);
+    font-size: 14px;
+    text-align: center;
+    line-height: 1.8;
+  }
+  .preview-empty .big-icon {
+    font-size: 48px;
+    display: block;
+    margin-bottom: 12px;
+    opacity: 0.4;
+  }
+
+  /* ── Control bar ── */
+  .control-bar {
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .control-group .label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-right: 4px;
+  }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    background: var(--panel-light);
+    color: var(--text);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    font-family: inherit;
+    line-height: 1;
+  }
+  .icon-btn:hover {
+    background: var(--border);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .zoom-display {
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 50px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .spacer { flex: 1; }
+
+  .hint-text {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  .mobile-msg { display: none; }
+
+  /* ── Mobile floating bar (hidden on desktop) ── */
+  .mobile-bar { display: none; }
+
+  @media (max-width: 768px) {
+    body {
+      height: 100vh;      /* fallback for older browsers */
+      height: 100dvh;     /* dynamic viewport height — excludes browser toolbar */
+    }
+    .left-panel { display: none !important; }
+    .header { padding: 8px 12px; }
+    .header h1 { font-size: 14px; }
+    .header .subtitle { display: none; }
+    .control-bar { display: none !important; }
+    .right-panel { padding-bottom: 76px; } /* leave room for fixed mobile bar */
+
+    .desktop-msg { display: none; }
+    .mobile-msg { display: inline; }
+
+    .preview-empty { font-size: 13px; }
+    .preview-empty .big-icon { font-size: 40px; }
+
+    .mobile-bar {
+      display: flex !important;
+      position: fixed;
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      left: 12px;
+      right: 12px;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+      gap: 8px;
+    }
+    .mobile-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(26, 29, 36, 0.92);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 6px 8px;
+    }
+    .m-btn {
+      width: 40px;
+      height: 40px;
+      border: none;
+      border-radius: 10px;
+      background: var(--panel-light);
+      color: var(--text);
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s;
+      font-family: inherit;
+      line-height: 1;
+    }
+    .m-btn:active { background: var(--border); }
+    .m-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .m-btn-primary {
+      background: var(--accent);
+      color: #fff;
+      width: auto;
+      padding: 0 14px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .m-btn-primary:disabled { background: #2a3040; color: #555c6e; }
+    .m-btn-success { background: var(--success); color: #fff; }
+    .m-btn-success:disabled { background: #2a3040; color: #555c6e; }
+    .m-zoom {
+      font-size: 11px;
+      color: var(--text-dim);
+      min-width: 32px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>数字领主地块皮肤生成器</h1>
+  <span class="subtitle">上传图片 → 六边形框选 → 192×216 PNG 下载</span>
+</div>
+
+<div class="main">
+  <!-- ── Left Panel ── -->
+  <div class="left-panel">
+    <div class="section">
+      <div class="section-title">上传图片</div>
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">📁</div>
+        <div class="text">点击或拖放图片到此处</div>
+        <div class="hint">支持 JPG / PNG / GIF / BMP / WEBP 等格式</div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
+      <div class="file-info" id="fileInfo">
+        <div class="name" id="fileName"></div>
+        <div id="fileSize"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">裁剪结果</div>
+      <div class="result-area">
+        <div class="result-preview-wrapper" id="resultWrapper">
+          <canvas id="resultCanvas" width="192" height="216"></canvas>
+        </div>
+        <div class="result-placeholder" id="resultPlaceholder">
+          尚未生成裁剪结果<br>
+          上传图片后在右侧调整并点击「确认裁剪」
+        </div>
+        <button class="btn btn-success" id="downloadBtn" disabled>下载 PNG (192×216)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right Panel ── -->
+  <div class="right-panel">
+    <div class="preview-container" id="previewContainer">
+      <div class="preview-empty" id="previewEmpty">
+        <span class="big-icon">🖼️</span>
+        <span class="desktop-msg">请先在左侧上传图片</span>
+        <span class="mobile-msg">点击下方 📁 按钮上传图片</span>
+      </div>
+      <canvas id="previewCanvas"></canvas>
+    </div>
+    <div class="control-bar">
+      <div class="control-group">
+        <span class="label">缩放</span>
+        <button class="icon-btn" id="zoomOutBtn" title="缩小">−</button>
+        <span class="zoom-display" id="zoomDisplay">100%</span>
+        <button class="icon-btn" id="zoomInBtn" title="放大">+</button>
+        <button class="icon-btn" id="resetBtn" title="重置位置">↻</button>
+      </div>
+      <div class="spacer"></div>
+      <span class="hint-text">滚轮缩放 · 拖动平移</span>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" id="cropBtn" disabled>确认裁剪</button>
+    </div>
+
+    <!-- ── Mobile floating bar ── -->
+    <div class="mobile-bar">
+      <div class="mobile-group">
+        <button class="m-btn" id="mUploadBtn" title="上传图片">📁</button>
+        <button class="m-btn m-btn-success" id="mDownloadBtn" disabled title="下载 PNG">⬇</button>
+      </div>
+      <div class="mobile-group">
+        <button class="m-btn" id="mZoomOutBtn" title="缩小">−</button>
+        <span class="m-zoom" id="mZoomDisplay">100%</span>
+        <button class="m-btn" id="mZoomInBtn" title="放大">+</button>
+        <button class="m-btn" id="mResetBtn" title="重置位置">↻</button>
+        <button class="m-btn m-btn-primary" id="mCropBtn" disabled>裁剪</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ═════════════ Config ═════════════
+  const OUTPUT_W  = 192;
+  const OUTPUT_H  = 216;
+  const OUT_HEX_R = 108;                 // circumradius = half of 216
+
+  // Preview hexagon radius adapts to container size
+  function getHexRadius() {
+    const w = previewContainer.clientWidth;
+    const h = previewContainer.clientHeight;
+    return Math.max(60, Math.min(w, h) * 0.4);
+  }
+
+  // ═════════════ State ═════════════
+  let img = null;
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let isDragging = false;
+  let lastX = 0, lastY = 0;
+  let resultBlob = null;
+
+  // ═════════════ DOM ═════════════
+  const uploadZone     = document.getElementById('uploadZone');
+  const fileInput      = document.getElementById('fileInput');
+  const fileInfo       = document.getElementById('fileInfo');
+  const fileName       = document.getElementById('fileName');
+  const fileSize       = document.getElementById('fileSize');
+  const previewCanvas  = document.getElementById('previewCanvas');
+  const previewEmpty   = document.getElementById('previewEmpty');
+  const previewContainer = document.getElementById('previewContainer');
+  const ctx            = previewCanvas.getContext('2d');
+  const zoomInBtn      = document.getElementById('zoomInBtn');
+  const zoomOutBtn     = document.getElementById('zoomOutBtn');
+  const resetBtn       = document.getElementById('resetBtn');
+  const zoomDisplay    = document.getElementById('zoomDisplay');
+  const cropBtn        = document.getElementById('cropBtn');
+  const downloadBtn    = document.getElementById('downloadBtn');
+  const resultCanvas   = document.getElementById('resultCanvas');
+  const resultCtx      = resultCanvas.getContext('2d');
+  const resultWrapper  = document.getElementById('resultWrapper');
+  const resultPlaceholder = document.getElementById('resultPlaceholder');
+
+  // Mobile DOM
+  const mUploadBtn   = document.getElementById('mUploadBtn');
+  const mDownloadBtn = document.getElementById('mDownloadBtn');
+  const mZoomInBtn   = document.getElementById('mZoomInBtn');
+  const mZoomOutBtn  = document.getElementById('mZoomOutBtn');
+  const mResetBtn    = document.getElementById('mResetBtn');
+  const mZoomDisplay = document.getElementById('mZoomDisplay');
+  const mCropBtn     = document.getElementById('mCropBtn');
+
+  // Wire mobile buttons to same handlers
+  mUploadBtn.addEventListener('click', () => fileInput.click());
+  mDownloadBtn.addEventListener('click', () => downloadBtn.click());
+  mZoomInBtn.addEventListener('click', () => applyZoom(1.25));
+  mZoomOutBtn.addEventListener('click', () => applyZoom(1 / 1.25));
+  mResetBtn.addEventListener('click', () => { if (img) { fitImage(); renderPreview(); } });
+  mCropBtn.addEventListener('click', () => cropBtn.click());
+
+  // ═════════════ Hexagon path helper ═════════════
+  // Pointed-top (尖顶) regular hexagon
+  // Does NOT call beginPath — caller controls path lifecycle so multiple subpaths work (e.g. evenodd)
+  function hexPath(c, cx, cy, r) {
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 3;
+      const x = cx + r * Math.cos(a);
+      const y = cy + r * Math.sin(a);
+      if (i === 0) c.moveTo(x, y);
+      else c.lineTo(x, y);
+    }
+    c.closePath();
+  }
+
+  // ═════════════ File upload ═════════════
+  uploadZone.addEventListener('click', () => fileInput.click());
+
+  uploadZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    uploadZone.classList.add('dragover');
+  });
+  uploadZone.addEventListener('dragleave', () => {
+    uploadZone.classList.remove('dragover');
+  });
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) loadImageFile(f);
+  });
+
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) loadImageFile(f);
+    e.target.value = '';  // allow re-selecting same file
+  });
+
+  function loadImageFile(file) {
+    if (!file.type.startsWith('image/')) {
+      alert('请上传图片文件');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const ni = new Image();
+      ni.onload = () => {
+        img = ni;
+        fileName.textContent = file.name;
+        fileSize.textContent = formatSize(file.size) + ' · ' + ni.naturalWidth + '×' + ni.naturalHeight;
+        fileInfo.classList.add('visible');
+        previewEmpty.style.display = 'none';
+        previewCanvas.style.display = 'block';
+        cropBtn.disabled = false;
+        mCropBtn.disabled = false;
+        fitImage();
+        resizeCanvas();
+        renderPreview();
+      };
+      ni.onerror = () => alert('图片加载失败，请尝试其他格式');
+      ni.src = ev.target.result;
+    };
+    reader.onerror = () => alert('文件读取失败');
+    reader.readAsDataURL(file);
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  // ═════════════ Canvas sizing (DPR-aware) ═════════════
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = previewContainer.clientWidth;
+    const h = previewContainer.clientHeight;
+    previewCanvas.width  = Math.round(w * dpr);
+    previewCanvas.height = Math.round(h * dpr);
+    previewCanvas.style.width  = w + 'px';
+    previewCanvas.style.height = h + 'px';
+    previewCanvas._cssW = w;
+    previewCanvas._cssH = h;
+  }
+
+  window.addEventListener('resize', () => {
+    if (!img) { resizeCanvas(); return; }
+    resizeCanvas();
+    renderPreview();
+  });
+
+  // ═════════════ Image fitting ═════════════
+  function fitImage() {
+    if (!img) return;
+    const w = previewContainer.clientWidth;
+    const h = previewContainer.clientHeight;
+    // Cover the hexagon bounding box
+    const hexR = getHexRadius();
+    const hexW = hexR * Math.sqrt(3);
+    const hexH = hexR * 2;
+    const sx = hexW / img.naturalWidth;
+    const sy = hexH / img.naturalHeight;
+    scale = Math.max(sx, sy);
+    // Center image on hexagon center (= canvas center)
+    offsetX = (w - img.naturalWidth * scale) / 2;
+    offsetY = (h - img.naturalHeight * scale) / 2;
+  }
+
+  // ═════════════ Render preview ═════════════
+  function renderPreview() {
+    if (!img) return;
+    const w = previewCanvas._cssW;
+    const h = previewCanvas._cssH;
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    // Checkerboard background (shows through transparent image areas)
+    drawCheckerboard(ctx, 0, 0, w, h);
+
+    // Draw the image with current zoom & pan
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(
+      img,
+      offsetX, offsetY,
+      img.naturalWidth * scale, img.naturalHeight * scale
+    );
+
+    // Dark overlay outside hexagon; inside stays fully bright (hard edge)
+    const cx = w / 2;
+    const cy = h / 2;
+    const hexR = getHexRadius();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    hexPath(ctx, cx, cy, hexR);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fill('evenodd');
+
+    // Hexagon border
+    ctx.beginPath();
+    hexPath(ctx, cx, cy, hexR);
+    ctx.strokeStyle = '#4a9eff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Vertex dots
+    ctx.fillStyle = '#4a9eff';
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 3;
+      ctx.beginPath();
+      ctx.arc(cx + hexR * Math.cos(a), cy + hexR * Math.sin(a), 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const zTxt = Math.round(scale * 100) + '%';
+    zoomDisplay.textContent = zTxt;
+    if (mZoomDisplay) mZoomDisplay.textContent = zTxt;
+  }
+
+  function drawCheckerboard(c, x, y, w, h) {
+    const s = 12;
+    c.fillStyle = '#1a1d24';
+    c.fillRect(x, y, w, h);
+    c.fillStyle = '#232733';
+    for (let r = 0; r < Math.ceil(h / s); r++) {
+      for (let col = 0; col < Math.ceil(w / s); col++) {
+        if ((r + col) % 2 === 0) {
+          c.fillRect(x + col * s, y + r * s, s, s);
+        }
+      }
+    }
+  }
+
+  // ═════════════ Zoom & Pan ═════════════
+  function applyZoom(factor, mx, my) {
+    if (!img) return;
+    const w = previewContainer.clientWidth;
+    const h = previewContainer.clientHeight;
+    const old = scale;
+    scale = Math.max(0.01, Math.min(50, scale * factor));
+    const ratio = scale / old;
+    const px = (mx !== undefined) ? mx : w / 2;
+    const py = (my !== undefined) ? my : h / 2;
+    offsetX = px - (px - offsetX) * ratio;
+    offsetY = py - (py - offsetY) * ratio;
+    renderPreview();
+  }
+
+  zoomInBtn.addEventListener('click', () => applyZoom(1.25));
+  zoomOutBtn.addEventListener('click', () => applyZoom(1 / 1.25));
+  resetBtn.addEventListener('click', () => { if (img) { fitImage(); renderPreview(); } });
+
+  previewCanvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = previewCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    applyZoom(e.deltaY < 0 ? 1.1 : 1 / 1.1, mx, my);
+  }, { passive: false });
+
+  // Mouse drag
+  previewCanvas.addEventListener('mousedown', e => {
+    isDragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    previewCanvas.classList.add('dragging');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    offsetX += e.clientX - lastX;
+    offsetY += e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    renderPreview();
+  });
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+    previewCanvas.classList.remove('dragging');
+  });
+
+  // Touch support
+  let touchDist = 0;
+  let touchScale = 1;
+
+  previewCanvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      touchDist = Math.hypot(dx, dy);
+      touchScale = scale;
+    }
+  }, { passive: true });
+
+  previewCanvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && isDragging) {
+      offsetX += e.touches[0].clientX - lastX;
+      offsetY += e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+      renderPreview();
+    } else if (e.touches.length === 2 && touchDist > 0) {
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      const d = Math.hypot(dx, dy);
+      scale = Math.max(0.01, Math.min(50, touchScale * d / touchDist));
+      renderPreview();
+    }
+  }, { passive: false });
+
+  previewCanvas.addEventListener('touchend', () => {
+    isDragging = false;
+    touchDist = 0;
+  });
+
+  // ═════════════ Crop ═════════════
+  cropBtn.addEventListener('click', () => {
+    if (!img) return;
+
+    const w = previewCanvas._cssW;
+    const h = previewCanvas._cssH;
+
+    // Clear output
+    resultCtx.setTransform(1, 0, 0, 1, 0, 0);
+    resultCtx.clearRect(0, 0, OUTPUT_W, OUTPUT_H);
+
+    // Clip to hexagon
+    resultCtx.save();
+    resultCtx.beginPath();
+    hexPath(resultCtx, OUTPUT_W / 2, OUTPUT_H / 2, OUT_HEX_R);
+    resultCtx.clip();
+
+    // Compute transform: image → output canvas
+    // preview: image at (offsetX, offsetY) size (iw*scale, ih*scale)
+    //          hex center (w/2, h/2), radius getHexRadius()
+    // output:  hex center (OUTPUT_W/2, OUTPUT_H/2), radius OUT_HEX_R
+    //
+    // out = (img * scale + offset - previewCenter) * (OUT_HEX_R / hexR) + outCenter
+    const previewHexR = getHexRadius();
+    const ratio = OUT_HEX_R / previewHexR;
+    const s = scale * ratio;
+    const tx = (offsetX - w / 2) * ratio + OUTPUT_W / 2;
+    const ty = (offsetY - h / 2) * ratio + OUTPUT_H / 2;
+
+    resultCtx.setTransform(s, 0, 0, s, tx, ty);
+    resultCtx.imageSmoothingEnabled = true;
+    resultCtx.imageSmoothingQuality = 'high';
+    resultCtx.drawImage(img, 0, 0);
+
+    resultCtx.restore();
+    resultCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Generate blob for download
+    resultCanvas.toBlob(blob => {
+      resultBlob = blob;
+      resultWrapper.classList.add('visible');
+      resultPlaceholder.style.display = 'none';
+      downloadBtn.disabled = false;
+      mDownloadBtn.disabled = false;
+    }, 'image/png');
+  });
+
+  // ═════════════ Download ═════════════
+  downloadBtn.addEventListener('click', () => {
+    if (!resultBlob) return;
+    const url = URL.createObjectURL(resultBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'hex_tile_' + Date.now() + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  // ═════════════ Init ═════════════
+  resizeCanvas();
+})();
+</script>
+
+</body>
+</html>
