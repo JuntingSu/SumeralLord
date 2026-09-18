@@ -21,6 +21,8 @@ export interface MctsConfig {
   damageCoeff: number;
   /** 叶评估连兵数量差净增益奖励系数 w（2026-09-17：我连兵数−敌连兵数净增 → 奖励正比于增量） */
   linkedGainBonus: number;
+  /** 无反击进攻奖励系数 K（2026-09-17：攻击无反击敌兵，单次奖励 ∝ 当次兵力差；封顶 0.8×terminalScale 仅次于获胜） */
+  noCounterBonus: number;
   /** 叶评估死胡同连兵惩罚系数 q（2026-09-17：加点投到无方向连兵的浪费惩罚，与兵力成正比） */
   stuckPenalty: number;
   /** 终端奖励倍率（2026-09-17 用户修正：扩大 5 倍促转化） */
@@ -168,6 +170,22 @@ function linkedCount(state: GameState, owner: number): number {
   return n;
 }
 
+/**
+ * 无反击进攻奖励：对 counter===0 的敌兵进攻（免费伤害），
+ * 奖励 ∝ 当次进攻造成的兵力差（敌损−我损），封顶 0.8×terminalScale（仅次于直接获胜）。
+ * 返回攻击方视角的正奖励（0 = 无奖励）。
+ */
+function noCounterAttackBonus(stateBefore: GameState, stateAfter: GameState, attackerSeat: number, cfg: MctsConfig): number {
+  const opp = 3 - attackerSeat;
+  const beforeM = totalStrength(stateBefore, attackerSeat);
+  const beforeE = totalStrength(stateBefore, opp);
+  const afterM = totalStrength(stateAfter, attackerSeat);
+  const afterE = totalStrength(stateAfter, opp);
+  const diff = (beforeE - afterE) - (beforeM - afterM);
+  if (diff <= 0) return 0;
+  return Math.min(cfg.noCounterBonus * diff, 0.8 * cfg.terminalScale);
+}
+
 /** rollout：规则 AI 对双方模拟；返回 seat 视角价值 */
 function rollout(state: GameState, seat: number, cfg: MctsConfig, aiSeed: string): number {
   let sim = state;
@@ -175,6 +193,7 @@ function rollout(state: GameState, seat: number, cfg: MctsConfig, aiSeed: string
   const startE = totalStrength(state, 3 - seat);
   const startMLinked = linkedCount(state, seat);
   const startELinked = linkedCount(state, 3 - seat);
+  let rollBonus = 0; // 无反击进攻奖励累计（仅计入非终局叶子；终局/截断以结局为准）
   for (let t = 0; t < cfg.rolloutRounds * 2; t++) {
     if (sim.finished) return evalTerminal(sim, seat, cfg);
     if (cfg.turnCap > 0 && sim.turn > cfg.turnCap) return truncationValue(cfg);
@@ -192,13 +211,22 @@ function rollout(state: GameState, seat: number, cfg: MctsConfig, aiSeed: string
       continue;
     }
     for (const intent of intents) {
+      const s0 = sim;
+      const to = (intent as { to?: number }).to;
+      const isNoCounter = intent.intentType === 'ATTACK' && to !== undefined && sim.tiles[to]?.soldier?.counter === 0;
       const r = applyIntent(sim, { actor: { kind: 'PLAYER', seat: s }, intent });
-      if (r.ok) sim = r.state;
+      if (r.ok) {
+        sim = r.state;
+        if (isNoCounter) {
+          const b = noCounterAttackBonus(s0, sim, s, cfg);
+          rollBonus += s === seat ? b : -b;
+        }
+      }
       if (sim.finished) break;
       if (cfg.turnCap > 0 && sim.turn > cfg.turnCap) break;
     }
   }
-  return evaluateNode(sim, seat, cfg, startM, startE, startMLinked, startELinked);
+  return evaluateNode(sim, seat, cfg, startM, startE, startMLinked, startELinked) + rollBonus;
 }
 
 interface ChildEdge {
@@ -241,6 +269,8 @@ export function chooseMove(state: GameState, cfg: MctsConfig, aiSeed: string): P
       continue;
     }
     const intent = node.untried.pop()!;
+    const to = (intent as { to?: number }).to;
+    const isNoCounter = intent.intentType === 'ATTACK' && to !== undefined && node.state.tiles[to]?.soldier?.counter === 0;
     const r = applyIntent(node.state, { actor: { kind: 'PLAYER', seat: node.player }, intent });
     if (!r.ok) {
       backprop(node, evaluateNode(node.state, node.player, cfg));
@@ -256,7 +286,13 @@ export function chooseMove(state: GameState, cfg: MctsConfig, aiSeed: string): P
       untried: null,
     };
     node.children.set(keyOf(intent), { intent, node: child });
-    backprop(child, rollout(child.state, child.player, cfg, aiSeed));
+    let simValue = rollout(child.state, child.player, cfg, aiSeed);
+    if (isNoCounter) {
+      // 搜索自身的无反击进攻奖励（攻击方视角；换算到子节点视角）
+      const b = noCounterAttackBonus(node.state, r.state, node.player, cfg);
+      if (b > 0) simValue += child.player === node.player ? b : -b;
+    }
+    backprop(child, simValue);
   }
 
   // 根选择：node.player 视角最大化（对手节点取反）

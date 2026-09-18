@@ -12,6 +12,7 @@ export interface NParams {
   cStronghold: number;
   damageCoeff: number;
   linkedGainBonus: number;
+  noCounterBonus: number;
   stuckPenalty: number;
   explorationC: number;
   simsPerMove: number;
@@ -47,6 +48,7 @@ export function nConfigOf(params: NParams, b: number, turnCap: number): MctsConf
     cStronghold: params.cStronghold,
     damageCoeff: params.damageCoeff,
     linkedGainBonus: params.linkedGainBonus,
+    noCounterBonus: params.noCounterBonus,
     stuckPenalty: params.stuckPenalty,
     terminalScale: 5,
     rolloutRounds: params.rolloutRounds,
@@ -135,6 +137,7 @@ export function makeMctsOpponent(cfg: Partial<MctsConfig>): (b: number, turnCap:
       cStronghold: 0.1,
       damageCoeff: 0.001,
       linkedGainBonus: 0.05,
+      noCounterBonus: 0.3,
       stuckPenalty: 0.002,
       terminalScale: 5,
       rolloutRounds: 8,
