@@ -29,8 +29,9 @@ function cfgOf(map: MapFullData): MctsConfig {
   return {
     simsPerMove: SIMS,
     explorationC: 1.0,
-    cStronghold: 0.1,
+    cStronghold: parseFloat(process.env.C_SH ?? '0.1'),
     damageCoeff: parseFloat(process.env.DAMAGE_D ?? '0.001'),
+    stuckPenalty: parseFloat(process.env.STUCK_Q ?? '0.002'),
     terminalScale: 5,
     rolloutRounds: 8,
     turnCap: 5 * map.row * map.column, // 临时 c_cap=5，M5 标定

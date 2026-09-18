@@ -5,7 +5,7 @@
 // 终端：  R = outcome + (1 − 2p̂)（p̂ = b 先手 / 1−b 后手）
 // 截断：  R = −0.9（回合上限，平坦）
 // 值视角：negamax（节点值 = 该节点行动玩家视角；子节点换手取反）
-import { applyIntent, listAiActions, planAiTurn } from '@dl/shared';
+import { applyIntent, listAiActions, planAiTurn, neighborsOf, isFullBreak } from '@dl/shared';
 import type { GameState, PlayerIntent } from '@dl/shared';
 import { createRng } from './rng.js';
 import { withSeed } from './game.js';
@@ -19,6 +19,8 @@ export interface MctsConfig {
   cStronghold: number;
   /** 叶评估伤害差分项系数 d（2026-09-17 用户修正） */
   damageCoeff: number;
+  /** 叶评估死胡同连兵惩罚系数 q（2026-09-17：加点投到无方向连兵的浪费惩罚，与兵力成正比） */
+  stuckPenalty: number;
   /** 终端奖励倍率（2026-09-17 用户修正：扩大 5 倍促转化） */
   terminalScale: number;
   /** rollout 轮数（双方各一次为一轮） */
@@ -66,7 +68,7 @@ function evalTerminal(state: GameState, seat: number, cfg: MctsConfig): number {
   return cfg.terminalScale * (outcome + (1 - 2 * prior));
 }
 
-/** 叶评估（seat 视角；A/B/O/S_me 取模拟终点局面；伤害差分项取 rollout 窗口净变化） */
+/** 叶评估（seat 视角；A/B/O/S_me 取模拟终点局面；伤害差分项取 rollout 窗口净变化；死胡同惩罚与兵力成正比） */
 function leafValue(state: GameState, seat: number, cfg: MctsConfig, startM: number, startE: number): number {
   const opp = 3 - seat; // 1v1：seat ∈ {1,2}
   let A = 0;
@@ -92,6 +94,9 @@ function leafValue(state: GameState, seat: number, cfg: MctsConfig, startM: numb
   const dmgE = Math.max(0, startE - B);
   const dmgM = startM - A;
   if (dmgE > 0) v += (dmgE - dmgM + 0.5) * dmgE * cfg.damageCoeff;
+  // 死胡同连兵惩罚：−q·Σ(我方死胡同连兵兵力)，抑制把点数投给无方向兵（2026-09-17 用户修正）
+  const stuck = stuckLinkedStrength(state, seat);
+  if (stuck > 0) v -= cfg.stuckPenalty * stuck;
   return v;
 }
 
@@ -110,6 +115,27 @@ function totalStrength(state: GameState, owner: number): number {
   for (const t of state.tiles) {
     const s = t.soldier;
     if (s && s.owner === owner) sum += s.strength;
+  }
+  return sum;
+}
+
+/** 死胡同连兵总兵力：连兵周围全部为友兵或全断地形（无任何可走/可攻方向），加点投给这类兵视为浪费 */
+function stuckLinkedStrength(state: GameState, seat: number): number {
+  const geo = { rows: state.rows, columns: state.columns, cylindrical: state.cylindrical };
+  let sum = 0;
+  for (let i = 0; i < state.tiles.length; i++) {
+    const s = state.tiles[i].soldier;
+    if (!s || s.owner !== seat || !s.isLinked) continue;
+    let hasDirection = false;
+    for (const n of neighborsOf(i, geo)) {
+      if (isFullBreak(state.tiles[n].terrain)) continue; // 全断 → 非方向
+      const other = state.tiles[n].soldier;
+      if (!other || other.owner !== seat) {
+        hasDirection = true; // 空可走格或敌兵（1v1：非同势力即敌）→ 有方向
+        break;
+      }
+    }
+    if (!hasDirection) sum += s.strength;
   }
   return sum;
 }

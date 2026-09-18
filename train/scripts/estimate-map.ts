@@ -20,6 +20,7 @@ const rec = estimateB(map, {
     explorationC: C,
     cStronghold: 0.1,
     damageCoeff: 0.001,
+    stuckPenalty: 0.002,
     terminalScale: 5,
     rolloutRounds: rounds,
     turnCap: 5 * map.row * map.column, // 临时 c_cap=5，M5 标定

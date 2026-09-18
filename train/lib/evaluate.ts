@@ -11,6 +11,7 @@ import { loadMap } from './pool.js';
 export interface NParams {
   cStronghold: number;
   damageCoeff: number;
+  stuckPenalty: number;
   explorationC: number;
   simsPerMove: number;
   rolloutRounds: number;
@@ -44,6 +45,7 @@ export function nConfigOf(params: NParams, b: number, turnCap: number): MctsConf
     explorationC: params.explorationC,
     cStronghold: params.cStronghold,
     damageCoeff: params.damageCoeff,
+    stuckPenalty: params.stuckPenalty,
     terminalScale: 5,
     rolloutRounds: params.rolloutRounds,
     turnCap,
@@ -130,6 +132,7 @@ export function makeMctsOpponent(cfg: Partial<MctsConfig>): (b: number, turnCap:
       explorationC: 1.0,
       cStronghold: 0.1,
       damageCoeff: 0.001,
+      stuckPenalty: 0.002,
       terminalScale: 5,
       rolloutRounds: 8,
       turnCap,
