@@ -20,6 +20,7 @@ const rec = estimateB(map, {
     explorationC: C,
     cStronghold: 0.1,
     damageCoeff: 0.001,
+    linkedGainBonus: 0.05,
     stuckPenalty: 0.002,
     terminalScale: 5,
     rolloutRounds: rounds,

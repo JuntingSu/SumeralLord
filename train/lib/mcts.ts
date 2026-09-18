@@ -17,8 +17,10 @@ export interface MctsConfig {
   explorationC: number;
   /** 叶评估据点项系数 c */
   cStronghold: number;
-  /** 叶评估伤害差分项系数 d（2026-09-17 用户修正） */
+  /** 叶评估伤害差分项系数 d（2026-09-17 用户修正：我方损失计 0.9） */
   damageCoeff: number;
+  /** 叶评估连兵数量差净增益奖励系数 w（2026-09-17：我连兵数−敌连兵数净增 → 奖励正比于增量） */
+  linkedGainBonus: number;
   /** 叶评估死胡同连兵惩罚系数 q（2026-09-17：加点投到无方向连兵的浪费惩罚，与兵力成正比） */
   stuckPenalty: number;
   /** 终端奖励倍率（2026-09-17 用户修正：扩大 5 倍促转化） */
@@ -69,18 +71,28 @@ function evalTerminal(state: GameState, seat: number, cfg: MctsConfig): number {
 }
 
 /** 叶评估（seat 视角；A/B/O/S_me 取模拟终点局面；伤害差分项取 rollout 窗口净变化；死胡同惩罚与兵力成正比） */
-function leafValue(state: GameState, seat: number, cfg: MctsConfig, startM: number, startE: number): number {
+function leafValue(
+  state: GameState,
+  seat: number,
+  cfg: MctsConfig,
+  startM: number,
+  startE: number,
+  startMLinked: number,
+  startELinked: number,
+): number {
   const opp = 3 - seat; // 1v1：seat ∈ {1,2}
   let A = 0;
   let B = 0;
   let O = 0;
   let S = 0;
+  let myLinked = 0;
   for (const t of state.tiles) {
     const s = t.soldier;
     if (!s) continue;
     if (s.owner === seat) {
       A += s.strength;
       if (t.terrain === 1) S++;
+      if (s.isLinked) myLinked++;
     } else if (s.owner === opp) {
       B += s.strength;
       if (s.isLinked) O++;
@@ -88,25 +100,31 @@ function leafValue(state: GameState, seat: number, cfg: MctsConfig, startM: numb
   }
   const ratio = (A * A) / (B * (B + O)); // 防御：B=0 → 极大 → tanh→1
   let v = Math.tanh(Math.log(ratio)) + cfg.cStronghold * S;
-  // 伤害差分项：(Δ敌 − Δ我 + 0.5)·Δ敌·d
+  // 伤害差分项：(Δ敌 − 0.9·Δ我 + 0.5)·Δ敌·d（2026-09-17：我方损失计 0.9 鼓励进攻）
   // Δ敌 = max(0, 开局敌总兵力 − 终点敌总兵力)；Δ我 = 开局我总兵力 − 终点我总兵力（净变化，加点净增为负）
   // 敌方无减少 → 项为 0；我方净损大于敌方 → 项为负；反击次数 1 → 多步围攻（先手吃反击、后续无反击）显正
   const dmgE = Math.max(0, startE - B);
   const dmgM = startM - A;
-  if (dmgE > 0) v += (dmgE - dmgM + 0.5) * dmgE * cfg.damageCoeff;
+  if (dmgE > 0) v += (dmgE - 0.9 * dmgM + 0.5) * dmgE * cfg.damageCoeff;
+  // 连兵数量差净增益奖励：w·max(0, (我连兵−敌连兵)终点 − (我连兵−敌连兵)开局)
+  // 连兵数 = 每回合点数收入；净增 = 经济和网络优势扩大（2026-09-17 用户新增）
+  const linkedGain = (myLinked - O) - (startMLinked - startELinked);
+  if (linkedGain > 0) v += cfg.linkedGainBonus * linkedGain;
   // 死胡同连兵惩罚：−q·Σ(我方死胡同连兵兵力)，抑制把点数投给无方向兵（2026-09-17 用户修正）
   const stuck = stuckLinkedStrength(state, seat);
   if (stuck > 0) v -= cfg.stuckPenalty * stuck;
   return v;
 }
 
-/** 节点直评（终局/截断/叶子；无窗口时伤害项为 0） */
-function evaluateNode(state: GameState, seat: number, cfg: MctsConfig, startM?: number, startE?: number): number {
+/** 节点直评（终局/截断/叶子；无窗口时伤害项与连兵增益为 0） */
+function evaluateNode(state: GameState, seat: number, cfg: MctsConfig, startM?: number, startE?: number, startMLinked?: number, startELinked?: number): number {
   if (state.finished) return evalTerminal(state, seat, cfg);
   if (cfg.turnCap > 0 && state.turn > cfg.turnCap) return truncationValue(cfg);
   const sm = startM ?? totalStrength(state, seat);
   const se = startE ?? totalStrength(state, 3 - seat);
-  return leafValue(state, seat, cfg, sm, se);
+  const sl = startMLinked ?? linkedCount(state, seat);
+  const el = startELinked ?? linkedCount(state, 3 - seat);
+  return leafValue(state, seat, cfg, sm, se, sl, el);
 }
 
 /** 某势力总兵力 */
@@ -140,11 +158,23 @@ function stuckLinkedStrength(state: GameState, seat: number): number {
   return sum;
 }
 
+/** 某势力连兵数（= 每回合点数收入） */
+function linkedCount(state: GameState, owner: number): number {
+  let n = 0;
+  for (const t of state.tiles) {
+    const s = t.soldier;
+    if (s && s.owner === owner && s.isLinked) n++;
+  }
+  return n;
+}
+
 /** rollout：规则 AI 对双方模拟；返回 seat 视角价值 */
 function rollout(state: GameState, seat: number, cfg: MctsConfig, aiSeed: string): number {
   let sim = state;
   const startM = totalStrength(state, seat);
   const startE = totalStrength(state, 3 - seat);
+  const startMLinked = linkedCount(state, seat);
+  const startELinked = linkedCount(state, 3 - seat);
   for (let t = 0; t < cfg.rolloutRounds * 2; t++) {
     if (sim.finished) return evalTerminal(sim, seat, cfg);
     if (cfg.turnCap > 0 && sim.turn > cfg.turnCap) return truncationValue(cfg);
@@ -168,7 +198,7 @@ function rollout(state: GameState, seat: number, cfg: MctsConfig, aiSeed: string
       if (cfg.turnCap > 0 && sim.turn > cfg.turnCap) break;
     }
   }
-  return evaluateNode(sim, seat, cfg, startM, startE);
+  return evaluateNode(sim, seat, cfg, startM, startE, startMLinked, startELinked);
 }
 
 interface ChildEdge {

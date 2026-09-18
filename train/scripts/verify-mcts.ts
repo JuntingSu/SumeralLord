@@ -31,6 +31,7 @@ function cfgOf(map: MapFullData): MctsConfig {
     explorationC: 1.0,
     cStronghold: parseFloat(process.env.C_SH ?? '0.1'),
     damageCoeff: parseFloat(process.env.DAMAGE_D ?? '0.001'),
+    linkedGainBonus: parseFloat(process.env.LINKED_W ?? '0.05'),
     stuckPenalty: parseFloat(process.env.STUCK_Q ?? '0.002'),
     terminalScale: 5,
     rolloutRounds: 8,
