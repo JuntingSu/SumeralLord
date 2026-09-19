@@ -24,6 +24,8 @@ export interface ActionPlan {
   intents: PlayerIntent[];
   /** 方案 E_ape（基础行为段叶子得分；防守段不改变得分语义） */
   score: number;
+  /** 方案叶子局面（行动意图应用完毕的状态；供加点组装与 MCTS 复用） */
+  leaf: GameState;
 }
 
 export interface PlanActionOptions {
@@ -693,7 +695,7 @@ export function planActionPhase(state: GameState, seat: number, opts?: PlanActio
   // ④ 防守行为段：对每条候选路径执行（基线 = 该路径方案 E_ape）
   return top.map((p) => {
     const defense = defenseIntents(ctx, p.leaf, p.score);
-    return { intents: [...p.intents, ...defense], score: p.score };
+    return { intents: [...p.intents, ...defense], score: p.score, leaf: p.leaf };
   });
 }
 
