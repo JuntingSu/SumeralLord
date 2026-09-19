@@ -99,7 +99,7 @@ const evalTally = new Map<number, { wins: number; draws: number; losses: number;
 const acceptedMilestones = new Set<number>();
 const startGamesDone = state.gamesDone;
 let nextGameIndex = state.gamesDone;
-let lastFitAt = Math.floor(state.gamesDone / args.fitEvery) * args.fitEvery; // 防双拟合（worker 并发完成时）
+let lastFitMilestone = Math.floor(state.gamesDone / args.fitEvery); // 防双拟合（worker 并发完成时）
 let stopped = false;
 
 function spawnWorker(): WorkerHandle {
@@ -235,8 +235,10 @@ function recordTrainResult(msg: WorkerResult): void {
   state.updatedAt = new Date().toISOString();
   saveTrainState(STATE_FILE, state);
 
-  if (state.gamesDone % args.fitEvery === 0 && state.gamesDone > lastFitAt) {
-    lastFitAt = state.gamesDone;
+  // 拟合里程碑：gamesDone 并发乱序推进可能跳过精确倍数 → 按跨越判定
+  const fitMilestone = Math.floor(state.gamesDone / args.fitEvery);
+  if (fitMilestone > lastFitMilestone) {
+    lastFitMilestone = fitMilestone;
     runFit(state.gamesDone);
   }
   // 验收里程碑
