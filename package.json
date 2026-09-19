@@ -5,7 +5,8 @@
   "workspaces": [
     "packages/*",
     "backend",
-    "frontend"
+    "frontend",
+    "train"
   ],
   "scripts": {
     "dev:backend": "npm run dev -w backend",
@@ -15,7 +16,8 @@
     "typecheck:frontend": "npm run typecheck -w frontend",
     "build:frontend": "npm run build -w frontend",
     "lint": "eslint packages/shared/src",
-    "test:shared": "npm run test -w @dl/shared"
+    "test:shared": "npm run test -w @dl/shared",
+    "test:train": "npm run test -w @dl/train"
   },
   "devDependencies": {
     "eslint": "^10.8.1",

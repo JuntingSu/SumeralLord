@@ -1,0 +1,25 @@
+{
+  "name": "@dl/train",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen-maps": "tsx scripts/gen-maps.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "dryrun": "tsx scripts/dryrun.ts",
+    "profile": "tsx scripts/profile.ts",
+    "train": "tsx scripts/train.ts",
+    "eval": "tsx scripts/eval.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dl/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "~5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

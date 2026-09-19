@@ -3,5 +3,6 @@ dist/
 *.log
 backend/data/
 backend/static/skin/
+train/runs/
 mapeditor-release/
 pack.txt
