@@ -21,6 +21,7 @@ const reasonCount = new Map<string, number>();
 const outcomeCount = new Map<string, number>();
 let totalTime = 0;
 
+let totalRejects = 0;
 console.log(`[dryrun] 种子权重空转 ${games} 局（simulations=${simulations}，τ=1.0）`);
 for (let g = 0; g < games; g++) {
   const map = pool.rotate(g);
@@ -34,6 +35,7 @@ for (let g = 0; g < games; g++) {
   });
   const dt = Date.now() - t0;
   totalTime += dt;
+  totalRejects += result.stats.rejects;
   allSamples.push(...result.samples);
   turnList.push(result.stats.turns);
   stepList.push(result.stats.steps);
@@ -42,12 +44,13 @@ for (let g = 0; g < games; g++) {
   outcomeCount.set(outcome, (outcomeCount.get(outcome) ?? 0) + 1);
   console.log(
     `[dryrun] 局 ${g + 1}/${games}: map=${map.id} turns=${result.stats.turns} steps=${result.stats.steps} ` +
-      `reason=${result.stats.reason} outcome=${outcome} ${(dt / 1000).toFixed(1)}s`,
+      `rejects=${result.stats.rejects} reason=${result.stats.reason} outcome=${outcome} ${(dt / 1000).toFixed(1)}s`,
   );
 }
 
 // 样本合理性：特征分布（min/mean/max）
 console.log('\n---- 空转汇总 ----');
+console.log(`意图拒绝: 总计 ${totalRejects} 条 / 意图总数 ${stepList.reduce((a, b) => a + b, 0)} 条（应≈0）`);
 console.log(`局长: turns avg=${avg(turnList).toFixed(1)} min=${Math.min(...turnList)} max=${Math.max(...turnList)}`);
 console.log(`步数: steps avg=${avg(stepList).toFixed(1)} min=${Math.min(...stepList)} max=${Math.max(...stepList)}`);
 console.log(`终局原因: ${[...reasonCount.entries()].map(([k, v]) => `${k}=${v}`).join(', ')}`);

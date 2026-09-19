@@ -97,11 +97,13 @@ const workers: WorkerHandle[] = [];
 const evalQueue: number[] = []; // 待跑验收批次（里程碑号）
 const evalTally = new Map<number, { wins: number; draws: number; losses: number; results: number }>();
 const acceptedMilestones = new Set<number>();
+const startGamesDone = state.gamesDone;
 let nextGameIndex = state.gamesDone;
+let lastFitAt = Math.floor(state.gamesDone / args.fitEvery) * args.fitEvery; // 防双拟合（worker 并发完成时）
 let stopped = false;
 
 function spawnWorker(): WorkerHandle {
-  const child = spawn(process.execPath, ['--import', 'tsx', path.join(__dirname, 'worker.ts')], {
+  const child = spawn(process.execPath, ['--max-old-space-size=768', '--import', 'tsx', path.join(__dirname, 'worker.ts')], {
     cwd: path.join(__dirname, '..', '..'),
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     serialization: 'advanced',
@@ -124,7 +126,7 @@ function spawnWorker(): WorkerHandle {
   return handle;
 }
 
-function nextJob(workerIndex: number): WorkerJob | null {
+function nextJob(): WorkerJob | null {
   // 验收任务优先（保持验收节奏）
   if (evalQueue.length > 0) {
     const gameIndex = evalQueue.shift()!;
@@ -141,7 +143,7 @@ function nextJob(workerIndex: number): WorkerJob | null {
       simulations: args.simulations,
     };
   }
-  if (args.maxGames !== undefined && nextGameIndex >= state.gamesDone + args.maxGames) return null;
+  if (args.maxGames !== undefined && nextGameIndex >= startGamesDone + args.maxGames) return null;
   const gameIndex = nextGameIndex++;
   return {
     type: 'play',
@@ -158,7 +160,7 @@ function dispatch(): void {
   if (stopped) return;
   for (const w of workers) {
     if (w.busy) continue;
-    const job = nextJob(w.job ? 0 : 0);
+    const job = nextJob();
     if (!job) {
       maybeFinish();
       return;
@@ -233,7 +235,8 @@ function recordTrainResult(msg: WorkerResult): void {
   state.updatedAt = new Date().toISOString();
   saveTrainState(STATE_FILE, state);
 
-  if (state.gamesDone % args.fitEvery === 0) {
+  if (state.gamesDone % args.fitEvery === 0 && state.gamesDone > lastFitAt) {
+    lastFitAt = state.gamesDone;
     runFit(state.gamesDone);
   }
   // 验收里程碑
@@ -326,7 +329,8 @@ function stopAll(): void {
 function maybeFinish(): void {
   if (stopped || exitRequested) return;
   if (args.maxGames === undefined) return;
-  if (state.gamesDone >= state.gamesDone + 0 || nextGameIndex < state.gamesDone + args.maxGames) return;
+  if (nextGameIndex < startGamesDone + args.maxGames) return;
+  if (evalQueue.length > 0) return;
   if (workers.every((w) => !w.busy)) {
     console.log(`[train] 已达 --max-games ${args.maxGames}，正常退出。`);
     stopAll();

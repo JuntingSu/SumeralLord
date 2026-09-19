@@ -140,18 +140,74 @@ export function linkedSet(b: Board, seat: number): Set<number> {
 
 /**
  * ② 割点型连兵：去除该兵即导致部分区域断电（脱离据点变断兵）的 seat 方连兵。
+ * 实现：Tarjan 关节点——连兵网络（同势力连兵邻接图 + 虚拟锚点=全接地形兵）为连通图，
+ * s 为割点 ⟺ 去除 s 后存在不连通锚点的节点（断电）。O(V+E) 一次求出全部割点。
  * opts.excludeThreatened：跳过"周围有 ≥2 个威胁性敌兵"者（E_ape 坏型排除；加点规则1 不排除）。
  * 威胁性敌兵 = 兵力 ≥ 2 的敌方连兵 ∪ 任意敌方断兵（中立兵不计）。
  */
 export function cutVertices(b: Board, seat: number, opts?: { excludeThreatened?: boolean }): number[] {
   const before = linkedSet(b, seat);
-  const out: number[] = [];
-  for (const tile of before) {
-    if (opts?.excludeThreatened && threatenedNeighborCount(b, seat, tile) >= 2) continue;
-    const after = linkedSetAfterRemoval(b, seat, new Set([tile]));
-    // 去除自身外，仍有其他连兵脱离网络 → 割点
-    if (after.size < before.size - 1) out.push(tile);
+  const nodes = [...before];
+  const idx = new Map<number, number>();
+  nodes.forEach((t, i) => idx.set(t, i));
+  const ANCHOR = nodes.length; // 虚拟锚点：与所有"位于全接地形"的兵相邻
+  const adj: number[][] = Array.from({ length: nodes.length + 1 }, () => []);
+  for (let i = 0; i < nodes.length; i++) {
+    const t = nodes[i];
+    if (isStrongholdTerrain(b.terrain[t])) {
+      adj[i].push(ANCHOR);
+      adj[ANCHOR].push(i);
+    }
+    for (const nb of neighborsOf(t, b.geo)) {
+      const j = idx.get(nb);
+      if (j !== undefined) adj[i].push(j);
+    }
   }
+
+  // Tarjan 关节点（迭代式；从 ANCHOR 出发，图必连通）
+  const n = nodes.length + 1;
+  const disc = new Int32Array(n).fill(-1);
+  const low = new Int32Array(n);
+  const isCut = new Uint8Array(n);
+  let timer = 0;
+  const parent = new Int32Array(n).fill(-1);
+  // 显式栈：[node, 邻接游标]
+  const stack: Array<[number, number]> = [];
+  const rootChildren: number[] = [];
+  disc[ANCHOR] = low[ANCHOR] = timer++;
+  stack.push([ANCHOR, 0]);
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1];
+    const u = top[0];
+    if (top[1] < adj[u].length) {
+      const v = adj[u][top[1]++];
+      if (disc[v] === -1) {
+        parent[v] = u;
+        disc[v] = low[v] = timer++;
+        if (u === ANCHOR) rootChildren.push(v);
+        stack.push([v, 0]);
+      } else if (v !== parent[u]) {
+        if (disc[v] < low[u]) low[u] = disc[v];
+      }
+    } else {
+      stack.pop();
+      const p = parent[u];
+      if (p >= 0 && p !== ANCHOR) {
+        if (low[u] < low[p]) low[p] = low[u];
+        if (low[u] >= disc[p]) isCut[p] = 1; // 非根割点条件
+      }
+    }
+  }
+  // ANCHOR 为 DFS 根：根的割点条件 = 根子树 ≥2（锚点本身不输出，但影响其子节点判定无碍）
+
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    if (!isCut[i]) continue;
+    const tile = nodes[i];
+    if (opts?.excludeThreatened && threatenedNeighborCount(b, seat, tile) >= 2) continue;
+    out.push(tile);
+  }
+  out.sort((x, y) => x - y);
   return out;
 }
 

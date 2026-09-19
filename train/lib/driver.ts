@@ -42,6 +42,8 @@ export interface GameStats {
   winnerSeats: number[];
   turns: number;
   steps: number;
+  /** 被拒绝而丢弃的意图条数（空转 sanity：应≈0） */
+  rejects: number;
   /** 各势力意图提交数 */
   stepsBySeat: Record<string, number>;
 }
@@ -106,6 +108,7 @@ export function playSelfPlayGame(map: MapFullData, opts: DriveOptions): GameResu
 
   const samples: TrainSample[] = [];
   let steps = 0;
+  let rejects = 0;
   const stepsBySeat: Record<string, number> = { '1': 0, '2': 0 };
   let eventId = 0;
   let reason: GameStats['reason'] = 'victory';
@@ -134,7 +137,10 @@ export function playSelfPlayGame(map: MapFullData, opts: DriveOptions): GameResu
     const intents = [...decision.plan.actionIntents, ...decision.plan.addPointIntents];
     for (const intent of intents) {
       const r = applyIntent(state, { actor: { kind: 'PLAYER', seat }, intent });
-      if (!r.ok) continue;
+      if (!r.ok) {
+        rejects++;
+        continue;
+      }
       state = r.state;
       steps++;
       stepsBySeat[String(seat)]++;
@@ -198,6 +204,7 @@ export function playSelfPlayGame(map: MapFullData, opts: DriveOptions): GameResu
       winnerSeats: winningTeam !== null && winningTeam >= 0 ? [1, 2].filter((s) => teamOf(s) === winningTeam) : [],
       turns: state.turn,
       steps,
+      rejects,
       stepsBySeat,
     },
     samples,

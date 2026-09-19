@@ -133,6 +133,7 @@ function playEvalGame(
       winnerSeats: state.finished && state.winningTeam !== null && state.winningTeam >= 0 ? [1, 2].filter((s) => teamOf(s) === state.winningTeam) : [],
       turns: state.turn,
       steps,
+      rejects: 0,
       stepsBySeat: {},
     },
   };

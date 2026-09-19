@@ -31,6 +31,7 @@ export interface ActionPlan {
 export interface PlanActionOptions {
   /** 候选方案数（训练环境 top-4） */
   candidates?: number;
+  /** 单行为链枚举上限（锁兵分叉/消耗战选 B 的分支展开上限） */
   maxChainsPerOrigin?: number;
   maxLeaves?: number;
   maxApplies?: number;
@@ -43,7 +44,7 @@ interface Ctx {
   maxApplies: number;
   leaves: number;
   maxLeaves: number;
-  maxChainsPerOrigin: number;
+  maxChainsPerBehavior: number;
 }
 
 type BehaviorKind = 'spread' | 'adjacent' | 'ocean' | 'suicide' | 'exchange';
@@ -114,11 +115,18 @@ function oceanRoutes(ctx: Ctx, state: GameState, fromTile: number): OceanRouteNo
   const geo = { rows: state.rows, columns: state.columns, cylindrical: state.cylindrical };
   const maxLayers = Math.min(soldier.strength + 1, 48);
   const nodes: OceanRouteNode[] = [];
-  const seen = new Set<string>(); // tile:strength 去重（同格同兵力只保留首条路径）
-
+  const seen = new Set<string>(); // tile:strength 去重（入队前去重 → 每层 ≤ 海洋格×兵力值，多项式规模）
   let frontier: OceanRouteNode[] = [];
+  const addNode = (node: OceanRouteNode, bucket: OceanRouteNode[]): void => {
+    const key = `${node.tile}:${node.strength}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    nodes.push(node);
+    bucket.push(node);
+  };
+
   if (state.tiles[fromTile].terrain === TERRAIN.OCEAN) {
-    frontier.push({ tile: fromTile, strength: soldier.strength, hasMovement: soldier.hasMovement, path: [] });
+    addNode({ tile: fromTile, strength: soldier.strength, hasMovement: soldier.hasMovement, path: [] }, frontier);
   } else {
     for (const nb of neighborsOf(fromTile, geo)) {
       if (state.tiles[nb].terrain !== TERRAIN.OCEAN) continue;
@@ -127,23 +135,20 @@ function oceanRoutes(ctx: Ctx, state: GameState, fromTile: number): OceanRouteNo
       // 断兵下海：整体搬迁 −1；兵力 1 断兵下海后失去移动力
       const s0 = soldier.isLinked ? soldier.strength - 1 : soldier.strength === 1 ? 1 : soldier.strength - 1;
       if (s0 < 1) continue;
-      frontier.push({
-        tile: nb,
-        strength: s0,
-        hasMovement: s0 >= 2, // 兵力 1 断兵下海后失去移动力
-        path: [{ intentType: 'MOVE', from: fromTile, to: nb }],
-      });
+      addNode(
+        {
+          tile: nb,
+          strength: s0,
+          hasMovement: s0 >= 2, // 兵力 1 断兵下海后失去移动力
+          path: [{ intentType: 'MOVE', from: fromTile, to: nb }],
+        },
+        frontier,
+      );
     }
   }
   let layer = frontier.length > 0 && frontier[0].path.length === 0 ? 0 : 1;
   // layer 语义：已消耗的海洋步数（0 = 兵力已在海洋；1 = 第一步下海完成）
   while (frontier.length > 0 && layer <= maxLayers) {
-    for (const node of frontier) {
-      const key = `${node.tile}:${node.strength}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      nodes.push(node);
-    }
     const next: OceanRouteNode[] = [];
     for (const node of frontier) {
       if (!node.hasMovement) continue;
@@ -152,12 +157,15 @@ function oceanRoutes(ctx: Ctx, state: GameState, fromTile: number): OceanRouteNo
         if (state.tiles[nb].soldier) continue; // 路途只经空海洋
         const s1 = node.strength - 1;
         if (s1 < 1) continue;
-        next.push({
-          tile: nb,
-          strength: s1,
-          hasMovement: s1 >= 2,
-          path: [...node.path, { intentType: 'MOVE', from: node.tile, to: nb }],
-        });
+        addNode(
+          {
+            tile: nb,
+            strength: s1,
+            hasMovement: s1 >= 2,
+            path: [...node.path, { intentType: 'MOVE', from: node.tile, to: nb }],
+          },
+          next,
+        );
       }
     }
     frontier = next;
@@ -202,6 +210,16 @@ function enumerateBehaviors(ctx: Ctx, state: GameState, lockedTile: number | nul
   const behaviors: Behavior[] = [];
   const phaseOk = state.phase === 'ACTION';
   if (!phaseOk) return behaviors;
+  // 水路 BFS 缓存（同一枚举内每兵至多算一次；自杀条件②复用）
+  const routeCache = new Map<number, OceanRouteNode[]>();
+  const routesOf = (tile: number): OceanRouteNode[] => {
+    let r = routeCache.get(tile);
+    if (!r) {
+      r = oceanRoutes(ctx, state, tile);
+      routeCache.set(tile, r);
+    }
+    return r;
+  };
 
   for (let tile = 0; tile < state.tiles.length; tile++) {
     if (lockedTile !== null && tile !== lockedTile) continue;
@@ -237,7 +255,7 @@ function enumerateBehaviors(ctx: Ctx, state: GameState, lockedTile: number | nul
       state.tiles[tile].terrain === TERRAIN.OCEAN ||
       neighborsOf(tile, geo).some((nb) => state.tiles[nb].terrain === TERRAIN.OCEAN);
     if (nearOcean) {
-      const routes = oceanRoutes(ctx, state, tile);
+      const routes = routesOf(tile);
       const targets = oceanTargets(ctx, state, tile, routes);
       for (const { targetTile, best } of targets) {
         const target = state.tiles[targetTile].soldier!;
@@ -288,7 +306,7 @@ function enumerateBehaviors(ctx: Ctx, state: GameState, lockedTile: number | nul
       for (const { targetTile, best } of targets) {
         const target = state.tiles[targetTile].soldier!;
         if (best.strength >= target.strength) continue; // 会成功 → 非自杀
-        if (suicideConditionHolds(ctx, state, tile, best.strength, targetTile)) {
+        if (suicideConditionHolds(ctx, state, tile, best.strength, targetTile, routesOf)) {
           behaviors.push({
             kind: 'suicide',
             fromTile: tile,
@@ -307,7 +325,7 @@ function enumerateBehaviors(ctx: Ctx, state: GameState, lockedTile: number | nul
         if (!t.soldier) continue;
         if (!isAttackableTarget(state, ctx.seat, t.soldier.owner)) continue;
         if (sPower >= t.soldier.strength) continue; // 会成功（就近进攻已覆盖）
-        if (suicideConditionHolds(ctx, state, tile, s.strength, nb)) {
+        if (suicideConditionHolds(ctx, state, tile, s.strength, nb, routesOf)) {
           behaviors.push({ kind: 'suicide', fromTile: tile, intents: [{ intentType: 'ATTACK', from: tile, to: nb }], targetTile: nb });
         }
       }
@@ -323,6 +341,7 @@ function suicideConditionHolds(
   aTile: number,
   aArrivalStrength: number,
   xTile: number,
+  routesOf: (tile: number) => OceanRouteNode[],
 ): boolean {
   const geo = { rows: state.rows, columns: state.columns, cylindrical: state.cylindrical };
   let hasOther = false;
@@ -336,8 +355,7 @@ function suicideConditionHolds(
       arrival = s.strength; // 就近：无移动损耗
     } else if (state.tiles[tile].terrain === TERRAIN.OCEAN || neighborsOf(tile, geo).some((nb) => state.tiles[nb].terrain === TERRAIN.OCEAN)) {
       // 远海方式可达 X 周围（合法进攻不论成败）：取最大到达兵力
-      const routes = oceanRoutes(ctx, state, tile);
-      for (const r of routes) {
+      for (const r of routesOf(tile)) {
         if (neighborsOf(r.tile, geo).includes(xTile) && r.hasMovement) arrival = Math.max(arrival, r.strength);
       }
     }
@@ -392,7 +410,7 @@ function expandChains(ctx: Ctx, origin: GameState, first: Behavior): Chain[] {
 }
 
 function expandChainNode(ctx: Ctx, node: ChainNode, out: Chain[]): void {
-  if (out.length >= ctx.maxChainsPerOrigin || ctx.applies >= ctx.maxApplies) {
+  if (out.length >= ctx.maxChainsPerBehavior || ctx.applies >= ctx.maxApplies) {
     out.push({ state: node.state, intents: node.intents });
     return;
   }
@@ -425,7 +443,7 @@ function expandChainNode(ctx: Ctx, node: ChainNode, out: Chain[]): void {
         exchangeFollowupUsed: node.exchangeFollowupUsed,
         usedTiles: node.usedTiles,
       }, out);
-      if (out.length >= ctx.maxChainsPerOrigin || ctx.applies >= ctx.maxApplies) return;
+      if (out.length >= ctx.maxChainsPerBehavior || ctx.applies >= ctx.maxApplies) return;
     }
     return;
   }
@@ -475,7 +493,7 @@ function expandChainNode(ctx: Ctx, node: ChainNode, out: Chain[]): void {
             usedTiles: used,
           }, out);
         }
-        if (out.length >= ctx.maxChainsPerOrigin || ctx.applies >= ctx.maxApplies) return;
+        if (out.length >= ctx.maxChainsPerBehavior || ctx.applies >= ctx.maxApplies) return;
       }
       return;
     }
@@ -502,7 +520,7 @@ function expandChainNode(ctx: Ctx, node: ChainNode, out: Chain[]): void {
           exchangeFollowupUsed: true,
           usedTiles: node.usedTiles,
         }, out);
-        if (out.length >= ctx.maxChainsPerOrigin || ctx.applies >= ctx.maxApplies) return;
+        if (out.length >= ctx.maxChainsPerBehavior || ctx.applies >= ctx.maxApplies) return;
       }
       return;
     }
@@ -673,10 +691,10 @@ export function planActionPhase(state: GameState, seat: number, opts?: PlanActio
     seat,
     turnStart: state,
     applies: 0,
-    maxApplies: opts?.maxApplies ?? 120_000,
+    maxApplies: opts?.maxApplies ?? 12_000,
     leaves: 0,
-    maxLeaves: opts?.maxLeaves ?? 400,
-    maxChainsPerOrigin: opts?.maxChainsPerOrigin ?? 48,
+    maxLeaves: opts?.maxLeaves ?? 100,
+    maxChainsPerBehavior: opts?.maxChainsPerOrigin ?? 4,
   };
 
   // ① 前置行为段
@@ -732,15 +750,26 @@ function searchOrigin(ctx: Ctx, origin: GameState, path: PlayerIntent[], plans: 
     ? behaviors.filter((b) => b.kind === 'suicide' || b.kind === 'exchange')
     : behaviors;
 
-  const chains: Array<Chain & { score: number }> = [];
+  // 逐行为展开，仅保留 running top-2（避免全量链状态驻留导致内存膨胀）
+  let top2: Array<Chain & { score: number }> = [];
   for (const b of branches) {
     for (const chain of expandChains(ctx, origin, b)) {
-      chains.push({ ...chain, score: evalApe(chain.state, ctx.turnStart, ctx.seat) });
+      const scored = { ...chain, score: evalApe(chain.state, ctx.turnStart, ctx.seat) };
+      if (top2.length < 2) {
+        top2.push(scored);
+        top2.sort((x, y) => y.score - x.score || x.intents.length - y.intents.length || cmpIntents(x.intents, y.intents));
+      } else if (
+        scored.score > top2[1].score ||
+        (scored.score === top2[1].score &&
+          (scored.intents.length < top2[1].intents.length ||
+            (scored.intents.length === top2[1].intents.length && cmpIntents(scored.intents, top2[1].intents) < 0)))
+      ) {
+        top2[1] = scored;
+        top2.sort((x, y) => y.score - x.score || x.intents.length - y.intents.length || cmpIntents(x.intents, y.intents));
+      }
     }
-    if (ctx.applies >= ctx.maxApplies) break;
+    if (ctx.applies >= ctx.maxApplies || ctx.leaves >= ctx.maxLeaves) break;
   }
-  chains.sort((a, b) => b.score - a.score || a.intents.length - b.intents.length || cmpIntents(a.intents, b.intents));
-  const top2 = chains.slice(0, 2);
   if (top2.length === 0) {
     recordLeaf();
     return;
