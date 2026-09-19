@@ -2,9 +2,13 @@
 import { TERRAIN_PROPS } from '@dl/shared';
 import type { GameState, SoldierState, TileState } from '@dl/shared';
 
-export function makeSoldier(owner: number, strength: number, isLinked: boolean): SoldierState {
-  const terrainCounter = 1;
-  return { owner, strength, isLinked, hasMovement: false, counter: terrainCounter };
+export function makeSoldier(
+  owner: number,
+  strength: number,
+  isLinked: boolean,
+  hasMovement = false,
+): SoldierState {
+  return { owner, strength, isLinked, hasMovement, counter: 1 };
 }
 
 export interface TileSpec {
