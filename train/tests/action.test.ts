@@ -253,7 +253,7 @@ describe('真实地图端到端', () => {
     expect(state.phase).toBe('ACTION');
     const plans = planActionPhase(state, 1);
     expect(plans.length).toBeGreaterThanOrEqual(1);
-    expect(plans.length).toBeLessThanOrEqual(4);
+    expect(plans.length).toBeLessThanOrEqual(6);
     for (const p of plans) {
       const { rejects } = replay(state, 1, p.intents);
       expect(rejects).toBe(0);

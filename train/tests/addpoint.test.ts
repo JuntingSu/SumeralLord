@@ -281,7 +281,7 @@ describe('回合计划组装（4 候选）', () => {
     });
     const plans = planTurnCandidates(state, 1, SEED_TE_WEIGHTS);
     expect(plans.length).toBeGreaterThanOrEqual(1);
-    expect(plans.length).toBeLessThanOrEqual(4);
+    expect(plans.length).toBeLessThanOrEqual(6);
     for (const plan of plans) {
       // 重放：行动意图（ACTION 相位门控）→ SWITCH_PHASE → 加点意图
       let cur = state;

@@ -1,5 +1,5 @@
 // turnplan.ts — 完整回合计划组装（设计方案 §2.3）
-// MCTS 每节点动作空间 = 4 条行动方案（top-4）× 1 种加点方案 = 4 个候选回合计划；
+// MCTS 每节点动作空间 = 6 条行动方案（top-6）× 1 种加点方案 = 6 个候选回合计划；
 // 加点方案在每个行动候选的行动后局面（含相位推进到 ADD_POINT）上独立运行。
 import { applyIntent } from '@dl/shared';
 import type { GameState, PlayerIntent } from '@dl/shared';

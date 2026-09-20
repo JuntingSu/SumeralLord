@@ -33,7 +33,7 @@ describe('mctsDecide（argmax 确定性）', () => {
     const state = initGame('mcts-stats');
     const r = mctsDecide(state, 1, SEED_TE_WEIGHTS, { simulations: 30 });
     expect(r.plans.length).toBeGreaterThanOrEqual(1);
-    expect(r.plans.length).toBeLessThanOrEqual(4);
+    expect(r.plans.length).toBeLessThanOrEqual(6);
     expect(r.visits.reduce((x, y) => x + y, 0)).toBe(30);
     if (!r.plan.resultState.finished) {
       expect(r.plan.resultState.phase).toBe('ACTION');

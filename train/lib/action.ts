@@ -1,5 +1,5 @@
-// action.ts — 行动阶段三段式算法（行动文档 v1.5 原样实现；候选 top-4 按训练设计方案 §2.1）
-// 结构：①前置行为段（进攻据点，判定一次）→ ②基础行为段（5 种行为 DFS + 规则1/2 链推进 + 原点剪枝 + top-2）
+// action.ts — 行动阶段三段式算法（行动文档 v1.5 原样实现；候选 top-6 按训练设计方案 §2.1）
+// 结构：①前置行为段（进攻据点，判定一次）→ ②基础行为段（5 种行为 DFS + 规则1/2 链推进 + 原点剪枝 + top-4 链）
 // → ③防守行为段（每条候选路径独立下海批准）。所有结算走真实 reducer（applyIntent），与正式规则一致。
 //
 // 工程保险（文档"终止性"只保证有限，不保证低开销；组合爆炸时优雅降级）：
@@ -31,7 +31,7 @@ export interface ActionPlan {
 }
 
 export interface PlanActionOptions {
-  /** 候选方案数（训练环境 top-4） */
+  /** 候选方案数（训练环境 top-6，2026-09-20：top-4 → top-6） */
   candidates?: number;
   /** 单行为链枚举上限（锁兵分叉/消耗战选 B 的分支展开上限） */
   maxChainsPerOrigin?: number;
@@ -799,7 +799,7 @@ function minStrongholdDist(tile: number, strongholds: number[], geo: BoardGeomet
 
 /** 行动阶段候选方案生成（top-N，训练环境 N=4） */
 export function planActionPhase(state: GameState, seat: number, opts?: PlanActionOptions): ActionPlan[] {
-  const nCandidates = opts?.candidates ?? 4;
+  const nCandidates = opts?.candidates ?? 6;
   const ctx: Ctx = {
     seat,
     turnStart: state,
@@ -842,7 +842,10 @@ function cmpIntents(a: PlayerIntent[], b: PlayerIntent[]): number {
   return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
 
-/** 基础行为段搜索：枚举原点行为 → 链推进 → top-2 递归；叶子记录方案 */
+/** 每原点保留的备选链数（2026-09-20：top-2 → top-4） */
+const ORIGIN_TOP_CHAINS = 4;
+
+/** 基础行为段搜索：枚举原点行为 → 链推进 → top-N 递归；叶子记录方案 */
 function searchOrigin(ctx: Ctx, origin: GameState, path: PlayerIntent[], plans: InternalPlan[]): void {
   const recordLeaf = (): void => {
     ctx.leaves++;
@@ -863,31 +866,28 @@ function searchOrigin(ctx: Ctx, origin: GameState, path: PlayerIntent[], plans: 
     ? behaviors.filter((b) => b.kind === 'suicide' || b.kind === 'exchange')
     : behaviors;
 
-  // 逐行为展开，仅保留 running top-2（避免全量链状态驻留导致内存膨胀）
-  let top2: Array<Chain & { score: number }> = [];
+  // 逐行为展开，仅保留 running top-N（避免全量链状态驻留导致内存膨胀）
+  const cmpChain = (x: Chain & { score: number }, y: Chain & { score: number }): number =>
+    y.score - x.score || x.intents.length - y.intents.length || cmpIntents(x.intents, y.intents);
+  let best: Array<Chain & { score: number }> = [];
   for (const b of branches) {
     for (const chain of expandChains(ctx, origin, b)) {
       const scored = { ...chain, score: evalApe(chain.state, ctx.turnStart, ctx.seat) };
-      if (top2.length < 2) {
-        top2.push(scored);
-        top2.sort((x, y) => y.score - x.score || x.intents.length - y.intents.length || cmpIntents(x.intents, y.intents));
-      } else if (
-        scored.score > top2[1].score ||
-        (scored.score === top2[1].score &&
-          (scored.intents.length < top2[1].intents.length ||
-            (scored.intents.length === top2[1].intents.length && cmpIntents(scored.intents, top2[1].intents) < 0)))
-      ) {
-        top2[1] = scored;
-        top2.sort((x, y) => y.score - x.score || x.intents.length - y.intents.length || cmpIntents(x.intents, y.intents));
+      if (best.length < ORIGIN_TOP_CHAINS) {
+        best.push(scored);
+        best.sort(cmpChain);
+      } else if (cmpChain(scored, best[ORIGIN_TOP_CHAINS - 1]) < 0) {
+        best[ORIGIN_TOP_CHAINS - 1] = scored;
+        best.sort(cmpChain);
       }
     }
     if (ctx.applies >= ctx.maxApplies || ctx.leaves >= ctx.maxLeaves) break;
   }
-  if (top2.length === 0) {
+  if (best.length === 0) {
     recordLeaf();
     return;
   }
-  for (const c of top2) {
+  for (const c of best) {
     searchOrigin(ctx, c.state, [...path, ...c.intents], plans);
   }
 }
