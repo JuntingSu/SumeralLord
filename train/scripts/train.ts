@@ -7,6 +7,25 @@ import { appendFileSync, mkdirSync, writeFileSync, existsSync, readdirSync, unli
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/** Windows 文件锁（杀毒扫描/外部打开）会短暂 EBUSY——带退避重试的落盘 */
+function safeWrite(file: string, content: string, mode: 'append' | 'overwrite'): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      if (mode === 'append') appendFileSync(file, content);
+      else writeFileSync(file, content);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') && attempt < 50) {
+        // 退避重试（最长 ~12.5s）
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 import { SEED_TE_WEIGHTS } from '../lib/eval.js';
 import { fitWeights } from '../lib/fitter.js';
 import type { TrainSample } from '../lib/driver.js';
@@ -189,9 +208,10 @@ function onResult(handle: WorkerHandle, msg: WorkerResult): void {
       const rate = tally.wins / tally.results;
       const halfRate = (tally.wins + 0.5 * tally.draws) / tally.results;
       const mapsSource = evalPool ? 'eval-maps' : 'train-maps';
-      appendFileSync(
+      safeWrite(
         ACCEPTANCE_FILE,
         `games=${state.gamesDone},version=v${currentRecord.version},maps=${mapsSource},wins=${tally.wins},draws=${tally.draws},losses=${tally.losses},rate=${rate.toFixed(3)},halfRate=${halfRate.toFixed(3)}\n`,
+        'append',
       );
       console.log(
         `[accept] 第 ${milestone} 次验收（v${currentRecord.version} vs 基准，${mapsSource}）：` +
@@ -199,7 +219,7 @@ function onResult(handle: WorkerHandle, msg: WorkerResult): void {
       );
       if (rate >= 0.6) {
         console.log('[accept] 达标（≥60%）——停止训练并输出报告。');
-        writeFileSync(path.join(RUNS_DIR, 'REPORT.md'), reportMd(tally, rate, milestone));
+        safeWrite(path.join(RUNS_DIR, 'REPORT.md'), reportMd(tally, rate, milestone), 'overwrite');
         stopAll();
         return;
       }
@@ -218,18 +238,19 @@ function recordTrainResult(msg: WorkerResult): void {
   const batchIndex = Math.floor(gameIndex / 100);
   const batchFile = path.join(SAMPLES_DIR, `batch-${String(batchIndex).padStart(4, '0')}.jsonl`);
   for (const s of msg.samples as TrainSample[]) {
-    appendFileSync(batchFile, JSON.stringify(s) + '\n');
+    safeWrite(batchFile, JSON.stringify(s) + '\n', 'append');
   }
   state.sampleBatch = Math.max(state.sampleBatch, batchIndex);
   // 对局日志
   if (args.saveLogs) {
     const logFile = path.join(LOGS_DIR, `game-${String(gameIndex).padStart(6, '0')}.jsonl`);
-    writeFileSync(logFile, msg.log.map((line) => JSON.stringify(line)).join('\n') + '\n');
+    safeWrite(logFile, msg.log.map((line) => JSON.stringify(line)).join('\n') + '\n', 'overwrite');
   }
   // 曲线
-  appendFileSync(
+  safeWrite(
     CURVE_FILE,
     `${gameIndex},${msg.stats.reason},${msg.stats.winningTeam ?? -1},${msg.stats.turns},${msg.stats.steps},v${currentRecord.version},${Date.now()}\n`,
+    'append',
   );
   state.gamesDone = Math.max(state.gamesDone, gameIndex + 1);
   state.updatedAt = new Date().toISOString();
@@ -247,9 +268,10 @@ function recordTrainResult(msg: WorkerResult): void {
     acceptedMilestones.add(milestone);
     if (!evalPool) {
       console.log(`[accept] 已达 ${state.gamesDone} 局，但 train/eval-maps/ 为空——跳过本次抽检（请放入验收地图后继续）。`);
-      appendFileSync(
+      safeWrite(
         ACCEPTANCE_FILE,
         `games=${state.gamesDone},version=v${currentRecord.version},maps=SKIPPED_EMPTY_EVAL_MAPS\n`,
+        'append',
       );
     } else {
       const start = milestone * args.evalGames;

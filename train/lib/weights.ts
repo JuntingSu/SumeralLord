@@ -3,6 +3,23 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 
 import path from 'node:path';
 import { SEED_TE_WEIGHTS, type TeWeights } from './eval.js';
 
+/** Windows 文件锁短暂 EBUSY——带退避重试（杀毒扫描/外部程序打开时训练不中断） */
+function safeWrite(file: string, content: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      writeFileSync(file, content);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') && attempt < 50) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export interface WeightRecord {
   version: number;
   weights: TeWeights;
@@ -49,7 +66,7 @@ export class WeightStore {
   }
 
   save(record: WeightRecord): void {
-    writeFileSync(path.join(this.dir, `v${record.version}.json`), JSON.stringify(record, null, 2));
+    safeWrite(path.join(this.dir, `v${record.version}.json`), JSON.stringify(record, null, 2));
   }
 
   /** 保存新版本（版本号 = 当前最新 + 1） */
@@ -82,5 +99,5 @@ export function loadTrainState(file: string): TrainState | null {
 }
 
 export function saveTrainState(file: string, state: TrainState): void {
-  writeFileSync(file, JSON.stringify(state, null, 2));
+  safeWrite(file, JSON.stringify(state, null, 2));
 }
