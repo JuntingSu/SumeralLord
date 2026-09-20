@@ -73,10 +73,10 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
-// ---------- τ 调度（§5：0→500 局线性 1.0→0.1，之后恒 0.1） ----------
+// ---------- τ 调度（§5，2026-09-20 修订：0→10000 局线性 10→0.5，之后恒 0.5） ----------
 function temperatureAt(gamesDone: number): number {
-  if (gamesDone >= 500) return 0.1;
-  return 1.0 - 0.9 * (gamesDone / 500);
+  if (gamesDone >= 10000) return 0.5;
+  return 10 - 9.5 * (gamesDone / 10000);
 }
 
 // ---------- 主流程 ----------

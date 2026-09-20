@@ -48,10 +48,11 @@ function evalSample(sample: TrainSample, weights: TeWeights): number {
   return sum;
 }
 
-/** 从样本窗口拟合新权重（返回新对象，不改入参） */
+/** 从样本窗口拟合新权重（返回新对象，不改入参）。
+ * 2026-09-20：配合慢 τ 高探索方案，默认步数/学习率上调（更激进；L2 锚定保持 1e-4）。 */
 export function fitWeights(samples: TrainSample[], seed: TeWeights, opts?: FitOptions): FitResult {
-  const steps = opts?.steps ?? 2000;
-  const lr = opts?.lr ?? 2e-4;
+  const steps = opts?.steps ?? 3000;
+  const lr = opts?.lr ?? 4e-4;
   const l2 = opts?.l2 ?? 1e-4;
   const margin = opts?.margin ?? 0.0;
   const rng = opts?.rng ?? Math.random;
