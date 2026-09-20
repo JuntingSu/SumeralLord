@@ -306,14 +306,15 @@ function enumerateBehaviors(ctx: Ctx, state: GameState, lockedTile: number | nul
       for (const { targetTile, best } of targets) {
         const target = state.tiles[targetTile].soldier!;
         if (best.strength >= target.strength) continue; // 会成功 → 非自杀
-        if (suicideConditionHolds(ctx, state, tile, best.strength, targetTile, routesOf)) {
-          behaviors.push({
-            kind: 'suicide',
-            fromTile: tile,
-            intents: [...best.path, { intentType: 'ATTACK', from: best.tile, to: targetTile }],
-            targetTile,
-          });
-        }
+        const oldOk = suicideConditionHolds(ctx, state, tile, best.strength, targetTile, routesOf);
+        const newOk = oceanSuicideNewCase(ctx, state, tile, targetTile, best);
+        if (!oldOk && !newOk) continue;
+        behaviors.push({
+          kind: 'suicide',
+          fromTile: tile,
+          intents: [...best.path, { intentType: 'ATTACK', from: best.tile, to: targetTile }],
+          targetTile,
+        });
       }
     }
 
@@ -364,6 +365,72 @@ function suicideConditionHolds(
     if (arrival <= aArrivalStrength) return false; // 存在到达兵力 ≤ A 的 B → 条件②不成立
   }
   return hasOther;
+}
+
+/**
+ * 海洋断兵自杀新情形（2026-09-20）：该兵是海洋断兵，且发起必败进攻后，
+ * 出现进攻前不能、进攻后能对 X 进行远海进攻/自杀的我方兵（X 被削弱或航道打通）→ 允许自杀。
+ * 等价于海洋版的"消耗战开瓶器"：A 的牺牲为后续远海进攻/自杀铺路。
+ */
+function oceanSuicideNewCase(
+  ctx: Ctx,
+  state: GameState,
+  aTile: number,
+  xTile: number,
+  best: OceanRouteNode,
+): boolean {
+  const a = state.tiles[aTile].soldier!;
+  if (a.isLinked || state.tiles[aTile].terrain !== TERRAIN.OCEAN) return false; // 须为海洋断兵
+  // 模拟 A 的必败进攻（到达 + ATTACK，走真实 reducer）
+  const post = applyAll(ctx, state, [...best.path, { intentType: 'ATTACK', from: best.tile, to: xTile }]);
+  if (!post || !post.tiles[xTile].soldier) return false; // A 必败 → X 应存活
+  // 检查是否存在 B：进攻前不能、进攻后能对 X 远海进攻/自杀
+  for (let bTile = 0; bTile < state.tiles.length; bTile++) {
+    if (bTile === aTile) continue;
+    const s = state.tiles[bTile].soldier;
+    if (!s || s.owner !== ctx.seat) continue;
+    const pre = canOceanActOn(ctx, state, bTile, xTile);
+    const postAbility = canOceanActOn(ctx, post, bTile, xTile);
+    if (postAbility !== 'none' && pre === 'none') return true; // 新获得能力
+  }
+  return false;
+}
+
+/** B 能否对 X 发起远海进攻（成功）或自杀（必败）：'none' | 'ocean' | 'suicide' */
+function canOceanActOn(
+  ctx: Ctx,
+  state: GameState,
+  bTile: number,
+  xTile: number,
+): 'none' | 'ocean' | 'suicide' {
+  const geo = { rows: state.rows, columns: state.columns, cylindrical: state.cylindrical };
+  const s = state.tiles[bTile].soldier;
+  if (!s || s.owner !== ctx.seat || !s.hasMovement) return 'none';
+  if (s.isLinked && s.strength === 1) return 'none';
+  const nearOcean =
+    state.tiles[bTile].terrain === TERRAIN.OCEAN ||
+    neighborsOf(bTile, geo).some((nb) => state.tiles[nb].terrain === TERRAIN.OCEAN);
+  if (!nearOcean) return 'none';
+  const target = state.tiles[xTile].soldier;
+  if (!target || !isAttackableTarget(state, ctx.seat, target.owner)) return 'none';
+  const xTerrain = state.tiles[xTile].terrain;
+  if (xTerrain !== TERRAIN.OCEAN && xTerrain !== TERRAIN.PLAIN) return 'none';
+  // 最强到达兵力：已在海洋且邻 X 可直接进攻；否则走水路
+  let bestArrival = -1;
+  if (state.tiles[bTile].terrain === TERRAIN.OCEAN && neighborsOf(bTile, geo).includes(xTile)) {
+    bestArrival = Math.max(bestArrival, s.strength);
+  }
+  const routes = oceanRoutes(ctx, state, bTile);
+  for (const r of routes) {
+    if (r.hasMovement && neighborsOf(r.tile, geo).includes(xTile)) {
+      bestArrival = Math.max(bestArrival, r.strength);
+    }
+  }
+  if (bestArrival < 0) return 'none';
+  if (xTerrain === TERRAIN.OCEAN ? bestArrival > target.strength : bestArrival >= target.strength) {
+    return 'ocean'; // 远海进攻（沿海平原含同归于尽）
+  }
+  return 'suicide'; // 到达兵力 < X → 可自杀（必败）
 }
 
 // ---------- 链推进（规则1 / 规则2 a/b/c） ----------

@@ -160,6 +160,33 @@ describe('自杀与消耗战循环', () => {
     const { state: after } = replay(state, 1, suicidePlan!.intents);
     expect(after.tiles[3].soldier?.owner).toBe(1); // X 最终被 B 吃掉
   });
+
+  it('海洋断兵自杀新情形：A 牺牲后 B 新获得远海进攻能力 → 允许 A 自杀（海洋消耗战）', () => {
+    // 2x4：t0 我城锚；t5 我连兵B；t1 海洋断兵A(str2)；t2 敌海洋兵X(str3)（A 邻 X 必败）
+    // A 进攻前：B 无航道（t1 被 A 占据、t2 被 X 占据）→ 不能远海进攻 X
+    // A 必败进攻后：A 死（X 反击）→ t1 空出、X 削弱到 1 → B 可下海 t1 远海进攻 X → 新能力出现
+    const state = makeState({
+      rows: 2,
+      columns: 4,
+      tiles: [
+        { terrain: O }, // 0 (0,0) 空海洋
+        { terrain: O, soldier: makeSoldier(1, 2, false, true) }, // 1 (0,1) 海洋断兵 A
+        { terrain: O, soldier: makeSoldier(2, 3, false, true) }, // 2 (0,2) 敌海洋兵 X
+        { terrain: P }, // 3 (0,3) 空平原
+        { terrain: C, soldier: makeSoldier(1, 3, true, true) }, // 4 (1,0) 我城锚
+        { terrain: P, soldier: makeSoldier(1, 4, true, true) }, // 5 (1,1) 我连兵 B（邻 t1/t2）
+        { terrain: P }, // 6 (1,2)
+        { terrain: P }, // 7 (1,3)
+      ],
+    });
+    const plans = planActionPhase(state, 1);
+    // 原点剪枝：存在自杀 → 方案以 A 的 ATTACK(1→2) 开始（新情形允许）
+    const suicidePlan = plans.find((p) => p.intents.length > 0 && p.intents[0].intentType === 'ATTACK' && p.intents[0].from === 1 && p.intents[0].to === 2);
+    expect(suicidePlan).toBeDefined();
+    // 消耗战继续：A 死后 B 下海补刀吃掉 X（X 削弱到 1，B 远海进攻成功）
+    const { state: after } = replay(state, 1, suicidePlan!.intents);
+    expect(after.tiles[2].soldier?.owner).toBe(1); // X 被 B 吃掉（海洋）
+  });
 });
 
 describe('防守行为段', () => {

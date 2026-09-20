@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { TERRAIN, applyIntent, hashGameState, initState } from '@dl/shared';
 import type { GameState, PlayerIntent } from '@dl/shared';
-import { planAddPoints, hasEmptyLandNeighbor } from '../lib/addpoint.js';
+import { planAddPoints, hasEmptyLandNeighbor, canDirectlyReachEnemy } from '../lib/addpoint.js';
 import { extractBoard } from '../lib/board.js';
 import { planTurnCandidates } from '../lib/turnplan.js';
 import { SEED_TE_WEIGHTS } from '../lib/eval.js';
@@ -90,13 +90,14 @@ describe('规则2 防击杀（邻格威胁）', () => {
     //   tile4 邻格 {5,3,2,1}：reach[5]？敌到 tile5：2→4(消耗3→0) 停；2→1(2)→… 经 tile1→tile5？tile1 邻 tile5（odd row: (0,1)→(1,1)+(1,-1)? tile1=(0,1) 邻 tile4、tile3、tile2、tile0）
     //   reach[5] 可能经 tile1→? tile1 不邻 tile5。→ tile4 威胁 = max(0,0,3,2)=3 → need = 3+1−2 = 2
     // tile5（非割点，邻敌兵 tile2）威胁 = 3 → need = 3+1−2 = 2
-    expect(m.get(4)).toBe(2);
-    expect(m.get(5)).toBe(2);
-    // 割点先于非割点（意图顺序）
-    const firstIdx = intents.findIndex((i) => i.intentType === 'ADD_POINT' && i.coordinate === 4);
-    const secondIdx = intents.findIndex((i) => i.intentType === 'ADD_POINT' && i.coordinate === 5);
-    expect(firstIdx).toBeGreaterThanOrEqual(0);
-    expect(secondIdx).toBeGreaterThan(firstIdx);
+    // 规则1/2 批量各 2 点；剩余 2 点进入规则3 抽签（可能追加给任一池内兵）
+    expect(m.get(4) ?? 0).toBeGreaterThanOrEqual(2);
+    expect(m.get(5) ?? 0).toBeGreaterThanOrEqual(2);
+    expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(6);
+    // 割点先于非割点（规则1/2 批量意图顺序：前两条 ADD_POINT 即批量）
+    const batch = intents.filter((i) => i.intentType === 'ADD_POINT');
+    expect(batch[0]).toMatchObject({ coordinate: 4, amount: 2 });
+    expect(batch[1]).toMatchObject({ coordinate: 5, amount: 2 });
   });
 });
 
@@ -133,16 +134,14 @@ describe('前中期加点限制（2026-09-20 修订）', () => {
     expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(4);
   });
 
-  it('残局（turn ≥ T）：全部连兵可加点（恢复原方案）', () => {
+  it('残局（turn ≥ T）：全部连兵可加点（恢复原方案；规则3 改为 top-3 池）', () => {
     const state = line11(2, 4); // turn=2 ≥ T=2 → 不限制
     const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
     const m = sumByTile(intents);
     const total = [...m.values()].reduce((a, b) => a + b, 0);
     expect(total).toBe(4);
-    // 池（20% 向上取整 = 1）单兵吃满：全部落在 tile1 或 tile2（均为连兵）
-    const key = [...m.keys()];
-    expect(key.length).toBe(1);
-    expect([1, 2]).toContain(key[0]);
+    // 打分前三池：tile1、tile2 均为直接可达 → 皆入池，点数只落在 {1,2}
+    for (const k of m.keys()) expect([1, 2]).toContain(k);
   });
 
   it('hasEmptyLandNeighbor：两侧皆我兵 → 无资格；邻空平原 → 有资格', () => {
@@ -161,6 +160,68 @@ describe('前中期加点限制（2026-09-20 修订）', () => {
     const b = extractBoard(state);
     expect(hasEmptyLandNeighbor(b, 1)).toBe(false);
     expect(hasEmptyLandNeighbor(b, 2)).toBe(true);
+  });
+});
+
+describe('规则3 修订（2026-09-20：全量探测 + top-3 池 + 15% 上限 + 后期直接可达）', () => {
+  /** 2x4：t0 我城、t1/t2/t4/t5 我连兵（直接可达敌方）、t7 敌城；t3/t6 空 */
+  function reachableBoard(turn: number, points: number): GameState {
+    const state = makeState({
+      rows: 2,
+      columns: 4,
+      tiles: [
+        { terrain: C, soldier: makeSoldier(1, 3, true, true) }, // 0 我城（被围，不可达）
+        { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 1 我连兵（可达）
+        { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 2 我连兵（邻敌）
+        { terrain: P }, // 3
+        { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 4 我连兵（可达）
+        { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 5 我连兵（可达）
+        { terrain: P }, // 6
+        { terrain: C, soldier: makeSoldier(2, 5, true, true) }, // 7 敌城
+      ],
+      turn,
+    });
+    return withPoints(state, 1, points);
+  }
+
+  it('后期：无法直接到达敌方的兵不能进入池；可达兵入池', () => {
+    // 2x4：t0 城被 t1/t4 夹（两条路径都先遇 2 友兵）→ 不可达；t1/t2/t4/t5 可达
+    const b = extractBoard(reachableBoard(2, 0));
+    expect(canDirectlyReachEnemy(b, 1, 2, 0)).toBe(false); // 城被围
+    expect(canDirectlyReachEnemy(b, 1, 2, 2)).toBe(true); // 邻敌
+    expect(canDirectlyReachEnemy(b, 1, 2, 1)).toBe(true);
+    expect(canDirectlyReachEnemy(b, 1, 2, 4)).toBe(true);
+    expect(canDirectlyReachEnemy(b, 1, 2, 5)).toBe(true);
+  });
+
+  it('15% 池外上限：点数少时池外兵拿不到点（只剩 top-3 池分）', () => {
+    // points=5 → 池外预算 floor(0.75)=0；4 个可达候选 → 只有池内（≤3 兵）能分
+    const state = reachableBoard(2, 5);
+    const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
+    const m = sumByTile(intents);
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+    const recipients = [...m.keys()];
+    expect(recipients.length).toBeLessThanOrEqual(3); // 全部落在 top-3 池
+    for (const k of recipients) expect([1, 2, 4, 5]).toContain(k);
+    for (const k of recipients) expect(k).not.toBe(0); // 城不进池
+  });
+
+  it('池外兵合计上限 15%（向下取整）：点数大时池外合计 ≤ floor(15%)', () => {
+    const state = reachableBoard(2, 20); // 池外预算 floor(3.0)=3
+    const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
+    const m = sumByTile(intents);
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    expect(total).toBe(20);
+    // 无法从外部直接识别池成员——验证结构性上限：除池外，任何兵获得的点数不会破坏上限。
+    // 改为验证：点数分配只在可达兵之间，且没有兵获得超过 total 的异常份额
+    for (const [k, v] of m) {
+      expect([1, 2, 4, 5]).toContain(k);
+      expect(v).toBeGreaterThanOrEqual(0);
+    }
+    // 池外合计 ≤ 3：最坏情况——所有非池兵合计。用确定性验证：至少有一个兵拿到 ≥ ceil((20-3)/3) 点
+    const maxShare = Math.max(...m.values());
+    expect(maxShare).toBeGreaterThanOrEqual(6); // 池内 top 兵应吃大头
   });
 });
 

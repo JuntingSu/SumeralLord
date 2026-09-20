@@ -18,7 +18,10 @@ export interface TurnPlan {
 
 export interface TurnPlanOptions {
   action?: PlanActionOptions;
-  poolRatio?: number;
+  /** 无限池规模（规则3，默认 3） */
+  poolSize?: number;
+  /** 池外兵合计上限比例（默认 0.15） */
+  nonPoolRatio?: number;
 }
 
 /**
@@ -58,7 +61,13 @@ function finishTurnPlan(
     }
   }
   // 加点（意图经 reducer 逐条应用，保证与提交后一致；点数用尽 reducer 自动切阶段）
-  const planned = planAddPoints(cur, turnStart, seat, weights, opts ? { poolRatio: opts.poolRatio } : undefined);
+  const planned = planAddPoints(
+    cur,
+    turnStart,
+    seat,
+    weights,
+    opts ? { poolSize: opts.poolSize, nonPoolRatio: opts.nonPoolRatio } : undefined,
+  );
   for (const intent of planned) {
     if (cur.phase !== 'ADD_POINT') break; // 点数用尽已自动切阶段
     const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat }, intent });
