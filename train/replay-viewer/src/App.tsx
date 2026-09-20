@@ -1,0 +1,331 @@
+// 独立回放查看器（train/replay-viewer）：上传 jsonl 对局日志 → 本地 reducer 重放 →
+// 复用 EventAnimator + BoardCanvas 播放演出。纯本地解析，无后端、无鉴权，任何人的日志均可播放。
+// 播放控制：暂停/继续、1x/2x/4x、进度条（按意图数定位，seek 即重放到 N）、快进到结尾。
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
+import type { GameStartMsg, GameState, PlayerIntent, SoldierState } from '@dl/shared';
+import { applyIntent, initState } from '@dl/shared';
+import { EventAnimator, type EventQueueItem } from './canvas/animator';
+import BoardCanvas from './components/BoardCanvas';
+
+interface ReplayIntent {
+  intent: PlayerIntent;
+  fromSeat: number;
+}
+
+interface ParsedLog {
+  start: GameStartMsg;
+  intents: ReplayIntent[];
+}
+
+/** 解析对局日志：首行 GAME_START + 其余行意图流（坏行跳过；非 GAME_START 首行 → 不可回放） */
+function parseLog(text: string): ParsedLog | null {
+  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return null;
+  let start: GameStartMsg | null = null;
+  const intents: ReplayIntent[] = [];
+  lines.forEach((line, i) => {
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return; // 坏行跳过
+    }
+    if (i === 0) {
+      if (msg.type === 'GAME_START') start = msg as unknown as GameStartMsg;
+      return;
+    }
+    const m = msg as { type?: string; intent?: PlayerIntent; fromSeat?: number };
+    if (m.type === 'INTENT_BROADCAST' && m.intent && typeof m.fromSeat === 'number') {
+      intents.push({ intent: m.intent, fromSeat: m.fromSeat });
+    }
+  });
+  return start ? { start, intents } : null;
+}
+
+type Mode = 'upload' | 'error' | 'playing';
+
+export default function App() {
+  const [mode, setMode] = useState<Mode>('upload');
+  const [errMsg, setErrMsg] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [mapTitle, setMapTitle] = useState('');
+  const [board, setBoard] = useState<GameState | null>(null);
+  const [startInfo, setStartInfo] = useState<GameStartMsg | null>(null);
+  const [cursor, setCursor] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [speed, setSpeed] = useState(4);
+  const [replaying, setReplaying] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const animatorRef = useRef<EventAnimator | null>(null);
+  const queueRef = useRef<EventQueueItem[]>([]);
+  const intentsRef = useRef<ReplayIntent[]>([]);
+  const boardRef = useRef<GameState | null>(null);
+  const cursorRef = useRef(0);
+  const pausedRef = useRef(false);
+  const totalRef = useRef(0);
+
+  const syncCursor = (n: number) => {
+    cursorRef.current = n;
+    setCursor(n);
+  };
+
+  /** 从第 n 条意图重放（seek 与初始化共用）：无动画直接应用到 n */
+  const replayTo = useCallback(
+    (n: number) => {
+      const start = startInfo;
+      if (!start) return;
+      animatorRef.current?.reset();
+      queueRef.current = [];
+      const b = initState({
+        map: start.map,
+        seatAssignments: start.seatAssignments,
+        timeSettings: start.timeSettings,
+        seed: start.seed,
+      }).state;
+      let cur = b;
+      const intents = intentsRef.current;
+      const k = Math.max(0, Math.min(n, intents.length));
+      for (let i = 0; i < k; i++) {
+        const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat: intents[i].fromSeat }, intent: intents[i].intent });
+        if (r.ok) cur = r.state;
+      }
+      boardRef.current = cur;
+      setBoard(cur);
+      syncCursor(k);
+    },
+    [startInfo, syncCursor],
+  );
+
+  /** 读取并解析本地日志 → 初始化回放 */
+  const loadFile = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        const parsed = parseLog(text);
+        if (!parsed) {
+          setMode('error');
+          setErrMsg('不是有效的对局日志：首行必须是 GAME_START 消息（需含 map / seatAssignments / timeSettings / seed）');
+          return;
+        }
+        const { start, intents } = parsed;
+        intentsRef.current = intents;
+        totalRef.current = intents.length;
+        setTotal(intents.length);
+        setStartInfo(start);
+        setFileName(file.name);
+        setMapTitle(start.map.title ?? '');
+        setPaused(false);
+        pausedRef.current = false;
+        setReplaying(false);
+        animatorRef.current?.reset();
+        queueRef.current = [];
+        animatorRef.current = new EventAnimator(
+          () => queueRef.current,
+          () => {
+            queueRef.current = queueRef.current.slice(1);
+          },
+        );
+        animatorRef.current.setSpeed(4); // 默认 4 倍速演出
+        setSpeed(4);
+        const b = initState({
+          map: start.map,
+          seatAssignments: start.seatAssignments,
+          timeSettings: start.timeSettings,
+          seed: start.seed,
+        }).state;
+        boardRef.current = b;
+        setBoard(b);
+        syncCursor(0);
+        setMode('playing');
+      } catch (e) {
+        setMode('error');
+        setErrMsg(e instanceof Error ? e.message : '文件读取失败');
+      }
+    },
+    [syncCursor],
+  );
+
+  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) void loadFile(f);
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) void loadFile(f);
+  };
+
+  const backToUpload = () => {
+    setMode('upload');
+    setErrMsg('');
+    setFileName('');
+    setMapTitle('');
+    setBoard(null);
+    setStartInfo(null);
+    setTotal(0);
+    syncCursor(0);
+    intentsRef.current = [];
+    animatorRef.current?.reset();
+    queueRef.current = [];
+  };
+
+  // 播放循环：animator 空闲且有剩余意图 → 应用下一条（产生链入队 → animator 逐链播放）
+  useEffect(() => {
+    if (mode !== 'playing') return;
+    const iv = window.setInterval(() => {
+      if (pausedRef.current) return;
+      const anim = animatorRef.current;
+      if (!anim) return;
+      if (anim.isPlaying) return;
+      if (cursorRef.current >= totalRef.current) {
+        setReplaying(false);
+        return;
+      }
+      const cur = boardRef.current;
+      if (!cur) return;
+      const item = intentsRef.current[cursorRef.current];
+      const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat: item.fromSeat }, intent: item.intent });
+      if (r.ok) {
+        const beforeTiles: Array<SoldierState | null> = cur.tiles.map((t) => (t.soldier ? { ...t.soldier } : null));
+        boardRef.current = r.state;
+        setBoard(r.state);
+        queueRef.current = [...queueRef.current, { chain: r.chain, beforeTiles }];
+      }
+      syncCursor(cursorRef.current + 1);
+      setReplaying(true);
+    }, 100);
+    return () => window.clearInterval(iv);
+  }, [mode, syncCursor]);
+
+  const handlePause = () => {
+    const next = !paused;
+    animatorRef.current?.setPaused(next);
+    pausedRef.current = next;
+    setPaused(next);
+  };
+  const handleSpeed = (v: number) => {
+    animatorRef.current?.setSpeed(v);
+    setSpeed(v);
+  };
+  const fastForward = () => {
+    animatorRef.current?.reset();
+    pausedRef.current = false;
+    setPaused(false);
+    replayTo(totalRef.current);
+  };
+
+  if (mode !== 'playing' || !board) {
+    return (
+      <div
+        className={`flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-900 p-8 text-white ${dragOver ? '' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+      >
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-amber-300">数字领主 · 回放查看器</h1>
+          <p className="mt-2 text-sm text-slate-400">上传对局日志（.jsonl）即可播放 —— 纯本地解析重放，无后端、无鉴权，任何对局日志都能看</p>
+        </div>
+
+        <label
+          className={`cursor-pointer rounded-lg border-2 border-dashed px-10 py-8 text-center transition-colors ${
+            dragOver ? 'border-amber-400 bg-slate-800' : 'border-slate-600 bg-slate-800/60 hover:border-slate-400'
+          }`}
+        >
+          <input type="file" accept=".jsonl,.json,.log,.txt" onChange={handleFileInput} className="hidden" />
+          <span className="block text-lg">{dragOver ? '松开鼠标上传' : '点击选择 jsonl 文件'}</span>
+          <span className="mt-2 block text-xs text-slate-500">也可以直接把文件拖进本窗口</span>
+        </label>
+
+        {mode === 'error' && <p className="max-w-md text-center text-sm text-red-400">{errMsg}</p>}
+
+        <div className="max-w-md text-center text-xs leading-5 text-slate-500">
+          <p>日志格式：每行一条 JSON。首行必须是 <span className="text-slate-400">GAME_START</span>（含 map / seatAssignments / timeSettings / seed），后续为
+          <span className="text-slate-400"> INTENT_BROADCAST</span> 意图流（GAME_OVER 等其余消息自动忽略）。</p>
+        </div>
+      </div>
+    );
+  }
+
+  const finished = board.finished;
+  const winners = board.winners ?? [];
+  const currentForce = board.forces.find((f) => f.seat === board.currentSeat);
+
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-900 text-white">
+      <header className="flex items-center justify-between border-b border-slate-700 px-6 py-2.5">
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-slate-400">回放 · 第 {board.turn} 回合</span>
+          <span className="max-w-52 truncate text-sm">
+            <span className="text-slate-400">当前行动：</span>
+            <span className="font-medium">{currentForce?.name ?? '—'}</span>
+          </span>
+          <span className="max-w-52 truncate text-xs text-slate-500">
+            {fileName}{mapTitle ? ` · ${mapTitle}` : ''}
+          </span>
+          {finished && (
+            <span className="rounded bg-amber-700 px-2 py-0.5 text-xs">
+              {winners.length > 0 ? `🎉 胜利：${winners.join('、')}` : '对局结束（平局/中止）'}
+            </span>
+          )}
+        </div>
+        <button onClick={backToUpload} className="rounded bg-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-600">
+          选择其他文件
+        </button>
+      </header>
+
+      <main className="relative flex-1 overflow-hidden px-6 py-4">
+        {/* absolute inset-0：高度确定（相对 padding box），BoardCanvas 的 h-full 百分比才有效
+            （block 父级 flex-grow 拉伸的高度对百分比子元素无效，canvas 会塌陷为 0） */}
+        <div className="absolute inset-0">
+          <BoardCanvas board={board} mySeat={null} isSpectator fogEnabled={false} fogLevels={null} phase={board.phase} selected={null} onTileClick={() => undefined} onTileHover={() => undefined} animatorRef={animatorRef} className="h-full w-full" />
+        </div>
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-4 bg-slate-900/80 px-4 py-2 text-xs text-slate-300">
+          <span className="flex items-center gap-2">
+            <button onClick={handlePause} className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600">
+              {paused ? '继续' : '暂停'}
+            </button>
+            {[1, 2, 4].map((v) => (
+              <button
+                key={v}
+                onClick={() => handleSpeed(v)}
+                className={`rounded px-2 py-0.5 hover:bg-slate-600 ${speed === v ? 'bg-slate-600 text-amber-300' : 'bg-slate-700 text-slate-400'}`}
+              >
+                {v}x
+              </button>
+            ))}
+            <button
+              onClick={fastForward}
+              className="rounded bg-slate-700 px-2 py-0.5 text-amber-300 hover:bg-slate-600"
+            >
+              快进到结尾
+            </button>
+          </span>
+          <span className="flex flex-1 items-center gap-2">
+            <input
+              type="range"
+              min={0}
+              max={Math.max(1, total)}
+              value={cursor}
+              onChange={(e) => replayTo(Number(e.target.value))}
+              className="flex-1"
+              aria-label="回放进度"
+            />
+            <span className="w-24 text-right text-slate-400">
+              {cursor} / {total} 意图{replaying && cursor < total && !paused ? '（播放中…）' : ''}
+            </span>
+          </span>
+        </div>
+      </main>
+    </div>
+  );
+}

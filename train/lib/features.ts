@@ -1,9 +1,9 @@
 // features.ts — E_te 6 特征与 E_ape 4 特征（设计方案 §3.1 / §3.2，逐条对应文档）
 // 全部为纯函数：输入 GameState 双快照 + 视角 seat，输出特征向量；不改状态。
-import { neighborsOf } from '@dl/shared';
+import { TILE_OWNER, neighborsOf } from '@dl/shared';
 import type { GameState } from '@dl/shared';
 import type { Board } from './board.js';
-import { extractBoard, hexDistanceTo, otherSeat, soldiersOf, strongholdTilesOf } from './board.js';
+import { extractBoard, hexDistanceTo, isImpassableTerrain, otherSeat, soldiersOf, strongholdTilesOf } from './board.js';
 import {
   battleReach,
   cutVertices,
@@ -162,32 +162,43 @@ function reliabilityValue(b: Board, seat: number, enemy: number): number {
   return maxValue;
 }
 
-/** 特征 5：我方威胁性（我方断兵不计入源） */
+/** 特征 5：我方威胁性（2026-09-20 重定义）
+ * d = 该兵"兵力 1000、不考虑敌方任何兵"走到最近敌方据点周围时的兵力下降值
+ *  （统一消耗 = 每步 1；敌方兵无视（按空格消耗）；阻挡兵/山地/虚空不可通过；敌方兵格不阻碍）。
+ * 特征值 = Σ (4·(地图长+地图宽) − d) × 该兵兵力；不可达按 d = 4(L+W)（贡献 0）。
+ */
 function threatValue(b: Board, seat: number, enemy: number): number {
-  const reach = battleReach(b, seat, { linkedOnlySources: true });
   const strongholds = strongholdTilesOf(b, enemy);
   if (strongholds.length === 0) return 0;
+  // 目标种子：敌方据点周围（距离 1）的全部格；多源 BFS 求每格到最近目标的步数
   const size = b.size;
-  // 多源 BFS：每格到最近敌方据点的 hex 距离（纯几何距离，与 hexDistance 一致）
-  const dist = new Int16Array(size).fill(-1);
-  let queue: number[] = [...strongholds];
-  for (const s of strongholds) dist[s] = 0;
-  let head = 0;
-  while (head < queue.length) {
-    const cur = queue[head++];
-    for (const nb of neighborsOf(cur, b.geo)) {
+  const dist = new Int32Array(size).fill(-1);
+  const queue: number[] = [];
+  for (const sp of strongholds) {
+    for (const nb of neighborsOf(sp, b.geo)) {
       if (dist[nb] < 0) {
-        dist[nb] = dist[cur] + 1;
+        dist[nb] = 0;
         queue.push(nb);
       }
     }
   }
-  const bigB = Math.max(b.geo.rows, b.geo.columns);
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    for (const nb of neighborsOf(cur, b.geo)) {
+      if (dist[nb] >= 0) continue;
+      if (isImpassableTerrain(b.terrain[nb])) continue; // 山地/虚空
+      if (b.owner[nb] === TILE_OWNER.BLOCKER) continue; // 阻挡兵不可通过
+      dist[nb] = dist[cur] + 1;
+      queue.push(nb);
+    }
+  }
+  const cap = 4 * (b.geo.rows + b.geo.columns);
   let sum = 0;
   for (let t = 0; t < size; t++) {
-    if (reach[t] < 0) continue;
-    const d = dist[t] < 0 ? bigB : dist[t];
-    sum += Math.max(0, 1 - d / bigB);
+    if (b.owner[t] !== seat) continue;
+    const d = dist[t] < 0 ? cap : dist[t];
+    sum += (cap - Math.min(d, cap)) * b.strength[t];
   }
   return sum;
 }

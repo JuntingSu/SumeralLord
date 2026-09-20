@@ -1,0 +1,28 @@
+{
+  "name": "@dl/replay-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "独立对局回放查看器：上传 jsonl 日志 → 本地 reducer 重放（无后端、无鉴权）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dl/shared": "*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.7",
+    "@types/node": "^22.13.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.7",
+    "typescript": "~5.7.3",
+    "vite": "^6.1.1"
+  }
+}

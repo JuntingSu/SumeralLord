@@ -1,17 +1,21 @@
-// addpoint.ts — 加点阶段算法（设计方案 §2.2，M=1 唯一方案）
+// addpoint.ts — 加点阶段算法（设计方案 §2.2，M=1 唯一方案；2026-09-20 修订：前中期加点限制）
 // 规则1（防断电，可达威胁）→ 规则2（防击杀，邻格威胁）→ 规则3（E_te 引导饱和分配）。
 // 规则1/2 全有或全无；规则3 逐点抽签（局面哈希做种子，同局面同分配）。
-import { neighborsOf } from '@dl/shared';
+// 修订：回合数 < T（前中期）时，只允许在"周围有空据点/空平原"的连兵上加点的候选集过滤，
+// 规则的优先级与分配机制沿用原方案；回合数 ≥ T（残局）恢复全部连兵可加点。
+import { TERRAIN, neighborsOf } from '@dl/shared';
 import type { GameState, PlayerIntent } from '@dl/shared';
 import { hashGameState } from '@dl/shared';
 import type { Board } from './board.js';
 import { attackPowerOf, extractBoard } from './board.js';
 import { battleReach, cutVertices, linkedSet, linkedSetAfterRemoval } from './battlefield.js';
-import { evalTe, type TeWeights } from './eval.js';
+import { evalTe, phaseThreshold, type TeWeights } from './eval.js';
 
 export interface AddPointOptions {
   /** 无限加点池比例（默认 0.2，向上取整） */
   poolRatio?: number;
+  /** 前中期候选资格过滤（内部使用） */
+  eligible?: (tile: number) => boolean;
 }
 
 interface DefenseCandidate {
@@ -44,8 +48,12 @@ export function planAddPoints(
   const intents: PlayerIntent[] = [];
   let remaining = points;
 
+  // 前中期限制（2026-09-20）：回合数 < T 时，只允许在"周围有空据点/空平原"的连兵上加点
+  const restrict = state.turn < phaseThreshold(state.rows, state.columns);
+  const isEligible = (tile: number): boolean => !restrict || hasEmptyLandNeighbor(b, tile);
+
   // ---- 规则1 + 规则2：统一候选集，排序 =（是否割点、断电规模降序）----
-  const candidates = collectDefenseCandidates(b, seat, enemy);
+  const candidates = collectDefenseCandidates(b, seat, enemy).filter((c) => isEligible(c.tile));
   const allocations: Array<{ tile: number; amount: number }> = [];
   for (const c of candidates) {
     if (c.need <= 0) continue;
@@ -58,9 +66,18 @@ export function planAddPoints(
   // ---- 规则3：E_te 引导饱和分配（在规则1/2 分配后的局面探测；剩余点数逐点抽签）----
   if (remaining > 0) {
     const post12 = allocations.length > 0 ? applyAllocations(state, allocations) : state;
-    intents.push(...saturateAssign(post12, turnStart, seat, weights, remaining, opts));
+    intents.push(...saturateAssign(post12, turnStart, seat, weights, remaining, { ...opts, eligible: isEligible }));
   }
   return intents;
+}
+
+/** 周围（距离 1）有空据点/空平原 的兵（前中期加点候选资格） */
+export function hasEmptyLandNeighbor(b: Board, tile: number): boolean {
+  for (const nb of neighborsOf(tile, b.geo)) {
+    const terrain = b.terrain[nb];
+    if ((terrain === TERRAIN.PLAIN || terrain === TERRAIN.CITY) && b.owner[nb] < 0) return true;
+  }
+  return false;
 }
 
 /** 规则1/2 分配后的模拟局面（ADD_POINT 只加兵力、无级联事件 → 直接构兵） */
@@ -125,8 +142,8 @@ function saturateAssign(
   opts?: AddPointOptions,
 ): PlayerIntent[] {
   const b = extractBoard(state);
-  const linkedTiles = [...linkedSet(b, seat)];
-  if (linkedTiles.length === 0) return []; // 无连兵：交还点数（由调用方 SWITCH_PHASE）
+  const linkedTiles = [...linkedSet(b, seat)].filter((t) => opts?.eligible?.(t) ?? true);
+  if (linkedTiles.length === 0) return []; // 无（可加点）连兵：交还点数（由调用方 SWITCH_PHASE）
 
   // 逐兵 +1 探测（ADD_POINT 只加兵力、无级联事件 → 直接构造模拟局面）
   const scored = linkedTiles.map((tile) => {

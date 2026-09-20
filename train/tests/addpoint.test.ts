@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { TERRAIN, applyIntent, hashGameState, initState } from '@dl/shared';
 import type { GameState, PlayerIntent } from '@dl/shared';
-import { planAddPoints } from '../lib/addpoint.js';
+import { planAddPoints, hasEmptyLandNeighbor } from '../lib/addpoint.js';
+import { extractBoard } from '../lib/board.js';
 import { planTurnCandidates } from '../lib/turnplan.js';
 import { SEED_TE_WEIGHTS } from '../lib/eval.js';
 import { generateTrainMap } from '../lib/mapgen.js';
@@ -99,8 +100,72 @@ describe('规则2 防击杀（邻格威胁）', () => {
   });
 });
 
+describe('前中期加点限制（2026-09-20 修订）', () => {
+  /** 1x11：tile0 我城锚、tile1/tile2 我连兵（tile1 两侧皆我兵→无空邻地；tile2 邻空 tile3）；tile9 敌城 */
+  function line11(turn: number, points: number): GameState {
+    const state = lineState11(turn);
+    return withPoints(state, 1, points);
+  }
+  function lineState11(turn: number): GameState {
+    const tiles = [
+      { terrain: C, soldier: makeSoldier(1, 3, true, true) }, // 0 我城锚
+      { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 1 我连兵（无空邻地）
+      { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 2 我连兵（邻空 tile3）
+      { terrain: P }, // 3
+      { terrain: P }, // 4
+      { terrain: P }, // 5
+      { terrain: P }, // 6
+      { terrain: P }, // 7
+      { terrain: P }, // 8
+      { terrain: C, soldier: makeSoldier(2, 5, true, true) }, // 9 敌城
+      { terrain: P }, // 10
+    ];
+    return makeState({ rows: 1, columns: 11, tiles, turn });
+  }
+
+  it('前中期（turn < T）：只允许在周围有空据点/空平原的兵上加点', () => {
+    // T(1x11) = 2；turn=1 < 2 → 限制生效：仅 tile2 有资格 → 全部点数给 tile2
+    const state = line11(1, 4);
+    const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
+    const m = sumByTile(intents);
+    expect(m.get(2)).toBe(4);
+    expect(m.get(1)).toBeUndefined();
+    expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(4);
+  });
+
+  it('残局（turn ≥ T）：全部连兵可加点（恢复原方案）', () => {
+    const state = line11(2, 4); // turn=2 ≥ T=2 → 不限制
+    const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
+    const m = sumByTile(intents);
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    expect(total).toBe(4);
+    // 池（20% 向上取整 = 1）单兵吃满：全部落在 tile1 或 tile2（均为连兵）
+    const key = [...m.keys()];
+    expect(key.length).toBe(1);
+    expect([1, 2]).toContain(key[0]);
+  });
+
+  it('hasEmptyLandNeighbor：两侧皆我兵 → 无资格；邻空平原 → 有资格', () => {
+    const state = makeState({
+      rows: 1,
+      columns: 5,
+      tiles: [
+        { terrain: C, soldier: makeSoldier(1, 3, true, true) }, // 0 我城
+        { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 1（邻 0/2 皆我兵）
+        { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 2（邻 3 空）
+        { terrain: P },
+        { terrain: C, soldier: makeSoldier(2, 5, true, true) }, // 4 敌城
+      ],
+      turn: 1,
+    });
+    const b = extractBoard(state);
+    expect(hasEmptyLandNeighbor(b, 1)).toBe(false);
+    expect(hasEmptyLandNeighbor(b, 2)).toBe(true);
+  });
+});
+
 describe('规则3 E_te 饱和分配', () => {
-  it('同局面抽签确定（哈希种子）；总点数花完；只加给连兵', () => {
+  it('同局面抽签确定（哈希种子）；总点数≤可用；只加给有资格的连兵', () => {
     const { map } = generateTrainMap('addpoint-det');
     const { state } = initState({
       map,
@@ -111,16 +176,18 @@ describe('规则3 E_te 饱和分配', () => {
       seed: 'addpoint-det',
       timeSettings: { stepTime: 30, gameTime: 600, additionalTime: 10 },
     });
+    // 真实地图 turn=1 < T（前中期）→ 只允许"周围有空据点/空平原"的连兵
     const a = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
     const b2 = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
     expect(a).toEqual(b2);
     const total = a.reduce((acc, i) => acc + (i.intentType === 'ADD_POINT' ? i.amount : 0), 0);
-    expect(total).toBe(state.forces.find((f) => f.seat === 1)!.points);
+    expect(total).toBeLessThanOrEqual(state.forces.find((f) => f.seat === 1)!.points);
     for (const i of a) {
-      if (i.intentType === 'ADD_POINT') {
-        expect(state.tiles[i.coordinate].soldier?.owner).toBe(1);
-        expect(state.tiles[i.coordinate].soldier?.isLinked).toBe(true);
-      }
+      if (i.intentType !== 'ADD_POINT') continue;
+      const s = state.tiles[i.coordinate].soldier!;
+      expect(s.owner).toBe(1);
+      expect(s.isLinked).toBe(true);
+      expect(hasEmptyLandNeighbor(extractBoard(state), i.coordinate)).toBe(true);
     }
   });
 
