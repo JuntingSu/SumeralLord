@@ -55,6 +55,8 @@ interface Args {
   evalGames: number;
   /** 验收达标线（默认 0.6；训练达到该胜率自动停止） */
   acceptThreshold: number;
+  /** 拟合锚点：current（从当前权重增量拟合，手动调整得以保留，默认）| seed（从种子权重重学） */
+  fitAnchor: 'current' | 'seed';
   maxGames?: number;
   saveLogs: boolean;
 }
@@ -71,6 +73,7 @@ function parseArgs(argv: string[]): Args {
     acceptEvery: Number(get('accept-every') ?? 500),
     evalGames: Number(get('eval-games') ?? 100),
     acceptThreshold: Number(get('accept-threshold') ?? 0.6),
+    fitAnchor: (get('fit-anchor') as 'current' | 'seed') ?? 'current',
     maxGames: get('max-games') ? Number(get('max-games')) : undefined,
     saveLogs: get('save-logs') !== '0',
   };
@@ -313,13 +316,15 @@ function runFit(gamesDone: number): void {
     }
   }
   if (samples.length === 0) return;
-  const { weights, report } = fitWeights(samples, SEED_TE_WEIGHTS);
+  // 拟合锚点：默认从当前权重增量拟合（手动调整/历史积累得以保留并细化）；--fit-anchor seed 恢复从种子重学
+  const anchor = args.fitAnchor === 'seed' ? SEED_TE_WEIGHTS : currentRecord.weights;
+  const { weights, report } = fitWeights(samples, anchor);
   currentRecord = store.next(weights, gamesDone, `fit@${gamesDone} samples=${samples.length} pairs=${report.pairsUsed}`);
   state.weightVersion = currentRecord.version;
   saveTrainState(STATE_FILE, state);
   console.log(
-    `[fit] ${gamesDone} 局 → v${currentRecord.version}（样本 ${samples.length}，pair 更新 ${report.pairsUsed}/${report.stepsRun}，` +
-      `损失 ${report.lossBefore.toFixed(4)} → ${report.lossAfter.toFixed(4)}）`,
+    `[fit] ${gamesDone} 局 → v${currentRecord.version}（锚=${args.fitAnchor === 'seed' ? 'seed' : 'current'}，样本 ${samples.length}，` +
+      `pair 更新 ${report.pairsUsed}/${report.stepsRun}，损失 ${report.lossBefore.toFixed(4)} → ${report.lossAfter.toFixed(4)}）`,
   );
 }
 
