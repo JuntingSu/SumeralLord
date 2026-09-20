@@ -86,11 +86,37 @@ export interface TrainMap {
 }
 
 /**
- * 生成一张 1v1 训练地图（不种子化）：
- * mode='plain' 均衡权重 + 可走格连通校验（≤500 次重试）；
- * 每势力一座出生据点（从可走格 shuffle 取 2），先手 seat1 兵力 3 / 后手 seat2 兵力 4。
+ * 敌我初始据点必须能通过平原/据点连通（2026-09-20 新增检查）：
+ * 两座有主据点之间存在一条仅经 PLAIN/CITY 地形的路径（海洋不参与连通）。
  */
-export function generateTrainMap(id: string): TrainMap {
+export function strongholdsLandConnected(battlefield: BattlefieldTile[], row: number, column: number): boolean {
+  const geo = geoOf(row, column);
+  const cities: number[] = [];
+  for (let i = 0; i < battlefield.length; i++) {
+    const [terrain, owner] = battlefield[i];
+    if (terrain === TERRAIN.CITY && (owner === 1 || owner === 2)) cities.push(i);
+  }
+  if (cities.length !== 2) return false;
+  const [a, b] = cities;
+  const land = (t: number): boolean => t === TERRAIN.PLAIN || t === TERRAIN.CITY;
+  const visited = new Uint8Array(battlefield.length);
+  const queue = [a];
+  visited[a] = 1;
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    if (cur === b) return true;
+    for (const nb of neighborsOf(cur, geo)) {
+      if (!visited[nb] && land(battlefield[nb][0])) {
+        visited[nb] = 1;
+        queue.push(nb);
+      }
+    }
+  }
+  return false;
+}
+
+/** 单张生成尝试：地形（可走格连通重试）+ 随机出生点 */
+function generateOnce(id: string): MapFullData {
   const row = 9 + Math.floor(Math.random() * 7); // [9,15]
   const column = 11 + Math.floor(Math.random() * 7); // [11,17]
   const size = row * column;
@@ -128,11 +154,11 @@ export function generateTrainMap(id: string): TrainMap {
     { name: '训练势力2', team: 2, computer: 2, seat: 2, flag: 2 },
   ];
 
-  const map: MapFullData = {
+  return {
     id,
     version: 1,
     title: `训练地图-${id}`,
-    description: 'MCTS 自训练图池（mode=plain，先手据点3/后手据点4）',
+    description: 'MCTS 自训练图池（mode=plain，先手据点3/后手据点4，敌我据点经平原/据点连通）',
     author: 'train',
     timestamp: nowTimestamp(),
     row,
@@ -146,5 +172,19 @@ export function generateTrainMap(id: string): TrainMap {
     player_list: playerList,
     battlefield,
   };
-  return { id, map };
+}
+
+/** 生成单张训练图的重试上限（强连通校验失败时重新生成） */
+const MAX_GEN_ATTEMPTS = 300;
+
+/**
+ * 生成一张 1v1 训练地图（不种子化）：
+ * mode='plain' 均衡权重 + 可走格连通校验 + 敌我初始据点经平原/据点连通校验（不满足则重生成）。
+ */
+export function generateTrainMap(id: string): TrainMap {
+  for (let attempt = 0; attempt < MAX_GEN_ATTEMPTS; attempt++) {
+    const map = generateOnce(id);
+    if (strongholdsLandConnected(map.battlefield, map.row, map.column)) return { id, map };
+  }
+  throw new Error(`无法生成满足"敌我据点经平原/据点连通"的训练地图: ${id}（已重试 ${MAX_GEN_ATTEMPTS} 次）`);
 }

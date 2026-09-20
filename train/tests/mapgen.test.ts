@@ -5,6 +5,7 @@ import {
   FIRST_SEAT_STRENGTH,
   SECOND_SEAT_STRENGTH,
   generateTrainMap,
+  strongholdsLandConnected,
   walkableConnected,
 } from '../lib/mapgen.js';
 
@@ -57,6 +58,46 @@ describe('generateTrainMap（mode=plain 移植）', () => {
     expect(map.player_list[0].seat).toBe(1);
     expect(map.player_list[1].seat).toBe(2);
     expect(map.player_list[0].team).not.toBe(map.player_list[1].team);
+  });
+
+  it('敌我初始据点必须能通过平原/据点连通（2026-09-20 新增检查；生成器保证满足）', () => {
+    for (let i = 0; i < 10; i++) {
+      const { map } = generateTrainMap(`t-land-${i}`);
+      expect(strongholdsLandConnected(map.battlefield, map.row, map.column)).toBe(true);
+    }
+  });
+});
+
+describe('strongholdsLandConnected（校验函数）', () => {
+  it('两据点间有纯平原/据点路径 → true', () => {
+    const battlefield: Array<[number, number, number]> = [
+      [TERRAIN.CITY, 1, 3], // 0 我城
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.CITY, 2, 4], // 3 敌城（1x4 行内直连）
+    ];
+    expect(strongholdsLandConnected(battlefield, 1, 4)).toBe(true);
+  });
+
+  it('两据点被海洋隔断（无纯平原/据点路径）→ false', () => {
+    const battlefield: Array<[number, number, number]> = [
+      [TERRAIN.CITY, 1, 3], // 0 我城
+      [TERRAIN.OCEAN, TILE_OWNER.EMPTY, 0], // 海洋隔断
+      [TERRAIN.OCEAN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.CITY, 2, 4], // 3 敌城
+    ];
+    // 注意：海洋可走（walkableConnected 仍 true），但平原/据点连通失败
+    expect(walkableConnected(battlefield, 1, 4)).toBe(true);
+    expect(strongholdsLandConnected(battlefield, 1, 4)).toBe(false);
+  });
+
+  it('据点数量不为 2 → false', () => {
+    const battlefield: Array<[number, number, number]> = [
+      [TERRAIN.CITY, 1, 3],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+    ];
+    expect(strongholdsLandConnected(battlefield, 1, 3)).toBe(false);
   });
 });
 
