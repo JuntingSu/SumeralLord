@@ -1,7 +1,7 @@
 // train.ts — 训练主进程（设计方案 §5/§6）
 // 主进程维护权重与训练进度；worker 并行自对弈；每 100 局拟合并下发新权重；
 // 每 500 局验收（argmax vs 种子基准；eval-maps 为空则提示并跳过，训练不中断）；
-// 验收达标（≥60%）自动停止；runs/ 断点续训。
+// 验收达标（--accept-threshold，默认 60%）自动停止；runs/ 断点续训。
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync, existsSync, readdirSync, unlinkSync, readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -53,6 +53,8 @@ interface Args {
   fitEvery: number;
   acceptEvery: number;
   evalGames: number;
+  /** 验收达标线（默认 0.6；训练达到该胜率自动停止） */
+  acceptThreshold: number;
   maxGames?: number;
   saveLogs: boolean;
 }
@@ -68,6 +70,7 @@ function parseArgs(argv: string[]): Args {
     fitEvery: Number(get('fit-every') ?? 100),
     acceptEvery: Number(get('accept-every') ?? 500),
     evalGames: Number(get('eval-games') ?? 100),
+    acceptThreshold: Number(get('accept-threshold') ?? 0.6),
     maxGames: get('max-games') ? Number(get('max-games')) : undefined,
     saveLogs: get('save-logs') !== '0',
   };
@@ -98,7 +101,7 @@ if (state.weightVersion !== currentRecord.version) {
 
 console.log(
   `[train] 启动：workers=${args.workers} simulations=${args.simulations} 图池=${pool.size}张 ` +
-    `验收池=${evalPool ? evalPool.size + '张' : '空（验收将跳过并提示）'} ` +
+    `验收池=${evalPool ? evalPool.size + '张' : '空（验收将跳过并提示）'} 达标线=${(args.acceptThreshold * 100).toFixed(0)}% ` +
     `已完成=${state.gamesDone} 权重版本=v${currentRecord.version}`,
 );
 if (!evalPool) {
@@ -217,8 +220,8 @@ function onResult(handle: WorkerHandle, msg: WorkerResult): void {
         `[accept] 第 ${milestone} 次验收（v${currentRecord.version} vs 基准，${mapsSource}）：` +
           `胜 ${tally.wins} / 平 ${tally.draws} / 负 ${tally.losses} → 胜率 ${(rate * 100).toFixed(1)}%`,
       );
-      if (rate >= 0.6) {
-        console.log('[accept] 达标（≥60%）——停止训练并输出报告。');
+      if (rate >= args.acceptThreshold) {
+        console.log(`[accept] 达标（≥${(args.acceptThreshold * 100).toFixed(0)}%）——停止训练并输出报告。`);
         safeWrite(path.join(RUNS_DIR, 'REPORT.md'), reportMd(tally, rate, milestone), 'overwrite');
         stopAll();
         return;
@@ -330,7 +333,7 @@ function reportMd(tally: { wins: number; draws: number; losses: number }, rate: 
     `- 对手：种子权重基准（argmax，同引擎同预算）`,
     `- 地图：${evalPool ? 'train/eval-maps/（用户设计）' : '训练图池（无泛化检验）'}`,
     `- 结果：胜 ${tally.wins} / 平 ${tally.draws} / 负 ${tally.losses}`,
-    `- 胜率：${(rate * 100).toFixed(1)}%（达标线 60%）`,
+    `- 胜率：${(rate * 100).toFixed(1)}%（达标线 ${(args.acceptThreshold * 100).toFixed(0)}%）`,
     '',
     '权重文件：train/runs/weights/；胜率曲线：train/runs/curve.csv；验收记录：train/runs/acceptance.csv',
   ].join('\n');

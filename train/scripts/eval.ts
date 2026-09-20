@@ -20,6 +20,7 @@ function get(key: string): string | undefined {
 
 const games = Number(get('games') ?? 100);
 const simulations = Number(get('simulations') ?? 300);
+const threshold = Number(get('threshold') ?? 0.6);
 const weightsArg = get('weights') ?? 'latest'; // latest | v{n} | seed
 const mapsArg = get('maps') ?? 'eval';
 
@@ -103,11 +104,11 @@ const rate = wins / games;
 const halfRate = (wins + 0.5 * draws) / games;
 console.log('---- 验收结果 ----');
 console.log(`胜 ${wins} / 平 ${draws} / 负 ${losses}`);
-console.log(`胜率 = ${(rate * 100).toFixed(1)}%（半分制 ${(halfRate * 100).toFixed(1)}%）——达标线 60%`);
+console.log(`胜率 = ${(rate * 100).toFixed(1)}%（半分制 ${(halfRate * 100).toFixed(1)}%）——达标线 ${(threshold * 100).toFixed(0)}%`);
 mkdirSync(RUNS_DIR, { recursive: true });
 appendFileSync(
   ACCEPTANCE_FILE,
-  `standalone,weights=${weightsLabel},maps=${mapsSource},games=${games},wins=${wins},draws=${draws},losses=${losses},rate=${rate.toFixed(3)},halfRate=${halfRate.toFixed(3)}\n`,
+  `standalone,weights=${weightsLabel},maps=${mapsSource},games=${games},wins=${wins},draws=${draws},losses=${losses},rate=${rate.toFixed(3)},halfRate=${halfRate.toFixed(3)},threshold=${threshold}\n`,
 );
 console.log(`已追加到 ${ACCEPTANCE_FILE}`);
-process.exit(rate >= 0.6 ? 0 : 1);
+process.exit(rate >= threshold ? 0 : 1);
