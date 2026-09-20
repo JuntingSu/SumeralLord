@@ -12,6 +12,7 @@ import type { Board } from './board.js';
 import { attackPowerOf, extractBoard, isImpassableTerrain } from './board.js';
 import { battleReach, cutVertices, linkedSet, linkedSetAfterRemoval } from './battlefield.js';
 import { evalTe, phaseThreshold, type TeWeights } from './eval.js';
+import { mulberry32 } from './rng.js';
 
 export interface AddPointOptions {
   /** 无限池规模（默认 3：打分前三） */
@@ -244,16 +245,4 @@ function probeAdd(state: GameState, tile: number, amount: number): GameState {
   const s = t.soldier!;
   tiles[tile] = { ...t, soldier: { ...s, strength: s.strength + amount } };
   return { ...state, tiles };
-}
-
-/** mulberry32：种子化 PRNG（加点抽签确定性随机源） */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }

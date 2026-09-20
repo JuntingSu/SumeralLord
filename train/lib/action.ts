@@ -10,14 +10,16 @@ import {
   TERRAIN,
   TILE_OWNER,
   applyIntent,
+  hashGameState,
   hexDistance,
   isFullBreak,
   isStrongholdTerrain,
   neighborsOf,
 } from '@dl/shared';
-import type { GameState, PlayerIntent } from '@dl/shared';
+import type { BoardGeometry, GameState, PlayerIntent } from '@dl/shared';
 import { evalApe } from './eval.js';
 import { attackPowerOf } from './board.js';
+import { mulberry32 } from './rng.js';
 
 export interface ActionPlan {
   /** 完整意图序列：前置链（若成立）+ 基础行为意图 + 防守意图 */
@@ -730,6 +732,7 @@ function defenseIntents(ctx: Ctx, leaf: GameState, baseScore: number): PlayerInt
   if (leaf.phase !== 'ACTION' || leaf.finished) return [];
   const geo = { rows: leaf.rows, columns: leaf.columns, cylindrical: leaf.cylindrical };
   const approved: Array<{ to: number; intent: PlayerIntent }> = [];
+  const usedFrom = new Set<number>();
   for (let tile = 0; tile < leaf.tiles.length; tile++) {
     const s = leaf.tiles[tile].soldier;
     if (!s || s.owner !== ctx.seat || !s.hasMovement) continue;
@@ -740,13 +743,56 @@ function defenseIntents(ctx: Ctx, leaf: GameState, baseScore: number): PlayerInt
       if (!sim) continue;
       if (evalApe(sim, ctx.turnStart, ctx.seat) > baseScore) {
         approved.push({ to: nb, intent: { intentType: 'MOVE', from: tile, to: nb } });
+        usedFrom.add(tile);
       }
     }
   }
-  // 冲突：目标格相同 → 冲突意图全部排除
+
+  // 规则4（2026-09-20）：场上 1 兵力断兵（有移动力、未被基础/下海使用）→ 命令其向靠近敌方据点的方向移动一步；
+  // 目标 = 相邻空可走格中使"到最近敌方据点的 hex 距离"严格减小者；多个相同距离位置随机取一（局面哈希种子，确定性）。
+  const rule4: Array<{ to: number; intent: PlayerIntent }> = [];
+  const strongholds: number[] = [];
+  for (let i = 0; i < leaf.tiles.length; i++) {
+    const t = leaf.tiles[i];
+    if (isStrongholdTerrain(t.terrain) && t.soldier && t.soldier.owner >= 1 && t.soldier.owner !== ctx.seat) {
+      strongholds.push(i);
+    }
+  }
+  if (strongholds.length > 0) {
+    const rng = mulberry32(parseInt(hashGameState(leaf).slice(0, 8), 16) >>> 0);
+    for (let tile = 0; tile < leaf.tiles.length; tile++) {
+      if (usedFrom.has(tile)) continue;
+      const s = leaf.tiles[tile].soldier;
+      if (!s || s.owner !== ctx.seat || !s.hasMovement) continue;
+      if (s.isLinked || s.strength !== 1) continue; // 1 兵力断兵
+      const d0 = minStrongholdDist(tile, strongholds, geo);
+      const candidates: Array<{ to: number; d: number }> = [];
+      for (const nb of neighborsOf(tile, geo)) {
+        const t = leaf.tiles[nb];
+        if (t.soldier || isFullBreak(t.terrain)) continue; // 空可走格
+        const d = minStrongholdDist(nb, strongholds, geo);
+        if (d < d0) candidates.push({ to: nb, d });
+      }
+      if (candidates.length === 0) continue;
+      const minD = Math.min(...candidates.map((c) => c.d));
+      const ties = candidates.filter((c) => c.d === minD);
+      const picked = ties[Math.floor(rng() * ties.length)];
+      rule4.push({ to: picked.to, intent: { intentType: 'MOVE', from: tile, to: picked.to } });
+    }
+  }
+
+  // 冲突：目标格相同 → 冲突意图全部排除（下海批准 + 规则4 合并判定）
+  const all = [...approved, ...rule4];
   const byTarget = new Map<number, number>();
-  for (const a of approved) byTarget.set(a.to, (byTarget.get(a.to) ?? 0) + 1);
-  return approved.filter((a) => byTarget.get(a.to) === 1).map((a) => a.intent);
+  for (const a of all) byTarget.set(a.to, (byTarget.get(a.to) ?? 0) + 1);
+  return all.filter((a) => byTarget.get(a.to) === 1).map((a) => a.intent);
+}
+
+/** 到最近敌方据点的 hex 距离 */
+function minStrongholdDist(tile: number, strongholds: number[], geo: BoardGeometry): number {
+  let d = Infinity;
+  for (const sp of strongholds) d = Math.min(d, hexDistance(tile, sp, geo));
+  return d;
 }
 
 // ---------- 主入口 ----------

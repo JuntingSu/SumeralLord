@@ -210,6 +210,32 @@ describe('防守行为段', () => {
     expect(after.tiles[2].soldier?.owner).toBe(1); // 下海成断兵
     expect(after.tiles[2].soldier?.isLinked).toBe(false);
   });
+
+  it('规则4：场上有1兵力断兵且无陆地铺场目标 → 命令其向靠近敌方据点的方向移动（可下海），距离相同随机一步（哈希种子确定）', () => {
+    // 1x6：t0 敌城、t1 空海洋、t2 我断兵1（无陆地空邻：t1 海洋/铺场排除、t3 被我城占）、t3 我城锚、t4/t5 空
+    // 基础行为段只有城锚铺场链 [MOVE(3,4), MOVE(4,5)]；断兵 t2 无基础行为 → 叶子仍有移动力
+    // 规则4：t2→t1（到敌城 t0 距离 2→1，严格减小）→ 方案尾部附 MOVE(2,1)
+    const state = lineState([
+      { terrain: C, soldier: makeSoldier(2, 5, true, true) }, // 0 敌城
+      { terrain: O }, // 1 空海洋
+      { terrain: P, soldier: makeSoldier(1, 1, false, true) }, // 2 我断兵1
+      { terrain: C, soldier: makeSoldier(1, 3, true, true) }, // 3 我城锚
+      { terrain: P }, // 4
+      { terrain: P }, // 5
+    ]);
+    const plans = planActionPhase(state, 1);
+    expect(plans.length).toBeGreaterThanOrEqual(1);
+    for (const p of plans) {
+      expect(p.intents[p.intents.length - 1]).toEqual({ intentType: 'MOVE', from: 2, to: 1 });
+    }
+    // 确定性（随机步由局面哈希种子决定）
+    const again = planActionPhase(state, 1);
+    expect(JSON.stringify(again)).toBe(JSON.stringify(plans));
+    // 可应用
+    const { state: after, rejects } = replay(state, 1, plans[0].intents);
+    expect(rejects).toBe(0);
+    expect(after.tiles[1].soldier?.owner).toBe(1); // 断兵移动到 t1（海洋）
+  });
 });
 
 describe('真实地图端到端', () => {
