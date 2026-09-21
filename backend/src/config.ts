@@ -30,6 +30,8 @@ export const config = {
   aiBotRestartBackoffMs: num(process.env.AI_BOT_RESTART_BACKOFF_MS, 1000),
   /** bot 崩溃重启次数上限（超出后放弃，等待对局结束） */
   aiBotRestartMax: num(process.env.AI_BOT_RESTART_MAX, 8),
+  /** 难度2（普通）训练 MCTS AI 的权重文件路径（WeightRecord JSON；缺省 bot 用种子权重） */
+  aiWeightsPath: process.env.DL_AI_WEIGHTS ?? '',
 };
 
 if (config.isProd && config.jwtSecret === 'dev-secret-do-not-use-in-prod') {

@@ -83,7 +83,19 @@ export class AiBotManager {
       `&reducerVersion=${encodeURIComponent(game.reducerVersion)}`;
     writeFileSync(
       bootPath,
-      JSON.stringify({ gameId: game.id, roomId: game.roomId, logFile: game.logFile, wsUrl, reducerVersion: game.reducerVersion }, null, 2),
+      JSON.stringify(
+        {
+          gameId: game.id,
+          roomId: game.roomId,
+          logFile: game.logFile,
+          wsUrl,
+          reducerVersion: game.reducerVersion,
+          // 难度2 训练 MCTS AI 权重（DL_AI_WEIGHTS；缺省 bot 用种子权重）
+          weightsPath: config.aiWeightsPath || undefined,
+        },
+        null,
+        2,
+      ),
       'utf8',
     );
     this.bots.set(game.id, { game, proc: null, bootPath, restarts: 0, killed: false });

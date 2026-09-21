@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "lib/online.ts",
+  "types": "lib/online.ts",
   "scripts": {
     "gen-maps": "tsx scripts/gen-maps.ts",
     "smoke": "tsx scripts/smoke.ts",

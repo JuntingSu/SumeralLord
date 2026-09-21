@@ -21,6 +21,8 @@ export interface MctsOptions {
   temperature?: number;
   /** 采样随机源（缺省 Math.random；训练对局不种子化） */
   rng?: () => number;
+  /** 在线算力预算（毫秒）：到点即用已建树返回（与 simulations 双上限；缺省不限） */
+  timeBudgetMs?: number;
 }
 
 export interface MctsResult {
@@ -121,6 +123,8 @@ function sampleByVisits(visits: number[], tau: number, rng: () => number): numbe
 export function mctsDecide(state: GameState, rootSeat: number, weights: TeWeights, opts?: MctsOptions): MctsResult {
   const simulations = opts?.simulations ?? 300;
   const c = opts?.explorationC ?? 1.0;
+  const timeBudgetMs = opts?.timeBudgetMs;
+  const t0 = timeBudgetMs !== undefined ? Date.now() : 0;
   const evalCache = new Map<string, number>();
   let nodeCount = 1;
 
@@ -138,6 +142,7 @@ export function mctsDecide(state: GameState, rootSeat: number, weights: TeWeight
   };
 
   for (let sim = 0; sim < simulations; sim++) {
+    if (timeBudgetMs !== undefined && Date.now() - t0 > timeBudgetMs) break; // 在线算力预算：到点即用已建树返回
     const path: MctsNode[] = [root];
     let node = root;
     let value: number;
