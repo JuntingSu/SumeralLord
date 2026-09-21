@@ -1,0 +1,37 @@
+{
+  "id": "demo-1789965398706",
+  "createdAt": "2026-09-21T04:36:38.706Z",
+  "sourceGameId": "txqw3sui6",
+  "seat": 2,
+  "turnStartEventId": 67,
+  "startEventId": 70,
+  "positionHash": "36b88224",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 133,
+      "to": 118
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 118,
+      "to": 104
+    },
+    {
+      "intentType": "MOVE",
+      "from": 102,
+      "to": 103
+    },
+    {
+      "intentType": "MOVE",
+      "from": 103,
+      "to": 118
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 118,
+      "to": 104
+    }
+  ],
+  "note": "既通过骗点削弱敌方兵力，又防止被敌方骗点"
+}

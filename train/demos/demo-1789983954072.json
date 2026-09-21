@@ -1,0 +1,22 @@
+{
+  "id": "demo-1789983954069",
+  "createdAt": "2026-09-21T09:45:54.069Z",
+  "sourceGameId": "th0gw16aw",
+  "seat": 1,
+  "turnStartEventId": 97,
+  "startEventId": 99,
+  "positionHash": "b9440eda",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 134,
+      "to": 120
+    },
+    {
+      "intentType": "MOVE",
+      "from": 120,
+      "to": 119
+    }
+  ],
+  "note": "占据点&将兵力尽可能转化成连兵数是好行为"
+}

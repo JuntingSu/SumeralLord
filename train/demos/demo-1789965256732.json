@@ -1,0 +1,30 @@
+{
+  "id": "demo-1789965256730",
+  "createdAt": "2026-09-21T04:34:16.730Z",
+  "sourceGameId": "txqw3sui6",
+  "seat": 1,
+  "turnStartEventId": 16,
+  "startEventId": 16,
+  "positionHash": "8e796323",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 27,
+      "to": 42
+    },
+    {
+      "intentType": "MOVE",
+      "from": 42,
+      "to": 41
+    },
+    {
+      "intentType": "MOVE",
+      "from": 43,
+      "to": 58
+    },
+    {
+      "intentType": "SWITCH_PHASE"
+    }
+  ],
+  "note": ""
+}

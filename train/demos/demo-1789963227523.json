@@ -1,0 +1,52 @@
+{
+  "id": "demo-1789963227521",
+  "createdAt": "2026-09-21T04:00:27.521Z",
+  "sourceGameId": "tpfzfxkfx",
+  "seat": 2,
+  "turnStartEventId": 81,
+  "startEventId": 81,
+  "positionHash": "49c6e762",
+  "intents": [
+    {
+      "intentType": "ATTACK",
+      "from": 40,
+      "to": 41
+    },
+    {
+      "intentType": "MOVE",
+      "from": 39,
+      "to": 40
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 40,
+      "to": 41
+    },
+    {
+      "intentType": "MOVE",
+      "from": 54,
+      "to": 67
+    },
+    {
+      "intentType": "MOVE",
+      "from": 67,
+      "to": 68
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 28,
+      "to": 29
+    },
+    {
+      "intentType": "MOVE",
+      "from": 27,
+      "to": 28
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 3,
+      "to": 16
+    }
+  ],
+  "note": ""
+}

@@ -1,0 +1,28 @@
+{
+  "id": "demo-1789965332129",
+  "createdAt": "2026-09-21T04:35:32.129Z",
+  "sourceGameId": "txqw3sui6",
+  "seat": 1,
+  "turnStartEventId": 55,
+  "startEventId": 58,
+  "positionHash": "c5928946",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 119,
+      "to": 118
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 118,
+      "to": 133
+    },
+    {
+      "intentType": "SWITCH_PHASE"
+    },
+    {
+      "intentType": "SWITCH_PHASE"
+    }
+  ],
+  "note": "进攻敌方3兵，虽然没有击杀，但是可以防止被骗点"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "demo-1789963115095",
+  "createdAt": "2026-09-21T03:58:35.095Z",
+  "sourceGameId": "tpfzfxkfx",
+  "seat": 2,
+  "turnStartEventId": 49,
+  "startEventId": 52,
+  "positionHash": "b9798628",
+  "intents": [
+    {
+      "intentType": "ATTACK",
+      "from": 40,
+      "to": 41
+    }
+  ],
+  "note": ""
+}
