@@ -34,6 +34,8 @@ export interface TrainSample {
   dToEnd: number;
   /** 终局标签：胜 +1 / 负 −1 / 平 0 */
   label: number;
+  /** 样本学习权重（缺省 1；人工示范样本 200 倍，拟合 pairwise 权重按 weight/d² 缩放） */
+  weight?: number;
 }
 
 export interface GameStats {

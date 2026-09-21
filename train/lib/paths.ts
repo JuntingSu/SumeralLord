@@ -7,6 +7,7 @@ const trainRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const TRAIN_ROOT = trainRoot;
 export const MAPS_DIR = path.join(trainRoot, 'maps');
 export const EVAL_MAPS_DIR = path.join(trainRoot, 'eval-maps');
+export const DEMOS_DIR = path.join(trainRoot, 'demos');
 export const RUNS_DIR = path.join(trainRoot, 'runs');
 export const WEIGHTS_DIR = path.join(RUNS_DIR, 'weights');
 export const SAMPLES_DIR = path.join(RUNS_DIR, 'samples');

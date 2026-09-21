@@ -29,6 +29,7 @@ function safeWrite(file: string, content: string, mode: 'append' | 'overwrite'):
 import { SEED_TE_WEIGHTS } from '../lib/eval.js';
 import { fitWeights } from '../lib/fitter.js';
 import type { TrainSample } from '../lib/driver.js';
+import { loadDemos, demoToSample } from '../lib/demos.js';
 import { MapPool, loadEvalMaps } from '../lib/pool.js';
 import {
   MAPS_DIR,
@@ -37,6 +38,7 @@ import {
   WEIGHTS_DIR,
   SAMPLES_DIR,
   LOGS_DIR,
+  DEMOS_DIR,
   STATE_FILE,
   CURVE_FILE,
   ACCEPTANCE_FILE,
@@ -316,6 +318,21 @@ function runFit(gamesDone: number): void {
     }
   }
   if (samples.length === 0) return;
+  // 人工示范样本：train/demos/*.json（200 倍权重胜样本；源日志缺失/重放不一致则跳过）。
+  // 与拟合锚点正交：示范样本在每次拟合中持续生效（直到删除 demo 文件）。
+  const demos = loadDemos(DEMOS_DIR);
+  let demoAdded = 0;
+  let demoSkipped = 0;
+  for (const demo of demos) {
+    const s = demoToSample(demo);
+    if (s) {
+      samples.push(s);
+      demoAdded++;
+    } else {
+      demoSkipped++;
+    }
+  }
+  if (samples.length === 0) return;
   // 拟合锚点：默认从当前权重增量拟合（手动调整/历史积累得以保留并细化）；--fit-anchor seed 恢复从种子重学
   const anchor = args.fitAnchor === 'seed' ? SEED_TE_WEIGHTS : currentRecord.weights;
   const { weights, report } = fitWeights(samples, anchor);
@@ -324,6 +341,7 @@ function runFit(gamesDone: number): void {
   saveTrainState(STATE_FILE, state);
   console.log(
     `[fit] ${gamesDone} 局 → v${currentRecord.version}（锚=${args.fitAnchor === 'seed' ? 'seed' : 'current'}，样本 ${samples.length}，` +
+      (demoAdded > 0 || demoSkipped > 0 ? `示范 +${demoAdded}（跳过 ${demoSkipped}），` : '') +
       `pair 更新 ${report.pairsUsed}/${report.stepsRun}，损失 ${report.lossBefore.toFixed(4)} → ${report.lossAfter.toFixed(4)}）`,
   );
 }

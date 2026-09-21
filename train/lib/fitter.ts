@@ -50,6 +50,11 @@ function evalSample(sample: TrainSample, weights: TeWeights): number {
   return sum;
 }
 
+/** 样本学习权重（缺省 1；示范样本 weight=200 以 200 倍参与 pairwise，重要性采样语义） */
+function sampleWeight(sample: TrainSample): number {
+  return sample.weight ?? 1;
+}
+
 /** 从样本窗口拟合新权重（返回新对象，不改入参）。
  * 2026-09-20：配合慢 τ 高探索方案，默认步数/学习率上调（更激进；L2 锚定保持 1e-4）。 */
 export function fitWeights(samples: TrainSample[], seed: TeWeights, opts?: FitOptions): FitResult {
@@ -83,7 +88,7 @@ export function fitWeights(samples: TrainSample[], seed: TeWeights, opts?: FitOp
       const wS = wins[Math.floor(rng() * wins.length)];
       const lS = losses[Math.floor(rng() * losses.length)];
       const d = evalSample(wS, working) - evalSample(lS, working);
-      const weight = 1 / (wS.dToEnd * wS.dToEnd) + 1 / (lS.dToEnd * lS.dToEnd);
+      const weight = sampleWeight(wS) / (wS.dToEnd * wS.dToEnd) + sampleWeight(lS) / (lS.dToEnd * lS.dToEnd);
       loss += Math.max(0, margin - d) * weight;
     }
     return loss / n;
@@ -98,7 +103,7 @@ export function fitWeights(samples: TrainSample[], seed: TeWeights, opts?: FitOp
     if (diff >= margin) continue;
     const setW = weightSetFor(wS, working);
     const setL = weightSetFor(lS, working);
-    const pairWeight = 1 / (wS.dToEnd * wS.dToEnd) + 1 / (lS.dToEnd * lS.dToEnd);
+    const pairWeight = sampleWeight(wS) / (wS.dToEnd * wS.dToEnd) + sampleWeight(lS) / (lS.dToEnd * lS.dToEnd);
     const gScale = lr * pairWeight;
     const applyUpdate = (vec: number[], dataGrad: number[]): void => {
       const seedVec = vec === mid ? seed.mid : seed.late;
