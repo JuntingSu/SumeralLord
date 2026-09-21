@@ -1,12 +1,14 @@
 // eval.test.ts — 阶段1：权重表、T 阈值与打分入口
 import { describe, expect, it } from 'vitest';
 import { TERRAIN, initState } from '@dl/shared';
-import { APE_WEIGHTS, SEED_TE_WEIGHTS, evalApe, evalTe, phaseThreshold } from '../lib/eval.js';
+import { APE_WEIGHTS, SEED_TE_WEIGHTS, evalApe, evalTe, isLatePhase, phaseThreshold } from '../lib/eval.js';
 import { apeFeatures, teFeatures } from '../lib/features.js';
+import { extractBoard, hasSoldierContact } from '../lib/board.js';
 import { generateTrainMap } from '../lib/mapgen.js';
 import { lineState, makeSoldier, makeState } from './helpers.js';
 
 const P = TERRAIN.PLAIN;
+const C = TERRAIN.CITY;
 
 describe('phaseThreshold', () => {
   it('T = ⌈log₂(面积/100)⌉ + 5', () => {
@@ -14,6 +16,81 @@ describe('phaseThreshold', () => {
     expect(phaseThreshold(9, 11)).toBe(5); // 99 → ceil(−0.014)=0
     expect(phaseThreshold(15, 17)).toBe(7); // 255 → ceil(1.35)=2
     expect(phaseThreshold(10, 14)).toBe(6); // 140 → ceil(0.485)=1
+  });
+});
+
+describe('残局判定（2026-09-20 新增接触判据）', () => {
+  /** 1x7：t0 我城、t1/t2 我连兵、t3 敌连兵（邻 t2）、t4/t5 敌连兵、t6 敌城 → 双方接触；T(1x7)=2 */
+  function contactLine(): ReturnType<typeof makeState> {
+    return makeState({
+      rows: 1,
+      columns: 7,
+      tiles: [
+        { terrain: C, soldier: makeSoldier(1, 3, true) }, // 0 我城
+        { terrain: P, soldier: makeSoldier(1, 2, true) }, // 1 我连兵
+        { terrain: P, soldier: makeSoldier(1, 2, true) }, // 2 我连兵（邻敌）
+        { terrain: P, soldier: makeSoldier(2, 2, true) }, // 3 敌连兵（邻我）
+        { terrain: P, soldier: makeSoldier(2, 2, true) }, // 4 敌连兵
+        { terrain: P, soldier: makeSoldier(2, 2, true) }, // 5 敌连兵
+        { terrain: C, soldier: makeSoldier(2, 3, true) }, // 6 敌城
+      ],
+      turn: 1,
+    });
+  }
+
+  /** 同尺寸无接触变体：敌兵整体后移，t2 邻空 t3（不邻敌） */
+  function noContactLine(): ReturnType<typeof makeState> {
+    return makeState({
+      rows: 1,
+      columns: 7,
+      tiles: [
+        { terrain: C, soldier: makeSoldier(1, 3, true) }, // 0 我城
+        { terrain: P, soldier: makeSoldier(1, 2, true) }, // 1 我连兵
+        { terrain: P, soldier: makeSoldier(1, 2, true) }, // 2 我连兵（邻空）
+        { terrain: P }, // 3 空
+        { terrain: P, soldier: makeSoldier(2, 2, true) }, // 4 敌连兵
+        { terrain: P, soldier: makeSoldier(2, 2, true) }, // 5 敌连兵
+        { terrain: C, soldier: makeSoldier(2, 3, true) }, // 6 敌城
+      ],
+      turn: 1,
+    });
+  }
+
+  it('hasSoldierContact：距离 1 的异势力兵 → true；隔开 → false', () => {
+    expect(hasSoldierContact(extractBoard(contactLine()))).toBe(true);
+    expect(hasSoldierContact(extractBoard(noContactLine()))).toBe(false);
+  });
+
+  it('isLatePhase：接触（回合数 < T）判残局；无接触且回合数 < T 判前中期；回合数 ≥ T 判残局', () => {
+    expect(phaseThreshold(1, 7)).toBe(2); // turn=1 < T
+    expect(isLatePhase(contactLine())).toBe(true); // 接触 → 残局
+    expect(isLatePhase(noContactLine())).toBe(false); // 无接触 + turn < T → 前中期
+    expect(isLatePhase({ ...noContactLine(), turn: 2 })).toBe(true); // turn ≥ T → 残局
+  });
+
+  it('E_te：接触触发残局权重（中盘→残局）', () => {
+    const w: typeof SEED_TE_WEIGHTS = { mid: [1, 0, 0, 0, 0, 0], late: [0, 1, 0, 0, 0, 0] };
+    const contact = contactLine();
+    const fC = teFeatures(contact, contact, 1);
+    expect(evalTe(contact, contact, 1, w)).toBeCloseTo(fC[1], 10); // 残局权重 → 取 f2
+    const noC = noContactLine();
+    const fN = teFeatures(noC, noC, 1);
+    expect(evalTe(noC, noC, 1, w)).toBeCloseTo(fN[0], 10); // 中盘权重 → 取 f1
+  });
+
+  it('E_ape：接触触发残局权重（前期→残局）', () => {
+    const contact = contactLine();
+    const fC = apeFeatures(contact, contact, 1);
+    expect(evalApe(contact, contact, 1)).toBeCloseTo(
+      APE_WEIGHTS.late.reduce((acc, w, i) => acc + w * fC[i], 0),
+      10,
+    );
+    const noC = noContactLine();
+    const fN = apeFeatures(noC, noC, 1);
+    expect(evalApe(noC, noC, 1)).toBeCloseTo(
+      APE_WEIGHTS.pre.reduce((acc, w, i) => acc + w * fN[i], 0),
+      10,
+    );
   });
 });
 

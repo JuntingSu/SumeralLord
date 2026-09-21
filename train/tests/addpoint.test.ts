@@ -5,7 +5,7 @@ import type { GameState, PlayerIntent } from '@dl/shared';
 import { planAddPoints, hasEmptyLandNeighbor, canDirectlyReachEnemy } from '../lib/addpoint.js';
 import { extractBoard } from '../lib/board.js';
 import { planTurnCandidates } from '../lib/turnplan.js';
-import { SEED_TE_WEIGHTS } from '../lib/eval.js';
+import { isLatePhase, phaseThreshold, SEED_TE_WEIGHTS } from '../lib/eval.js';
 import { generateTrainMap } from '../lib/mapgen.js';
 import { makeSoldier, makeState } from './helpers.js';
 
@@ -52,20 +52,19 @@ describe('规则1 防断电（可达威胁，全有或全无）', () => {
     expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(6);
   });
 
-  it('点数不足时整兵跳过（全有或全无）→ 剩余进入规则3（逐点 amount=1）', () => {
-    const state = withPoints(chainState(0, 6), 1, 2); // tile3 需3 只有2 → 规则1/2 跳过
+  it('点数不足时整兵跳过（全有或全无）；可达威胁使非割点连兵也补防', () => {
+    const state = withPoints(chainState(0, 6), 1, 2); // tile3 需3、tile4 需3 → 点数不足跳过
     const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
     const m = sumByTile(intents);
-    expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(2); // 规则3 花完
-    for (const i of intents) {
-      expect(i.intentType).toBe('ADD_POINT'); // 全部为规则3 逐点抽签（无规则1/2 批量防御）
-      if (i.intentType === 'ADD_POINT') expect(i.amount).toBe(1);
-    }
+    // 2026-09-21 可达语义：tile5（非割点）受敌连兵6 经 tile0→1→2 抵达威胁（抵达进攻力3，邻 tile5）
+    //   → need = 3+1−2 = 2；恰好 2 点补上（全有或全无），剩余 0 点不进规则3
+    expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(2);
+    expect(m.get(5)).toBe(2);
   });
 });
 
-describe('规则2 防击杀（邻格威胁）', () => {
-  it('邻格有敌兵的非割点连兵按贴脸威胁补防', () => {
+describe('规则2 防击杀（可达威胁，2026-09-21：由邻格贴脸改为与规则1 一致的可达语义）', () => {
+  it('有可达威胁的非割点连兵按到达时进攻力最大值补防', () => {
     // tile4 邻格无敌兵（敌在 tile0），但敌断兵贴脸：改造——敌兵直接放 tile2（邻 tile4）
     const state = makeState({
       rows: 2,
@@ -79,18 +78,13 @@ describe('规则2 防击杀（邻格威胁）', () => {
         { terrain: P, soldier: makeSoldier(1, 2, true, true) }, // 5
       ],
     });
-    // tile4 去除 → tile5 脱网 → 是割点 → 走规则1 可达语义。此处验证规则2 需要非割点：
-    // 让 tile5 另有锚（放一个我城在 tile2？不行被占）——改为直接构造星形：tile4 有 3 个链邻居。
-    // 简化：验证排序——割点 tile4 优先于规则2 对象 tile5（tile5 邻敌兵 tile2？tile5 邻居 = {4,2}）
+    // tile4 去除 → tile5 脱网 → 是割点 → 走规则1。此处验证规则2 需要非割点：
+    // 简化：验证排序——割点 tile4 优先于规则2 对象 tile5。
+    // 可达语义：敌连兵4（进攻力3）经 tile2 邻格抵达 tile4/tile5 周围 → 威胁 3（= 贴脸值，数值不变）
     const withPoints2 = withPoints(state, 1, 6);
     const intents = planAddPoints(withPoints2, withPoints2, 1, SEED_TE_WEIGHTS);
     const m = sumByTile(intents);
-    // tile4（割点，可达威胁 = max(reach[邻格])）：敌连兵4 进攻力3 → tile2 可达 0? battleReach 从 tile2：
-    //   tile2 自身 power 3；邻 tile4 我兵2 消耗3 → 0；邻 tile1 空 → 2；tile5 邻 tile4 …
-    //   tile4 邻格 {5,3,2,1}：reach[5]？敌到 tile5：2→4(消耗3→0) 停；2→1(2)→… 经 tile1→tile5？tile1 邻 tile5（odd row: (0,1)→(1,1)+(1,-1)? tile1=(0,1) 邻 tile4、tile3、tile2、tile0）
-    //   reach[5] 可能经 tile1→? tile1 不邻 tile5。→ tile4 威胁 = max(0,0,3,2)=3 → need = 3+1−2 = 2
-    // tile5（非割点，邻敌兵 tile2）威胁 = 3 → need = 3+1−2 = 2
-    // 规则1/2 批量各 2 点；剩余 2 点进入规则3 抽签（可能追加给任一池内兵）
+    // tile4（割点，可达威胁 3）→ need 2；tile5（非割点，可达威胁 3）→ need 2
     expect(m.get(4) ?? 0).toBeGreaterThanOrEqual(2);
     expect(m.get(5) ?? 0).toBeGreaterThanOrEqual(2);
     expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(6);
@@ -223,6 +217,42 @@ describe('规则3 修订（2026-09-20：全量探测 + top-3 池 + 15% 上限 + 
     const maxShare = Math.max(...m.values());
     expect(maxShare).toBeGreaterThanOrEqual(6); // 池内 top 兵应吃大头
   });
+
+  it('接触触发残局（turn < T 但双方接触）：加点资格切到后期（canDirectlyReachEnemy）', () => {
+    // 2x4：t0 我城、t1/t4/t5 我连兵、t2 我断兵（邻敌 t3，制造接触）、t7 敌城
+    // turn=1 < T(2x4)=2，但 t2-t3 接触 → 残局（odd-r 邻接：t2 邻 {1,3,5,6}）
+    const state = withPoints(
+      makeState({
+        rows: 2,
+        columns: 4,
+        tiles: [
+          { terrain: C, soldier: makeSoldier(1, 3, true) }, // 0 我城（不可直达）
+          { terrain: P, soldier: makeSoldier(1, 2, true) }, // 1 我连兵（无空邻地，但后期可达）
+          { terrain: P, soldier: makeSoldier(1, 2, false) }, // 2 我断兵（邻敌 t3 → 接触）
+          { terrain: P, soldier: makeSoldier(2, 2, true) }, // 3 敌连兵
+          { terrain: P, soldier: makeSoldier(1, 2, true) }, // 4 我连兵（无空邻地，但后期可达）
+          { terrain: P, soldier: makeSoldier(1, 2, true) }, // 5 我连兵
+          { terrain: P }, // 6
+          { terrain: C, soldier: makeSoldier(2, 5, true) }, // 7 敌城
+        ],
+      }),
+      1,
+      5,
+    );
+    expect(phaseThreshold(2, 4)).toBe(2);
+    expect(isLatePhase(state)).toBe(true); // 接触 → 残局（尽管 turn < T）
+    const b = extractBoard(state);
+    // t1/t4 无空邻地（前中期资格不满足），但残局下可直接到达敌方 → 可入池
+    expect(hasEmptyLandNeighbor(b, 1)).toBe(false);
+    expect(canDirectlyReachEnemy(b, 1, 2, 1)).toBe(true);
+    expect(hasEmptyLandNeighbor(b, 4)).toBe(false);
+    expect(canDirectlyReachEnemy(b, 1, 2, 4)).toBe(true);
+    // 加点总点数守恒，且全部落在后期可达兵上（不可直达的城 t0 不进池）
+    const intents = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
+    const m = sumByTile(intents);
+    expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(5);
+    for (const k of m.keys()) expect([1, 2, 4, 5]).toContain(k);
+  });
 });
 
 describe('规则3 E_te 饱和分配', () => {
@@ -237,18 +267,21 @@ describe('规则3 E_te 饱和分配', () => {
       seed: 'addpoint-det',
       timeSettings: { stepTime: 30, gameTime: 600, additionalTime: 10 },
     });
-    // 真实地图 turn=1 < T（前中期）→ 只允许"周围有空据点/空平原"的连兵
+    // 真实地图：随机出生点可能开局即双方接触（触发残局）→ 资格判据随相位选择
     const a = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
     const b2 = planAddPoints(state, state, 1, SEED_TE_WEIGHTS);
     expect(a).toEqual(b2);
     const total = a.reduce((acc, i) => acc + (i.intentType === 'ADD_POINT' ? i.amount : 0), 0);
     expect(total).toBeLessThanOrEqual(state.forces.find((f) => f.seat === 1)!.points);
+    const b = extractBoard(state);
+    const late = isLatePhase(state);
     for (const i of a) {
       if (i.intentType !== 'ADD_POINT') continue;
       const s = state.tiles[i.coordinate].soldier!;
       expect(s.owner).toBe(1);
       expect(s.isLinked).toBe(true);
-      expect(hasEmptyLandNeighbor(extractBoard(state), i.coordinate)).toBe(true);
+      if (late) expect(canDirectlyReachEnemy(b, 1, 2, i.coordinate)).toBe(true);
+      else expect(hasEmptyLandNeighbor(b, i.coordinate)).toBe(true);
     }
   });
 

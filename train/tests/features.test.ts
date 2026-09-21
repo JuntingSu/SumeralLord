@@ -87,9 +87,9 @@ describe('E_te 特征', () => {
     expect(teFeatures(end, end, 1)[3]).toBeCloseTo(1.5, 10);
   });
 
-  it('f5 我方威胁性（2026-09-20 新定义）：Σ (4·(L+W) − d) × 兵力，d = 兵力1000无视敌兵走到最近敌据点周围的步数', () => {
+  it('f5 我方威胁性（2026-09-21 归一化）：Σ ((4·(L+W) − d) / (4·(L+W))) × 兵力，d = 兵力1000无视敌兵走到最近敌据点周围的步数', () => {
     // line 1x5: [我城锚3, 空, 空, 敌城5, 空]：敌据点 tile3 的周围 = {tile2}
-    // d(tile0) = 2；cap = 4×(1+5) = 24 → (24−2)×3 = 66
+    // d(tile0) = 2；cap = 4×(1+5) = 24 → (24−2)/24×3 = 2.75（f5 已归一化 ÷cap）
     const end = lineState([
       { terrain: C, soldier: makeSoldier(1, 3, true) },
       { terrain: P },
@@ -97,16 +97,16 @@ describe('E_te 特征', () => {
       { terrain: C, soldier: makeSoldier(2, 5, true) },
       { terrain: P },
     ]);
-    expect(teFeatures(end, end, 1)[4]).toBe(66);
+    expect(teFeatures(end, end, 1)[4]).toBeCloseTo(((24 - 2) / 24) * 3, 10);
 
-    // 兵已邻敌据点：d=0 → 满值（cap = 4×(1+4) = 20）
+    // 兵已邻敌据点：d=0 → 满值（cap = 4×(1+4) = 20 → (20−0)/20×3 = 3）
     const end2 = lineState([
       { terrain: P },
       { terrain: P, soldier: makeSoldier(1, 3, true) },
       { terrain: C, soldier: makeSoldier(2, 5, true) },
       { terrain: P },
     ]);
-    expect(teFeatures(end2, end2, 1)[4]).toBe(20 * 3); // (20−0)×3
+    expect(teFeatures(end2, end2, 1)[4]).toBeCloseTo(((20 - 0) / 20) * 3, 10);
   });
 
   it('f5 不可达（被山地隔断）时按 d=cap 贡献 0；敌方兵不阻碍', () => {
@@ -118,7 +118,7 @@ describe('E_te 特征', () => {
       { terrain: P },
       { terrain: C, soldier: makeSoldier(2, 5, true) },
     ]);
-    expect(teFeatures(end, end, 1)[4]).toBe((24 - 3) * 3);
+    expect(teFeatures(end, end, 1)[4]).toBeCloseTo(((24 - 3) / 24) * 3, 10);
 
     // line 1x5: [我兵3, 山地, 空, 空, 敌城5] —— 山地阻断 → d=cap → 贡献 0
     const end3 = lineState([

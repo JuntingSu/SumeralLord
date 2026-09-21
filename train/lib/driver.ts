@@ -6,7 +6,7 @@ import type { GameStartMsg, GameState, IntentBroadcastMsg, MapFullData, PlayerIn
 import { mctsDecide } from './mcts.js';
 import type { MctsOptions } from './mcts.js';
 import { teFeatures } from './features.js';
-import type { TeWeights } from './eval.js';
+import { isLatePhase, type TeWeights } from './eval.js';
 
 /** 训练对局双方虚拟 playerId（§9 默认项 4） */
 export const TRAIN_PLAYER_IDS = { 1: 900001, 2: 900002 } as const;
@@ -24,8 +24,10 @@ export interface TrainSample {
   seat: number;
   /** 回合数（全局轮次） */
   turn: number;
-  /** 地图面积（rows×columns；拟合与打分的中盘/残局 T 阈值用） */
+  /** 地图面积（rows×columns；仅旧样本拟合回退用） */
   area: number;
+  /** 残局标记（回合数 ≥ T 或 该回合行动阶段结束时双方有子力接触）；拟合选择中盘/残局权重，同 E_te 打分口径 */
+  late: boolean;
   /** E_te 6 特征 */
   features: number[];
   /** 距终局的回合数（拟合 w=1/d²） */
@@ -166,6 +168,7 @@ export function playSelfPlayGame(map: MapFullData, opts: DriveOptions): GameResu
         turn: state.turn,
         area: map.row * map.column,
         features: teFeatures(state, turnStart, viewer),
+        late: isLatePhase(state),
         dToEnd: 0, // 终局后回填
         label: 0,
       });

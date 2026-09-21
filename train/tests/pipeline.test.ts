@@ -38,6 +38,7 @@ describe('playSelfPlayGame（低预算冒烟）', () => {
       expect([-1, 0, 1]).toContain(s.label);
       expect(s.dToEnd).toBeGreaterThanOrEqual(1);
       expect(s.area).toBe(map.row * map.column);
+      expect(typeof s.late).toBe('boolean'); // 残局标记随样本收集
     }
     // 双视角对称：同一 gameId 每回合两个视角
     const viewers = new Set(result.samples.map((s) => s.seat));
@@ -81,7 +82,7 @@ describe('playSelfPlayGame（低预算冒烟）', () => {
 
 describe('fitWeights（合成样本收敛方向）', () => {
   it('可分数据上排序损失下降，权重向区分方向移动', () => {
-    // 构造：胜局样本 f1 高、负局样本 f1 低（其余为 0）；turn=3 < T → 更新中盘权重
+    // 构造：胜局样本 f1 高、负局样本 f1 低（其余为 0）；late=false → 更新中盘权重
     const mk = (label: number, f1: number, dToEnd: number): TrainSample => ({
       gameId: 'g',
       mapId: 'm',
@@ -89,6 +90,7 @@ describe('fitWeights（合成样本收敛方向）', () => {
       turn: 3,
       area: 150,
       features: [f1, 0, 0, 0, 0, 0],
+      late: false,
       dToEnd,
       label,
     });
@@ -115,11 +117,43 @@ describe('fitWeights（合成样本收敛方向）', () => {
 
   it('无胜/负样本（全平）时返回种子权重', () => {
     const samples: TrainSample[] = [
-      { gameId: 'g', mapId: 'm', seat: 1, turn: 3, area: 150, features: [0, 0, 0, 0, 0, 0], dToEnd: 1, label: 0 },
+      { gameId: 'g', mapId: 'm', seat: 1, turn: 3, area: 150, features: [0, 0, 0, 0, 0, 0], late: false, dToEnd: 1, label: 0 },
     ];
     const { weights, report } = fitWeights(samples, SEED_TE_WEIGHTS);
     expect(weights).toEqual(SEED_TE_WEIGHTS);
     expect(report.stepsRun).toBe(0);
+  });
+
+  it('旧批次样本（无 late 字段）回退纯 T 阈值：turn ≥ T 走残局权重', () => {
+    // area=150 → T=6；turn=7 ≥ T → 残局（不带 late 字段，模拟升级前落盘的旧样本）
+    const mk = (label: number, f1: number): TrainSample =>
+      ({
+        gameId: 'g',
+        mapId: 'm',
+        seat: 1,
+        turn: 7,
+        area: 150,
+        features: [f1, 0, 0, 0, 0, 0],
+        dToEnd: 1,
+        label,
+      }) as TrainSample;
+    const samples: TrainSample[] = [];
+    for (let i = 0; i < 50; i++) {
+      samples.push(mk(1, 5 + Math.random()));
+      samples.push(mk(-1, -5 - Math.random()));
+    }
+    const rng = (() => {
+      let x = 7;
+      return () => {
+        x = (x * 1103515245 + 12345) % 2147483648;
+        return x / 2147483648;
+      };
+    })();
+    const seed: TeWeights = { mid: [0.05, 2, -1, -0.5, 0.2, 100], late: [0.05, 2, -1, -0.5, 0.2, 100] };
+    const { weights, report } = fitWeights(samples, seed, { steps: 3000, lr: 5e-4, l2: 1e-4, margin: 2, rng });
+    expect(weights.late[0]).toBeGreaterThan(seed.late[0] + 0.05); // 残局权重被更新
+    expect(weights.mid).toEqual(seed.mid); // 中盘不动
+    expect(report.pairsUsed).toBeGreaterThan(0);
   });
 });
 

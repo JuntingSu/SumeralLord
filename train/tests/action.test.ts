@@ -76,6 +76,36 @@ describe('就近进攻', () => {
     const t2 = after.tiles[2].soldier;
     expect(t2 && t2.owner).toBe(1); // 敌兵被吃
   });
+
+  it('断兵（有移动力）进攻力 ≥ 防守兵力时也可生成 ATTACK 意图并吃掉敌兵', () => {
+    // 断兵 5（进攻力 = 兵力 5）邻敌 4 → 就近进攻成功（进攻力 ≥ 兵力）
+    const state = lineState([
+      { terrain: C, soldier: makeSoldier(1, 3, true, true) },
+      { terrain: P, soldier: makeSoldier(1, 5, false, true) }, // 断兵（进攻力 = 5）
+      { terrain: P, soldier: makeSoldier(2, 4, true, false) },
+      { terrain: P },
+    ]);
+    const plans = planActionPhase(state, 1);
+    const attackPlan = plans.find((p) => p.intents.some((i) => i.intentType === 'ATTACK' && i.to === 2));
+    expect(attackPlan).toBeDefined();
+    const { state: after, rejects } = replay(state, 1, attackPlan!.intents);
+    expect(rejects).toBe(0);
+    const t2 = after.tiles[2].soldier;
+    expect(t2 && t2.owner).toBe(1); // 敌兵被吃
+  });
+
+  it('断兵进攻力 < 防守兵力时不生成成功就近进攻（无补刀兵 → 不生成对敌的进攻方案）', () => {
+    // 断兵 2（进攻力 2）邻敌 4 → 就近进攻不成立；无其他更强补刀兵 → 无 ATTACK 候选
+    const state = lineState([
+      { terrain: C, soldier: makeSoldier(1, 3, true, true) },
+      { terrain: P, soldier: makeSoldier(1, 2, false, true) }, // 断兵（进攻力 2）
+      { terrain: P, soldier: makeSoldier(2, 4, true, false) },
+      { terrain: P },
+    ]);
+    const plans = planActionPhase(state, 1);
+    const attackTo2 = plans.filter((p) => p.intents.some((i) => i.intentType === 'ATTACK' && i.to === 2));
+    expect(attackTo2).toHaveLength(0);
+  });
 });
 
 describe('前置行为：进攻据点', () => {

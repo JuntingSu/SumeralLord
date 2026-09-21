@@ -1,10 +1,12 @@
 // mapgen.ts — 训练图池生成器（设计方案 §7）
 // 移植 mapeditor/js/generator.js 的 mode='plain' 随机生成器：均衡权重、可走格连通重试。
 // 训练约定：row∈[9,15]、column∈[11,17] 每张随机；playerNum=2；不种子化（Math.random）；
-// 生成后先手（seat1）据点兵力 3、后手（seat2）据点兵力 4（后手补偿）。
+// 生成后先手（seat1）据点兵力 3、后手（seat2）据点兵力 4（后手补偿）；
+// 敌我据点须经平原/据点连通（2026-09-20）且出生据点间距 > 4（2026-09-21）。
 import {
   TERRAIN,
   TILE_OWNER,
+  hexDistance,
   neighborsOf,
   type BattlefieldTile,
   type BoardGeometry,
@@ -115,6 +117,18 @@ export function strongholdsLandConnected(battlefield: BattlefieldTile[], row: nu
   return false;
 }
 
+/** 出生据点间距（hex 距离）：两座有主据点之间（2026-09-21 新增：拒绝 ≤ 4，保证开局有缓冲） */
+export function strongholdDistance(battlefield: BattlefieldTile[], row: number, column: number): number {
+  const geo = geoOf(row, column);
+  const cities: number[] = [];
+  for (let i = 0; i < battlefield.length; i++) {
+    const [terrain, owner] = battlefield[i];
+    if (terrain === TERRAIN.CITY && (owner === 1 || owner === 2)) cities.push(i);
+  }
+  if (cities.length !== 2) return -1;
+  return hexDistance(cities[0], cities[1], geo);
+}
+
 /** 单张生成尝试：地形（可走格连通重试）+ 随机出生点 */
 function generateOnce(id: string): MapFullData {
   const row = 9 + Math.floor(Math.random() * 7); // [9,15]
@@ -179,12 +193,17 @@ const MAX_GEN_ATTEMPTS = 300;
 
 /**
  * 生成一张 1v1 训练地图（不种子化）：
- * mode='plain' 均衡权重 + 可走格连通校验 + 敌我初始据点经平原/据点连通校验（不满足则重生成）。
+ * mode='plain' 均衡权重 + 可走格连通校验 + 敌我初始据点经平原/据点连通校验 + 出生据点间距 > 4（不满足则重生成）。
  */
 export function generateTrainMap(id: string): TrainMap {
   for (let attempt = 0; attempt < MAX_GEN_ATTEMPTS; attempt++) {
     const map = generateOnce(id);
-    if (strongholdsLandConnected(map.battlefield, map.row, map.column)) return { id, map };
+    if (
+      strongholdsLandConnected(map.battlefield, map.row, map.column) &&
+      strongholdDistance(map.battlefield, map.row, map.column) > 4
+    ) {
+      return { id, map };
+    }
   }
-  throw new Error(`无法生成满足"敌我据点经平原/据点连通"的训练地图: ${id}（已重试 ${MAX_GEN_ATTEMPTS} 次）`);
+  throw new Error(`无法生成满足"敌我据点经平原/据点连通且出生据点间距 > 4"的训练地图: ${id}（已重试 ${MAX_GEN_ATTEMPTS} 次）`);
 }

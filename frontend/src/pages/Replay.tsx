@@ -85,17 +85,27 @@ export default function Replay() {
     let cancelled = false;
     (async () => {
       try {
-        const log = await fetchGameLog(gameId);
+        // 按 nextCursor 翻页拉全量（单页 limit=500，长对局需多页拼接）
+        let start: GameStartMsg | null = null;
+        const events: Array<Record<string, unknown>> = [];
+        let after = 0;
+        for (let guard = 0; guard < 200; guard++) {
+          const page = await fetchGameLog(gameId, after);
+          if (page.start && !start) start = page.start;
+          events.push(...page.events);
+          if (page.nextCursor <= 0) break;
+          after = page.nextCursor;
+        }
         if (cancelled) return;
-        if (!log.start) {
+        if (!start) {
           setStatus('error');
           setErrMsg('该对局为旧版日志，缺少开局数据，无法回放');
           return;
         }
-        intentsRef.current = extractIntents(log.events);
+        intentsRef.current = extractIntents(events);
         totalRef.current = intentsRef.current.length;
         setTotal(intentsRef.current.length);
-        setStartInfo(log.start);
+        setStartInfo(start);
         animatorRef.current = new EventAnimator(
           () => queueRef.current,
           () => {
@@ -104,10 +114,10 @@ export default function Replay() {
         );
         animatorRef.current.setSpeed(4); // 默认 4 倍速演出
         const b = initState({
-          map: log.start.map,
-          seatAssignments: log.start.seatAssignments,
-          timeSettings: log.start.timeSettings,
-          seed: log.start.seed,
+          map: start.map,
+          seatAssignments: start.seatAssignments,
+          timeSettings: start.timeSettings,
+          seed: start.seed,
         }).state;
         boardRef.current = b;
         setBoard(b);

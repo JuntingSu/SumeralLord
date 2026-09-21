@@ -1,5 +1,5 @@
 // board.ts — 评估层共享的棋盘紧凑视图与基础查询（一次提取、多处复用）
-import { TILE_OWNER, hexDistance, isFullBreak, isFullLink } from '@dl/shared';
+import { TILE_OWNER, hexDistance, isFullBreak, isFullLink, neighborsOf } from '@dl/shared';
 import type { BoardGeometry, GameState, SoldierState } from '@dl/shared';
 
 /** 棋盘紧凑视图：评估计算全部基于本视图（纯函数、不改 GameState） */
@@ -91,6 +91,21 @@ export function isImpassableTerrain(terrain: number): boolean {
 
 export function isBlocker(b: Board, tile: number): boolean {
   return b.owner[tile] === TILE_OWNER.BLOCKER;
+}
+
+/** 双方子力接触：存在距离 1 的一对异势力兵（1v1 = 友兵-敌兵相邻）。
+ * 中立兵（野生 0 / 阻挡 255）不属于任何势力，不计入"双方"。 */
+export function hasSoldierContact(b: Board): boolean {
+  for (let t = 0; t < b.size; t++) {
+    const o = b.owner[t];
+    if (o < 1 || o === TILE_OWNER.BLOCKER) continue;
+    for (const nb of neighborsOf(t, b.geo)) {
+      const on = b.owner[nb];
+      if (on < 1 || on === TILE_OWNER.BLOCKER || on === o) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 /** 两格 hex 距离（滚筒地图按列 wrap 取最小，复用 shared 整数实现） */

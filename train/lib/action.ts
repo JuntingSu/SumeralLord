@@ -1,5 +1,5 @@
-// action.ts — 行动阶段三段式算法（行动文档 v1.5 原样实现；候选 top-6 按训练设计方案 §2.1）
-// 结构：①前置行为段（进攻据点，判定一次）→ ②基础行为段（5 种行为 DFS + 规则1/2 链推进 + 原点剪枝 + top-4 链）
+// action.ts — 行动阶段三段式算法（行动文档 v1.6 原样实现；候选 top-6 按训练设计方案 §2.1）
+// 结构：①前置行为段（进攻据点，判定一次）→ ②基础行为段（5 种行为 DFS + 规则1/2 链推进 + 原点剪枝 + top-10 链）
 // → ③防守行为段（每条候选路径独立下海批准）。所有结算走真实 reducer（applyIntent），与正式规则一致。
 //
 // 工程保险（文档"终止性"只保证有限，不保证低开销；组合爆炸时优雅降级）：
@@ -239,16 +239,14 @@ function enumerateBehaviors(ctx: Ctx, state: GameState, lockedTile: number | nul
       }
     }
 
-    // --- 就近进攻：连兵 → 相邻陆地敌兵，进攻成功（进攻力 ≥ 兵力）---
-    if (s.isLinked) {
-      for (const nb of neighborsOf(tile, geo)) {
-        const t = state.tiles[nb];
-        if (!t.soldier) continue;
-        if (!isAttackableTarget(state, ctx.seat, t.soldier.owner)) continue;
-        if (t.terrain !== TERRAIN.PLAIN && t.terrain !== TERRAIN.CITY) continue;
-        if (attackPowerOf(s.strength, true) >= t.soldier.strength) {
-          behaviors.push({ kind: 'adjacent', fromTile: tile, intents: [{ intentType: 'ATTACK', from: tile, to: nb }], targetTile: nb });
-        }
+    // --- 就近进攻：连兵/断兵 → 相邻陆地敌兵，进攻成功（进攻力 ≥ 兵力；断兵进攻力 = 兵力）---
+    for (const nb of neighborsOf(tile, geo)) {
+      const t = state.tiles[nb];
+      if (!t.soldier) continue;
+      if (!isAttackableTarget(state, ctx.seat, t.soldier.owner)) continue;
+      if (t.terrain !== TERRAIN.PLAIN && t.terrain !== TERRAIN.CITY) continue;
+      if (attackPowerOf(s.strength, s.isLinked) >= t.soldier.strength) {
+        behaviors.push({ kind: 'adjacent', fromTile: tile, intents: [{ intentType: 'ATTACK', from: tile, to: nb }], targetTile: nb });
       }
     }
 
@@ -664,16 +662,14 @@ function patchApproach(ctx: Ctx, state: GameState, startTile: number, xTile: num
         next.push({ state: nextState, tile: nb, intents: [...node.intents, { intentType: 'MOVE', from: node.tile, to: nb }] });
       }
       // 就近进攻：攻击相邻敌兵且进攻成功（失败则无法继续推进）
-      if (s.isLinked) {
-        for (const nb of neighborsOf(node.tile, geo)) {
-          const t = node.state.tiles[nb];
-          if (!t.soldier) continue;
-          if (!isAttackableTarget(node.state, ctx.seat, t.soldier.owner)) continue;
-          if (attackPowerOf(s.strength, true) < t.soldier.strength) continue;
-          const nextState = applyOne(ctx, node.state, { intentType: 'ATTACK', from: node.tile, to: nb });
-          if (!nextState) continue;
-          next.push({ state: nextState, tile: nb, intents: [...node.intents, { intentType: 'ATTACK', from: node.tile, to: nb }] });
-        }
+      for (const nb of neighborsOf(node.tile, geo)) {
+        const t = node.state.tiles[nb];
+        if (!t.soldier) continue;
+        if (!isAttackableTarget(node.state, ctx.seat, t.soldier.owner)) continue;
+        if (attackPowerOf(s.strength, s.isLinked) < t.soldier.strength) continue;
+        const nextState = applyOne(ctx, node.state, { intentType: 'ATTACK', from: node.tile, to: nb });
+        if (!nextState) continue;
+        next.push({ state: nextState, tile: nb, intents: [...node.intents, { intentType: 'ATTACK', from: node.tile, to: nb }] });
       }
     }
     frontier = next;
@@ -842,8 +838,8 @@ function cmpIntents(a: PlayerIntent[], b: PlayerIntent[]): number {
   return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
 
-/** 每原点保留的备选链数（2026-09-20：top-2 → top-4） */
-const ORIGIN_TOP_CHAINS = 4;
+/** 每原点保留的备选链数（2026-09-21：top-4 → top-10；最终行动方案数保持 top-6 不变） */
+const ORIGIN_TOP_CHAINS = 10;
 
 /** 基础行为段搜索：枚举原点行为 → 链推进 → top-N 递归；叶子记录方案 */
 function searchOrigin(ctx: Ctx, origin: GameState, path: PlayerIntent[], plans: InternalPlan[]): void {

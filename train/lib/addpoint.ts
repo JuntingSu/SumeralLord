@@ -1,17 +1,18 @@
 // addpoint.ts — 加点阶段算法（设计方案 §2.2，M=1 唯一方案；2026-09-20 修订）
-// 规则1（防断电，可达威胁）→ 规则2（防击杀，邻格威胁）→ 规则3（E_te 引导饱和分配）。
+// 规则1（防断电，割点型连兵）→ 规则2（防击杀，其余连兵）→ 规则3（E_te 引导饱和分配）。
+// 规则1/2 威胁值统一为可达语义：能到达该兵周围（距离 1）的敌兵中，到达时进攻力最大值（2026-09-21 规则2 同规则1）。
 // 规则1/2 全有或全无；规则3 逐点抽签（局面哈希做种子，同局面同分配）。
-// 修订1（前中期限制）：回合数 < T 时，只允许在"周围有空据点/空平原"的连兵上加点。
+// 修订1（前中期限制）：非残局（回合数 < T 且无双方接触）时，只允许在"周围有空据点/空平原"的连兵上加点。
 // 修订2（规则3，2026-09-20）：模拟打分改为"加当前全部剩余点数"；无限池 = 打分前三；
-//   池外兵合计最多获得总加点的 15%（向下取整）；后期（回合数 ≥ T）无法直接到达敌方的兵不能进池。
+//   池外兵合计最多获得总加点的 15%（向下取整）；残局（回合数 ≥ T 或双方接触）无法直接到达敌方的兵不能进池。
 import { TERRAIN, neighborsOf } from '@dl/shared';
 import type { GameState, PlayerIntent } from '@dl/shared';
 import { hashGameState } from '@dl/shared';
 import { TILE_OWNER } from '@dl/shared';
 import type { Board } from './board.js';
-import { attackPowerOf, extractBoard, isImpassableTerrain } from './board.js';
+import { extractBoard, isImpassableTerrain } from './board.js';
 import { battleReach, cutVertices, linkedSet, linkedSetAfterRemoval } from './battlefield.js';
-import { evalTe, phaseThreshold, type TeWeights } from './eval.js';
+import { evalTe, isLatePhase, type TeWeights } from './eval.js';
 import { mulberry32 } from './rng.js';
 
 export interface AddPointOptions {
@@ -53,9 +54,9 @@ export function planAddPoints(
   const intents: PlayerIntent[] = [];
   let remaining = points;
 
-  // 前中期限制（修订1）：回合数 < T 时，只允许在"周围有空据点/空平原"的连兵上加点；
-  // 后期（修订2）：无法直接到达敌方的兵在规则3 下不能进入加点池
-  const restrict = state.turn < phaseThreshold(state.rows, state.columns);
+  // 前中期限制（修订1）：非残局（回合数 < T 且无双方接触）时，只允许在"周围有空据点/空平原"的连兵上加点；
+  // 残局（修订2）：无法直接到达敌方的兵在规则3 下不能进入加点池
+  const restrict = !isLatePhase(state);
   const rule3Eligible = (tile: number): boolean =>
     restrict ? hasEmptyLandNeighbor(b, tile) : canDirectlyReachEnemy(b, seat, enemy, tile);
 
@@ -133,7 +134,8 @@ function applyAllocations(state: GameState, allocations: Array<{ tile: number; a
   return { ...state, tiles };
 }
 
-/** 规则1（割点型连兵，可达威胁）∪ 规则2（邻格有敌兵的连兵，贴脸威胁） */
+/** 规则1（割点型连兵）∪ 规则2（其余连兵）：威胁值统一为可达语义——能到达该兵周围（距离 1）的敌兵中，
+ * 到达时进攻力最大值（2026-09-21：规则2 由"贴脸威胁"改为与规则1 一致的可达威胁，去掉"须邻格有敌兵"对象门控） */
 function collectDefenseCandidates(b: Board, seat: number, enemy: number): DefenseCandidate[] {
   const geo = b.geo;
   if (enemy < 0) return [];
@@ -146,22 +148,8 @@ function collectDefenseCandidates(b: Board, seat: number, enemy: number): Defens
     const strength = b.strength[tile];
     const isCut = cuts.has(tile);
     let threat = 0;
-    if (isCut) {
-      // 可达语义：能移动到该兵周围的敌兵中进攻力最大值（复用战场消耗 BFS）
-      for (const nb of neighborsOf(tile, geo)) {
-        threat = Math.max(threat, reach[nb]);
-      }
-    } else {
-      // 贴脸语义：邻格敌兵进攻力最大值
-      let hasAdjEnemy = false;
-      for (const nb of neighborsOf(tile, geo)) {
-        const o = b.owner[nb];
-        if (o >= 1 && o !== seat) {
-          hasAdjEnemy = true;
-          threat = Math.max(threat, attackPowerOf(b.strength[nb], b.linked[nb] === 1));
-        }
-      }
-      if (!hasAdjEnemy) continue; // 规则2 对象须邻格有敌兵
+    for (const nb of neighborsOf(tile, geo)) {
+      threat = Math.max(threat, reach[nb]);
     }
     if (threat < strength) continue; // 无需防御
     const after = linkedSetAfterRemoval(b, seat, new Set([tile]));

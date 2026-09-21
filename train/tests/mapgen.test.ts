@@ -5,6 +5,7 @@ import {
   FIRST_SEAT_STRENGTH,
   SECOND_SEAT_STRENGTH,
   generateTrainMap,
+  strongholdDistance,
   strongholdsLandConnected,
   walkableConnected,
 } from '../lib/mapgen.js';
@@ -66,6 +67,13 @@ describe('generateTrainMap（mode=plain 移植）', () => {
       expect(strongholdsLandConnected(map.battlefield, map.row, map.column)).toBe(true);
     }
   });
+
+  it('出生据点间距 > 4（2026-09-21 新增检查；生成器保证满足）', () => {
+    for (let i = 0; i < 10; i++) {
+      const { map } = generateTrainMap(`t-dist-${i}`);
+      expect(strongholdDistance(map.battlefield, map.row, map.column)).toBeGreaterThan(4);
+    }
+  });
 });
 
 describe('strongholdsLandConnected（校验函数）', () => {
@@ -98,6 +106,36 @@ describe('strongholdsLandConnected（校验函数）', () => {
       [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
     ];
     expect(strongholdsLandConnected(battlefield, 1, 3)).toBe(false);
+  });
+});
+
+describe('strongholdDistance（出生据点间距）', () => {
+  it('同排 1x5：城0 与 城4 距离 4（拒绝）；1x6：城0 与 城5 距离 5（通过）', () => {
+    const near: Array<[number, number, number]> = [
+      [TERRAIN.CITY, 1, 3],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.CITY, 2, 4],
+    ];
+    expect(strongholdDistance(near, 1, 5)).toBe(4); // ≤4 → 拒绝
+    const far: Array<[number, number, number]> = [
+      [TERRAIN.CITY, 1, 3],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+      [TERRAIN.CITY, 2, 4],
+    ];
+    expect(strongholdDistance(far, 1, 6)).toBe(5); // >4 → 通过
+  });
+
+  it('据点数量不为 2 → −1', () => {
+    const one: Array<[number, number, number]> = [
+      [TERRAIN.CITY, 1, 3],
+      [TERRAIN.PLAIN, TILE_OWNER.EMPTY, 0],
+    ];
+    expect(strongholdDistance(one, 1, 2)).toBe(-1);
   });
 });
 

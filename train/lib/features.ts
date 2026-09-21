@@ -198,7 +198,7 @@ function threatValue(b: Board, seat: number, enemy: number): number {
   for (let t = 0; t < size; t++) {
     if (b.owner[t] !== seat) continue;
     const d = dist[t] < 0 ? cap : dist[t];
-    sum += (cap - Math.min(d, cap)) * b.strength[t];
+    sum += (cap - Math.min(d, cap)) /cap * b.strength[t];
   }
   return sum;
 }

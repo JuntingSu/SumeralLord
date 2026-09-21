@@ -1,7 +1,7 @@
 // fitter.ts — E_te 权重拟合（设计方案 §5 / §9 默认项 1）
 // 跨局 pairwise 排序学习（胜局样本 > 败局样本对，允许不单调）；
 // 平方反比加权 w = 1/d²（d = 距终局回合数）；次梯度 SGD；指向种子权重的轻量 L2 正则。
-// 中盘/残局两套权重独立更新（阈值 T 逐样本按地图面积切换，同 E_te 打分口径）。
+// 中盘/残局两套权重独立更新（残局标记随样本记录：回合数 ≥ T 或 行动阶段结束双方接触，同 E_te 打分口径）。
 import { SEED_TE_WEIGHTS, phaseThreshold } from './eval.js';
 import type { TeWeights } from './eval.js';
 import type { TrainSample } from './driver.js';
@@ -34,7 +34,9 @@ export interface FitResult {
 }
 
 function weightSetFor(sample: TrainSample, weights: TeWeights): number[] {
-  // 由面积还原 rows/columns 近似值仅用于 T 阈值（E_te 打分同口径）
+  // 残局判定随样本记录（回合数 ≥ T 或 行动阶段结束双方子力接触，同 E_te 打分口径）；
+  // 升级前的旧批次文件无 late 字段 → 回退纯 T 阈值（面积还原近似，仅过渡批次使用）
+  if (sample.late !== undefined) return sample.late ? weights.late : weights.mid;
   const rows = Math.floor(Math.sqrt(sample.area)) || 9;
   const columns = Math.max(1, Math.floor(sample.area / rows));
   const T = phaseThreshold(rows, columns);
