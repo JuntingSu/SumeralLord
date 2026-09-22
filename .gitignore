@@ -4,5 +4,9 @@ dist/
 backend/data/
 backend/static/skin/
 train/runs/
+train/v1/runs/
+train/v2/runs/
+__pycache__/
+*.pyc
 mapeditor-release/
 pack.txt

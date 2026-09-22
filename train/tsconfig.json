@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["lib/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["v1/lib/**/*.ts", "v1/scripts/**/*.ts", "v1/tests/**/*.ts", "vitest.config.ts"]
 }

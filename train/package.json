@@ -3,20 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "lib/online.ts",
-  "types": "lib/online.ts",
+  "main": "v1/lib/online.ts",
+  "types": "v1/lib/online.ts",
   "scripts": {
-    "gen-maps": "tsx scripts/gen-maps.ts",
-    "smoke": "tsx scripts/smoke.ts",
-    "dryrun": "tsx scripts/dryrun.ts",
-    "profile": "tsx scripts/profile.ts",
-    "train": "tsx scripts/train.ts",
-    "eval": "tsx scripts/eval.ts",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "gen-maps": "tsx v1/scripts/gen-maps.ts",
+    "smoke": "tsx v1/scripts/smoke.ts",
+    "dryrun": "tsx v1/scripts/dryrun.ts",
+    "profile": "tsx v1/scripts/profile.ts",
+    "train": "tsx v1/scripts/train.ts",
+    "eval": "tsx v1/scripts/eval.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "test:v2": "vitest run --config v2/vitest.config.ts",
+    "random-games": "tsx v2/scripts/random-games.ts",
+    "check-onnx": "tsx v2/scripts/check-onnx.ts",
+    "train-py": "python v2/python/train.py",
+    "export-py": "python v2/python/export.py",
+    "typecheck": "tsc --noEmit",
+    "typecheck:v2": "tsc --noEmit -p v2/tsconfig.json",
+    "train:v2": "tsx v2/scripts/train-v2.ts"
   },
   "dependencies": {
-    "@dl/shared": "*"
+    "@dl/shared": "*",
+    "onnxruntime-node": "^1.30.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.1",
