@@ -1,0 +1,18 @@
+{
+  "id": "pref-1790650655215",
+  "kind": "action",
+  "sourceGameId": "tcbb5ladx",
+  "eventId": 338,
+  "seat": 2,
+  "actionA": {
+    "intentType": "MOVE",
+    "from": 44,
+    "to": 58
+  },
+  "actionB": {
+    "intentType": "MOVE",
+    "from": 86,
+    "to": 99
+  },
+  "label": "a"
+}

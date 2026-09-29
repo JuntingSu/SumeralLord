@@ -1,0 +1,18 @@
+{
+  "id": "pref-1790650358730",
+  "kind": "action",
+  "sourceGameId": "tgt2nmmd4",
+  "eventId": 157,
+  "seat": 1,
+  "actionA": {
+    "intentType": "MOVE",
+    "from": 2,
+    "to": 19
+  },
+  "actionB": {
+    "intentType": "MOVE",
+    "from": 2,
+    "to": 3
+  },
+  "label": "both_bad"
+}

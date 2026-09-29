@@ -1,0 +1,18 @@
+{
+  "id": "pref-1790650582173",
+  "kind": "action",
+  "sourceGameId": "tyxhnkatt",
+  "eventId": 769,
+  "seat": 1,
+  "actionA": {
+    "intentType": "MOVE",
+    "from": 75,
+    "to": 86
+  },
+  "actionB": {
+    "intentType": "MOVE",
+    "from": 97,
+    "to": 86
+  },
+  "label": "both_bad"
+}

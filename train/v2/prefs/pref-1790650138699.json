@@ -1,0 +1,15 @@
+{
+  "id": "pref-1790650138701",
+  "kind": "position",
+  "a": {
+    "sourceGameId": "ta3ruuy49",
+    "eventId": 10,
+    "seat": 1
+  },
+  "b": {
+    "sourceGameId": "tjf07ruxr",
+    "eventId": 11,
+    "seat": 1
+  },
+  "label": "a"
+}

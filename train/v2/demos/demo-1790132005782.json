@@ -1,0 +1,36 @@
+{
+  "id": "demo-1790132005772",
+  "kind": "demo",
+  "createdAt": "2026-09-23T02:53:25.772Z",
+  "sourceGameId": "tpojwiyqe",
+  "seat": 2,
+  "turnStartEventId": 8,
+  "startEventId": 8,
+  "positionHash": "a2781e25",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 137,
+      "to": 120
+    },
+    {
+      "intentType": "MOVE",
+      "from": 120,
+      "to": 138
+    },
+    {
+      "intentType": "MOVE",
+      "from": 138,
+      "to": 121
+    },
+    {
+      "intentType": "MOVE",
+      "from": 121,
+      "to": 139
+    },
+    {
+      "intentType": "SWITCH_PHASE"
+    }
+  ],
+  "note": ""
+}

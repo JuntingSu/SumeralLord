@@ -1,0 +1,16 @@
+{
+  "id": "pref-1790650334888",
+  "kind": "action",
+  "sourceGameId": "trq6mg0k0",
+  "eventId": 15,
+  "seat": 1,
+  "actionA": {
+    "intentType": "SWITCH_PHASE"
+  },
+  "actionB": {
+    "intentType": "MOVE",
+    "from": 175,
+    "to": 192
+  },
+  "label": "unknown"
+}

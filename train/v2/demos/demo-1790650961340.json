@@ -1,0 +1,133 @@
+{
+  "id": "demo-1790650961345",
+  "kind": "demo",
+  "createdAt": "2026-09-29T03:02:41.345Z",
+  "sourceGameId": "ty6uzuiu4",
+  "seat": 1,
+  "turnStartEventId": 342,
+  "startEventId": 342,
+  "positionHash": "ca43e960",
+  "intents": [
+    {
+      "intentType": "ATTACK",
+      "from": 79,
+      "to": 91
+    },
+    {
+      "intentType": "MOVE",
+      "from": 91,
+      "to": 90
+    },
+    {
+      "intentType": "MOVE",
+      "from": 90,
+      "to": 89
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 101,
+      "to": 100
+    },
+    {
+      "intentType": "MOVE",
+      "from": 100,
+      "to": 99
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 99,
+      "to": 98
+    },
+    {
+      "intentType": "MOVE",
+      "from": 89,
+      "to": 88
+    },
+    {
+      "intentType": "MOVE",
+      "from": 88,
+      "to": 77
+    },
+    {
+      "intentType": "MOVE",
+      "from": 77,
+      "to": 65
+    },
+    {
+      "intentType": "MOVE",
+      "from": 65,
+      "to": 54
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 54,
+      "to": 42
+    },
+    {
+      "intentType": "MOVE",
+      "from": 42,
+      "to": 43
+    },
+    {
+      "intentType": "MOVE",
+      "from": 43,
+      "to": 44
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 44,
+      "to": 32
+    },
+    {
+      "intentType": "MOVE",
+      "from": 69,
+      "to": 57
+    },
+    {
+      "intentType": "MOVE",
+      "from": 70,
+      "to": 82
+    },
+    {
+      "intentType": "MOVE",
+      "from": 82,
+      "to": 69
+    },
+    {
+      "intentType": "MOVE",
+      "from": 57,
+      "to": 44
+    },
+    {
+      "intentType": "MOVE",
+      "from": 69,
+      "to": 70
+    },
+    {
+      "intentType": "MOVE",
+      "from": 70,
+      "to": 71
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 44,
+      "to": 32
+    },
+    {
+      "intentType": "MOVE",
+      "from": 71,
+      "to": 59
+    },
+    {
+      "intentType": "MOVE",
+      "from": 59,
+      "to": 47
+    },
+    {
+      "intentType": "MOVE",
+      "from": 47,
+      "to": 35
+    }
+  ],
+  "note": ""
+}

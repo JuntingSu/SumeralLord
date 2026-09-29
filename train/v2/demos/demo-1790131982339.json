@@ -1,0 +1,28 @@
+{
+  "id": "demo-1790131982329",
+  "kind": "demo",
+  "createdAt": "2026-09-23T02:53:02.329Z",
+  "sourceGameId": "tpojwiyqe",
+  "seat": 1,
+  "turnStartEventId": 5,
+  "startEventId": 6,
+  "positionHash": "75d4d5fc",
+  "intents": [
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 66,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 66,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 66,
+      "amount": 1
+    }
+  ],
+  "note": ""
+}

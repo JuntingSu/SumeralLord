@@ -1,0 +1,233 @@
+{
+  "id": "demo-1790650861564",
+  "kind": "demo",
+  "createdAt": "2026-09-29T03:01:01.564Z",
+  "sourceGameId": "ty6uzuiu4",
+  "seat": 1,
+  "turnStartEventId": 142,
+  "startEventId": 142,
+  "positionHash": "3475db1a",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 69,
+      "to": 57
+    },
+    {
+      "intentType": "MOVE",
+      "from": 57,
+      "to": 45
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 45,
+      "to": 33
+    },
+    {
+      "intentType": "MOVE",
+      "from": 33,
+      "to": 44
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 44,
+      "to": 43
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 43,
+      "to": 42
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 42,
+      "to": 30
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 30,
+      "to": 29
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 29,
+      "to": 28
+    },
+    {
+      "intentType": "MOVE",
+      "from": 28,
+      "to": 15
+    },
+    {
+      "intentType": "MOVE",
+      "from": 15,
+      "to": 3
+    },
+    {
+      "intentType": "MOVE",
+      "from": 3,
+      "to": 2
+    },
+    {
+      "intentType": "MOVE",
+      "from": 2,
+      "to": 13
+    },
+    {
+      "intentType": "MOVE",
+      "from": 13,
+      "to": 25
+    },
+    {
+      "intentType": "MOVE",
+      "from": 115,
+      "to": 103
+    },
+    {
+      "intentType": "MOVE",
+      "from": 103,
+      "to": 90
+    },
+    {
+      "intentType": "MOVE",
+      "from": 90,
+      "to": 89
+    },
+    {
+      "intentType": "MOVE",
+      "from": 154,
+      "to": 153
+    },
+    {
+      "intentType": "MOVE",
+      "from": 165,
+      "to": 164
+    },
+    {
+      "intentType": "MOVE",
+      "from": 164,
+      "to": 176
+    },
+    {
+      "intentType": "MOVE",
+      "from": 71,
+      "to": 59
+    },
+    {
+      "intentType": "MOVE",
+      "from": 59,
+      "to": 47
+    },
+    {
+      "intentType": "MOVE",
+      "from": 47,
+      "to": 35
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 28,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 28,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 28,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 28,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 28,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 28,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 29,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 15,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 15,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 15,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 89,
+      "amount": 1
+    }
+  ],
+  "note": ""
+}

@@ -177,3 +177,18 @@ cd v2/replay-viewer && npm run dev                 # 浏览器打开，端口 51
 
 - **阶段 6（部署）**：`planAiTurn` 挂训练 AI 到难度 3、200 模拟 + 5s 兜底、线上可对局（用户暂缓）；
 - **阶段 7**：两队多人（训练范围阶段二，后续）。
+
+## 9 启动参数
+
+| 参数 | 默认 | 含义 |
+| --- | --- | --- |
+| --workers | 16（=核数） | 自对弈 worker 进程数 |
+| --games-per-round | 1000 | 每轮自对弈局数（拟合节奏） |
+| --gate-games / --gate-sims | 100 / 100 | 门限对局数 / 每步模拟数（argmax） |
+| --data-sims-min/max | 5 / 200 | 数据生成每步随机模拟数范围 |
+| --tau-start/end/games | 10 / 0.5 / 10000 | 温度线性退火（之后恒 0.5） |
+| --epochs / --lr | 3 / 1e-3 | 拟合超参 |
+| --max-samples | 300000 | 拟合子采样上限（CPU 成本控制） |
+| --max-rounds | ∞ | 轮数上限（调试用，如 --max-rounds 2） |
+| --max-steps | 1000 | 单局步数上限（判平） |
+| --lambda-bc-init/decay | 1.0 / 0.9 | 示范损失初始权重 / 每轮衰减 |

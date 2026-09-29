@@ -1,0 +1,582 @@
+{
+  "id": "pairs-1790656766587",
+  "createdAt": "2026-09-29T04:39:26.587Z",
+  "questions": [
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "t5vkoo9mi",
+        "eventId": 3,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "t9rf2gzti",
+        "eventId": 3,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "ta3ruuy49",
+        "eventId": 2,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tjf07ruxr",
+        "eventId": 3,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tkop0lrf7",
+        "eventId": 3,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tmt8gdq8u",
+        "eventId": 4,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tryj8u1yj",
+        "eventId": 3,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tstg3rdah",
+        "eventId": 3,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tucwqobvr",
+        "eventId": 3,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tyfkynu5x",
+        "eventId": 3,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "t5vkoo9mi",
+        "eventId": 8,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "t9rf2gzti",
+        "eventId": 9,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "ta3ruuy49",
+        "eventId": 10,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tjf07ruxr",
+        "eventId": 11,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tkop0lrf7",
+        "eventId": 9,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tmt8gdq8u",
+        "eventId": 10,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tryj8u1yj",
+        "eventId": 10,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tstg3rdah",
+        "eventId": 11,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tucwqobvr",
+        "eventId": 11,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tyfkynu5x",
+        "eventId": 11,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "t5vkoo9mi",
+        "eventId": 16,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "t9rf2gzti",
+        "eventId": 20,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "ta3ruuy49",
+        "eventId": 17,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tjf07ruxr",
+        "eventId": 19,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tkop0lrf7",
+        "eventId": 18,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tryj8u1yj",
+        "eventId": 18,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tstg3rdah",
+        "eventId": 16,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tucwqobvr",
+        "eventId": 17,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tyfkynu5x",
+        "eventId": 19,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "t5vkoo9mi",
+        "eventId": 23,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "t9rf2gzti",
+        "eventId": 31,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "ta3ruuy49",
+        "eventId": 27,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tjf07ruxr",
+        "eventId": 28,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tkop0lrf7",
+        "eventId": 25,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tmt8gdq8u",
+        "eventId": 28,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tryj8u1yj",
+        "eventId": 27,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tstg3rdah",
+        "eventId": 27,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "tucwqobvr",
+        "eventId": 26,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "position",
+      "a": {
+        "sourceGameId": "tyfkynu5x",
+        "eventId": 29,
+        "seat": 1
+      },
+      "b": {
+        "sourceGameId": "t5vkoo9mi",
+        "eventId": 33,
+        "seat": 1
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tyas2nren",
+      "eventId": 3,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 46,
+        "to": 34
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 46,
+        "to": 60
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tbuvdv83m",
+      "eventId": 513,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 24,
+        "to": 41
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 25,
+        "to": 26
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tbcrnds6h",
+      "eventId": 435,
+      "seat": 2,
+      "actionA": {
+        "intentType": "SWITCH_PHASE"
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 98,
+        "to": 116
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tstg3rdah",
+      "eventId": 168,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 69,
+        "to": 57
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 69,
+        "to": 83
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tb874kpsg",
+      "eventId": 853,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 28,
+        "to": 44
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 38,
+        "to": 23
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tgnqchewe",
+      "eventId": 33,
+      "seat": 2,
+      "actionA": {
+        "intentType": "SWITCH_PHASE"
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 149,
+        "to": 137
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "th42ql808",
+      "eventId": 350,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 95,
+        "to": 79
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 167,
+        "to": 185
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tf2at39k1",
+      "eventId": 968,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 127,
+        "to": 115
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 116,
+        "to": 102
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "t2jqsdztf",
+      "eventId": 647,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 9,
+        "to": 10
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 111,
+        "to": 126
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "t4w44s5e2",
+      "eventId": 964,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 43,
+        "to": 42
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 43,
+        "to": 54
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "t59za1fuq",
+      "eventId": 372,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 42,
+        "to": 31
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 9,
+        "to": 10
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tl2qj8wgh",
+      "eventId": 463,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 78,
+        "to": 94
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 78,
+        "to": 79
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tc7w29kyz",
+      "eventId": 721,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 54,
+        "to": 71
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 93,
+        "to": 110
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tscnpzkja",
+      "eventId": 164,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 136,
+        "to": 137
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 133,
+        "to": 132
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tele4b7ra",
+      "eventId": 291,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 13,
+        "to": 14
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 64,
+        "to": 53
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "te6zd1mv3",
+      "eventId": 31,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 70,
+        "to": 58
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 56,
+        "to": 57
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "taf1sgeak",
+      "eventId": 375,
+      "seat": 2,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 69,
+        "to": 68
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 69,
+        "to": 54
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "tln8j4djy",
+      "eventId": 389,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 41,
+        "to": 54
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 66,
+        "to": 67
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "t2j7t6r2q",
+      "eventId": 432,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 31,
+        "to": 42
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 59,
+        "to": 60
+      }
+    },
+    {
+      "kind": "action",
+      "sourceGameId": "t4x4ru5jf",
+      "eventId": 677,
+      "seat": 1,
+      "actionA": {
+        "intentType": "MOVE",
+        "from": 49,
+        "to": 66
+      },
+      "actionB": {
+        "intentType": "MOVE",
+        "from": 127,
+        "to": 126
+      }
+    }
+  ]
+}

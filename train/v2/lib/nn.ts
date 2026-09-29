@@ -16,6 +16,10 @@ export class NeuralNet {
   static async load(onnxPath: string): Promise<NeuralNet> {
     const session = await ort.InferenceSession.create(onnxPath, {
       executionProviders: ['cpu'],
+      // 模型（S≤256 小 Transformer）太小，多线程推理无并行收益，默认 intra-op 线程池（=物理核数）纯空转
+      // 实测：默认 ~6.7 核/session → 钉 1 线程后 ~1.0 核，单前向 17.8→17.9ms 几乎无代价（性能调查-CPU与worker并发.md）
+      intraOpNumThreads: 1,
+      interOpNumThreads: 1,
     });
     return new NeuralNet(session);
   }

@@ -87,16 +87,24 @@ def _derive_positions(s: int, columns: int) -> tuple[list[float], list[float]]:
     return rows, cols
 
 
-def load_samples(samples_dir: str) -> list[Sample]:
-    """读入 samples 目录下全部样本：优先二进制（.bin，训练循环用），否则 JSONL（.jsonl，调试用）"""
+def load_samples(samples_dir: str, max_samples: int = 0) -> list[Sample]:
+    """读入 samples 目录下全部样本（优先二进制：.bin，训练循环用），否则 JSONL（.jsonl，调试/示范用）。
+    max_samples > 0 时按固定种子随机打乱文件序、加载到上限即止（训练循环用：大轮次样本可达 10GB 级，
+    先全量加载再子采样会 OOM；上限在加载阶段生效）。"""
     files = sorted(os.listdir(samples_dir))
     bin_files = [f for f in files if f.endswith('.bin')]
     if bin_files:
+        if max_samples > 0 and len(bin_files) > 1:
+            random.Random(0).shuffle(bin_files)  # 固定种子：文件序打乱可复现，避免只取到早期高 τ 对局
         out: list[Sample] = []
         for fname in bin_files:
             out.extend(load_binary(os.path.join(samples_dir, fname)))
+            if max_samples > 0 and len(out) >= max_samples:
+                del out[max_samples:]
+                break
         return out
     out = []
+    bad = 0
     for fname in files:
         if not fname.endswith('.jsonl'):
             continue
@@ -106,7 +114,15 @@ def load_samples(samples_dir: str) -> list[Sample]:
                 line = line.strip()
                 if not line:
                     continue
-                out.append(parse_sample(json.loads(line)))
+                try:
+                    out.append(parse_sample(json.loads(line)))
+                except (KeyError, TypeError, ValueError):
+                    bad += 1  # 杂散文件（如对局日志误入样本目录）：跳过不中断
+                    continue
+                if max_samples > 0 and len(out) >= max_samples:
+                    return out
+    if bad:
+        print(f'[data] 警告：{samples_dir} 跳过 {bad} 条无法解析的样本行（格式不匹配，请检查目录内容）')
     return out
 
 

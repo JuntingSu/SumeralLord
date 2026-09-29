@@ -1,0 +1,10 @@
+[train-v2] 启动：workers=8 gamesPerRound=1000 gate=100局/100模拟 dataSims=[5,200] τ=10→0.5/10000 epochs=3 maxSamples=300000 stage=extract
+[train-v2] 提示：推理已钉 1 线程/worker ≈ 1 核，建议 workers 不超过物理核数并留 1~2 核给拟合/门限阶段（本机 16 逻辑核）
+[train-v2] 对手池 [v0] current=v0 图池=100 验收图池=7 从 round 0 继续
+[train-v2] 人类指导数据：抽样偏好题 + 转换标注…
+[sample-questions] 日志 1000 局，局面题 20 / 走法题 20（sims=100）
+[sample-questions] 生成 40 题（局面 20 / 走法 20）：D:\DATA\things\NumeralLordEverything\nl4ssh\glmtest01\本地数字领主\train\v2\prefs\pairs-1790649592742.json
+[annotations] 示范/纠错：2 条 → 有效 2 / 跳过 0
+[annotations] 偏好：0 条（unknown 已过滤），有效写入 D:\DATA\things\NumeralLordEverything\nl4ssh\glmtest01\本地数字领主\train\v2\runs\pref-samples
+[annotations] 完成：demo-samples=D:\DATA\things\NumeralLordEverything\nl4ssh\glmtest01\本地数字领主\train\v2\runs\demo-samples pref-samples=D:\DATA\things\NumeralLordEverything\nl4ssh\glmtest01\本地数字领主\train\v2\runs\pref-samples
+[train-v2] --stage extract 完成（产物：prefs/pairs-*.json、runs/demo-samples、runs/pref-samples；下一步：--stage fit）

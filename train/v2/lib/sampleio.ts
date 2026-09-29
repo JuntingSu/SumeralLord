@@ -1,5 +1,5 @@
 // sampleio.ts — 样本与对局日志落盘（日志 JSONL；样本二进制，逐局一文件）
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { TrainSample } from './driver.js';
 import { TILE_FEATURES } from './encode.js';
@@ -63,4 +63,24 @@ export function writeSamplesBinary(dir: string, gameId: string, samples: TrainSa
   }
   writeFileSync(file, Buffer.concat(chunks));
   return file;
+}
+
+/**
+ * 统计二进制样本文件记录数（按记录头布局遍历；文件损坏/截断返回 null）。
+ * 断点续跑用：worker 按 jobId 确定性命名 j<gi>.bin，文件存在且可完整解析 = 该局已完成。
+ */
+export function countSamplesBinary(file: string): number | null {
+  const buf = readFileSync(file);
+  let off = 0;
+  let n = 0;
+  while (off < buf.length) {
+    if (off + 20 > buf.length) return null;
+    const S = buf.readUInt32LE(off);
+    const L = buf.readUInt32LE(off + 12);
+    const rec = 20 + S * TILE_FEATURES * 4 + L * 8;
+    if (rec <= 20 || off + rec > buf.length) return null;
+    off += rec;
+    n++;
+  }
+  return n;
 }

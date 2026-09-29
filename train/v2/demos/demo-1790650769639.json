@@ -1,0 +1,48 @@
+{
+  "id": "demo-1790650769636",
+  "kind": "demo",
+  "createdAt": "2026-09-29T02:59:29.636Z",
+  "sourceGameId": "ty6uzuiu4",
+  "seat": 1,
+  "turnStartEventId": 12,
+  "startEventId": 12,
+  "positionHash": "5ccffa4f",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 130,
+      "to": 141
+    },
+    {
+      "intentType": "MOVE",
+      "from": 141,
+      "to": 153
+    },
+    {
+      "intentType": "MOVE",
+      "from": 153,
+      "to": 152
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 116,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 116,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 116,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 116,
+      "amount": 1
+    }
+  ],
+  "note": ""
+}

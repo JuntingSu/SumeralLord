@@ -1,0 +1,28 @@
+{
+  "id": "demo-1790650721163",
+  "kind": "demo",
+  "createdAt": "2026-09-29T02:58:41.163Z",
+  "sourceGameId": "ty6uzuiu4",
+  "seat": 1,
+  "turnStartEventId": 0,
+  "startEventId": 0,
+  "positionHash": "ad761ec8",
+  "intents": [
+    {
+      "intentType": "MOVE",
+      "from": 116,
+      "to": 115
+    },
+    {
+      "intentType": "MOVE",
+      "from": 115,
+      "to": 114
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 114,
+      "amount": 1
+    }
+  ],
+  "note": ""
+}

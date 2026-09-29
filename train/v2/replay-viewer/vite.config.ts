@@ -58,7 +58,7 @@ const saver: Plugin = {
     server.middlewares.use('/api/log/', (req, res, next) => {
       const gameId = decodeURIComponent((req.url ?? '').replace(/^\//, ''));
       if (!gameId) return next();
-      // 扫描 v2/runs/logs/round-*/game-<gameId>.jsonl
+      // 扫描 v2/runs/logs/round-*/game-<gameId>.jsonl（优先：文件名含 gameId）
       const logsRoot = path.join(V2_ROOT, 'runs', 'logs');
       let hit: string | null = null;
       if (fs.existsSync(logsRoot)) {
@@ -67,6 +67,28 @@ const saver: Plugin = {
           if (fs.existsSync(file)) {
             hit = file;
             break;
+          }
+        }
+        // 兜底：文件名不含 gameId 的历史日志（旧版按 jobId 命名的 game-j<gi>.jsonl）→ 按首行 GAME_START.gameId 匹配
+        if (!hit) {
+          for (const roundDir of fs.readdirSync(logsRoot)) {
+            const dir = path.join(logsRoot, roundDir);
+            if (!fs.statSync(dir).isDirectory()) continue;
+            for (const f of fs.readdirSync(dir)) {
+              if (!f.endsWith('.jsonl')) continue;
+              const first = fs.readFileSync(path.join(dir, f), 'utf8').split('\n').find((l) => l.trim());
+              if (!first) continue;
+              try {
+                const msg = JSON.parse(first) as { type?: string; gameId?: string };
+                if (msg.type === 'GAME_START' && msg.gameId === gameId) {
+                  hit = path.join(dir, f);
+                  break;
+                }
+              } catch {
+                /* 坏文件跳过 */
+              }
+            }
+            if (hit) break;
           }
         }
       }

@@ -1,0 +1,18 @@
+{
+  "id": "pref-1790650643007",
+  "kind": "action",
+  "sourceGameId": "tq84g5zrq",
+  "eventId": 788,
+  "seat": 2,
+  "actionA": {
+    "intentType": "MOVE",
+    "from": 130,
+    "to": 114
+  },
+  "actionB": {
+    "intentType": "MOVE",
+    "from": 130,
+    "to": 146
+  },
+  "label": "b"
+}

@@ -114,6 +114,7 @@ def run_epoch(
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--samples-dir', required=True, help='自对弈样本目录（runs/samples/round-XXXXX）')
+    ap.add_argument('--extra-samples-dir', default=None, help='额外样本目录（如 v1 示范对局 runs/v1-samples；与主样本合并训练）')
     ap.add_argument('--demo-dir', default=None, help='示范样本目录（runs/demo-samples；λ_bc × 策略 CE）')
     ap.add_argument('--pref-dir', default=None, help='偏好样本目录（runs/pref-samples；λ_pref × 价值排序）')
     ap.add_argument('--lambda-bc', type=float, default=1.0, help='示范损失权重（主循环按轮衰减传入）')
@@ -138,14 +139,16 @@ def main() -> None:
 
     print(f'加载样本：{args.samples_dir}')
     t0 = time.time()
-    samples = load_samples(args.samples_dir)
+    samples = load_samples(args.samples_dir, max_samples=args.max_samples)
     print(f'样本数 {len(samples)}，耗时 {time.time() - t0:.1f}s')
+    if args.extra_samples_dir:
+        extra = load_samples(args.extra_samples_dir, max_samples=args.max_samples)
+        print(f'额外样本（--extra-samples-dir）{len(extra)} 条，合并后 {len(samples) + len(extra)} 条')
+        samples = samples + extra
     if len(samples) == 0:
         raise SystemExit('样本为空（先运行 random-games.ts 生成）')
-    if args.max_samples > 0 and len(samples) > args.max_samples:
-        rng = random.Random(args.seed)
-        samples = rng.sample(samples, args.max_samples)
-        print(f'子采样至 {len(samples)} 条（--max-samples）')
+    if args.max_samples > 0 and len(samples) >= args.max_samples:
+        print(f'已按 --max-samples 上限加载（加载阶段子采样，避免大轮次全量加载 OOM）')
 
     demos = load_samples(args.demo_dir) if args.demo_dir else []
     prefs = load_pref_samples(args.pref_dir) if args.pref_dir else []

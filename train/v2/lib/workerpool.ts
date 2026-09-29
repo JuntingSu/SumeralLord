@@ -19,7 +19,14 @@ export async function runWorkerJobs(jobs: WorkerJob[], workerCount: number): Pro
       new Promise<void>((resolve, reject) => {
         const child = spawn(
           process.execPath,
-          ['--max-old-space-size=1024', '--import', 'tsx', path.join(__dirname, '..', 'scripts', 'worker.ts')],
+          [
+            // 大图后期加点局面（L≈2500）单次 MCTS 决策瞬时树内存可达数百 MB~GB；默认 4GB，
+            // 可经 V2_WORKER_MAX_OLD_SPACE 调整（训练内存吃紧时调小）
+            `--max-old-space-size=${process.env.V2_WORKER_MAX_OLD_SPACE ?? '4096'}`,
+            '--import',
+            'tsx',
+            path.join(__dirname, '..', 'scripts', 'worker.ts'),
+          ],
           { cwd: V2_ROOT, stdio: ['ignore', 'inherit', 'inherit', 'ipc'], serialization: 'advanced' },
         );
         let done = false;

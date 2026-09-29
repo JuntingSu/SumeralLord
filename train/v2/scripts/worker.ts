@@ -77,10 +77,33 @@ export type WorkerResult =
 
 const randInt = (min: number, max: number): number => min + Math.floor(Math.random() * (max - min + 1));
 
+/**
+ * 模型 session 缓存（LRU）：同轮内大量任务反复使用同一批模型路径（对手池 ≤20 + 门限 2），
+ * 避免每任务重新 load（每 session ~5MB 原生内存 + 建池开销；旧实现从不释放，随任务数累积）。
+ */
+const MAX_SESSIONS = 24;
+const sessionCache = new Map<string, Promise<NeuralNet>>();
+
+function getNet(modelPath: string): Promise<NeuralNet> {
+  const hit = sessionCache.get(modelPath);
+  if (hit) {
+    sessionCache.delete(modelPath); // 命中刷新 LRU
+    sessionCache.set(modelPath, hit);
+    return hit;
+  }
+  if (sessionCache.size >= MAX_SESSIONS) {
+    const oldest = sessionCache.keys().next().value;
+    if (oldest !== undefined) sessionCache.delete(oldest);
+  }
+  const p = NeuralNet.load(modelPath);
+  sessionCache.set(modelPath, p);
+  return p;
+}
+
 /** 自对弈：双方各自模型 + 每步随机模拟数 + 温度采样；落盘样本/日志 */
 async function runSelfplay(job: SelfplayJob): Promise<WorkerResult> {
-  const netA = await NeuralNet.load(job.modelA);
-  const netB = await NeuralNet.load(job.modelB);
+  const netA = await getNet(job.modelA);
+  const netB = await getNet(job.modelB);
   const nets: Record<number, NeuralNet> = { [job.seatA]: netA, [job.seatB]: netB };
   const policy: Policy = async (state) => {
     const net = nets[state.currentSeat];
@@ -96,15 +119,17 @@ async function runSelfplay(job: SelfplayJob): Promise<WorkerResult> {
     maxTurns: job.maxTurns,
     maxSteps: job.maxSteps,
   });
-  writeSamplesBinary(job.samplesDir, result.stats.gameId, result.samples);
+  // 样本按 jobId 确定性命名（game-j<gi>.bin）：断点续跑靠 .bin 文件存在性识别已完成对局；
+  // 日志保持 game-<gameId>.jsonl：判题工作台 /api/log 按文件名中的 gameId 取日志
+  writeSamplesBinary(job.samplesDir, `j${job.jobId}`, result.samples);
   writeGameLog(job.logsDir, result.stats.gameId, result.log);
   return { type: 'result', jobId: job.jobId, kind: 'selfplay', stats: result.stats, sampleCount: result.samples.length };
 }
 
 /** 门限对局：新 vs 当前，双方 argmax 固定模拟数；返回新权重一方胜负（1/−1/0） */
 async function runGate(job: GateJob): Promise<WorkerResult> {
-  const netNew = await NeuralNet.load(job.modelNew);
-  const netCur = await NeuralNet.load(job.modelCurrent);
+  const netNew = await getNet(job.modelNew);
+  const netCur = await getNet(job.modelCurrent);
   const otherSeat = job.trainedSeat === 1 ? 2 : 1;
   const nets: Record<number, NeuralNet> = { [job.trainedSeat]: netNew, [otherSeat]: netCur };
   const policy: Policy = async (state) => {
@@ -130,7 +155,7 @@ async function runGate(job: GateJob): Promise<WorkerResult> {
 /** 验收对局：v2 训练 AI（原子 MCTS，部署配置）vs v1 基准（v45 权重回合级 MCTS）；
  *  返回 v2 一方胜负（1/−1/0）。v1 引擎经 @dl/train（main → v1/lib/online.ts）调用。 */
 async function runAccept(job: AcceptJob): Promise<WorkerResult> {
-  const netV2 = await NeuralNet.load(job.modelV2);
+  const netV2 = await getNet(job.modelV2);
   const raw = JSON.parse(readFileSync(job.baselineWeightsPath, 'utf8')) as unknown;
   const rec = raw as { weights?: { mid: number[]; late: number[] } };
   const w = (rec.weights ?? rec) as { mid: number[]; late: number[] };

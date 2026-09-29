@@ -1,0 +1,236 @@
+{
+  "id": "demo-1790651058515",
+  "kind": "demo",
+  "createdAt": "2026-09-29T03:04:18.515Z",
+  "sourceGameId": "ty6uzuiu4",
+  "seat": 1,
+  "turnStartEventId": 424,
+  "startEventId": 424,
+  "positionHash": "c24a3d67",
+  "intents": [
+    {
+      "intentType": "ATTACK",
+      "from": 140,
+      "to": 152
+    },
+    {
+      "intentType": "MOVE",
+      "from": 141,
+      "to": 140
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 140,
+      "to": 152
+    },
+    {
+      "intentType": "MOVE",
+      "from": 178,
+      "to": 177
+    },
+    {
+      "intentType": "MOVE",
+      "from": 177,
+      "to": 176
+    },
+    {
+      "intentType": "MOVE",
+      "from": 176,
+      "to": 164
+    },
+    {
+      "intentType": "MOVE",
+      "from": 103,
+      "to": 91
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 91,
+      "to": 90
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 90,
+      "to": 89
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 89,
+      "to": 88
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 88,
+      "to": 100
+    },
+    {
+      "intentType": "MOVE",
+      "from": 100,
+      "to": 99
+    },
+    {
+      "intentType": "ATTACK",
+      "from": 99,
+      "to": 98
+    },
+    {
+      "intentType": "MOVE",
+      "from": 98,
+      "to": 110
+    },
+    {
+      "intentType": "MOVE",
+      "from": 110,
+      "to": 123
+    },
+    {
+      "intentType": "MOVE",
+      "from": 123,
+      "to": 135
+    },
+    {
+      "intentType": "MOVE",
+      "from": 135,
+      "to": 136
+    },
+    {
+      "intentType": "MOVE",
+      "from": 136,
+      "to": 124
+    },
+    {
+      "intentType": "MOVE",
+      "from": 124,
+      "to": 111
+    },
+    {
+      "intentType": "MOVE",
+      "from": 111,
+      "to": 112
+    },
+    {
+      "intentType": "MOVE",
+      "from": 112,
+      "to": 125
+    },
+    {
+      "intentType": "MOVE",
+      "from": 125,
+      "to": 126
+    },
+    {
+      "intentType": "SWITCH_PHASE"
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 115,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 114,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 103,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 125,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 126,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 136,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    },
+    {
+      "intentType": "ADD_POINT",
+      "coordinate": 82,
+      "amount": 1
+    }
+  ],
+  "note": ""
+}

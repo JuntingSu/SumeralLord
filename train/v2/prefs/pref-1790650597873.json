@@ -1,0 +1,18 @@
+{
+  "id": "pref-1790650597884",
+  "kind": "action",
+  "sourceGameId": "td14cpjmw",
+  "eventId": 418,
+  "seat": 1,
+  "actionA": {
+    "intentType": "MOVE",
+    "from": 15,
+    "to": 3
+  },
+  "actionB": {
+    "intentType": "MOVE",
+    "from": 58,
+    "to": 59
+  },
+  "label": "both_bad"
+}
