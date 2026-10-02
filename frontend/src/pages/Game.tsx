@@ -661,6 +661,10 @@ export default function Game() {
               )}
             </span>
           </div>
+          {/* 桌面端（lg+）：消息框固定屏幕右下角（与移动端同为 bottom-12，避开底部提示条） */}
+          <div className="fixed bottom-12 right-3 z-10 hidden lg:block">
+            <GameChat chat={chat} onSend={(text) => useGame.getState().sendChat(text)} className="static" />
+          </div>
           {/* 移动端（<lg）：结束行动/加点按钮与聊天共用右下角纵向堆叠容器——聊天在下、按钮在上，
               flex 从底向上排列即天然绑定：聊天展开时按钮被顶起，任何屏宽下都不会被聊天盖住 */}
           <div className="absolute bottom-12 right-3 z-10 flex flex-col items-end gap-2 lg:hidden">
