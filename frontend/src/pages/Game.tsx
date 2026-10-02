@@ -606,11 +606,11 @@ export default function Game() {
             animatorRef={animatorRef}
             className="h-full w-full"
           />
-          {/* 结束行动/加点：浮在地图区正下方、距底边一段距离（步时/局时任一 <10s 时每秒闪烁） */}
+          {/* 结束行动/加点：桌面端（lg+）保持底部居中（步时/局时任一 <10s 时每秒闪烁） */}
           {isMyActionTurn && (
             <button
               onClick={handleSwitchPhase}
-              className={`absolute bottom-14 left-3 z-10 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500 lg:left-1/2 lg:-translate-x-1/2 ${
+              className={`absolute bottom-14 left-1/2 z-10 hidden -translate-x-1/2 rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500 lg:block ${
                 lowActionTime ? 'low-time-blink' : ''
               }`}
             >
@@ -661,8 +661,22 @@ export default function Game() {
               )}
             </span>
           </div>
-          {/* 对局内聊天：默认折叠在棋盘右下角仅显示最近一条，点击小三角展开（观战可发言） */}
-          <GameChat chat={chat} onSend={(text) => useGame.getState().sendChat(text)} />
+          {/* 移动端（<lg）：结束行动/加点按钮与聊天共用右下角纵向堆叠容器——聊天在下、按钮在上，
+              flex 从底向上排列即天然绑定：聊天展开时按钮被顶起，任何屏宽下都不会被聊天盖住 */}
+          <div className="absolute bottom-12 right-3 z-10 flex flex-col items-end gap-2 lg:hidden">
+            {isMyActionTurn && (
+              <button
+                onClick={handleSwitchPhase}
+                className={`rounded bg-indigo-600 px-4 py-2 font-medium text-white shadow-lg hover:bg-indigo-500 ${
+                  lowActionTime ? 'low-time-blink' : ''
+                }`}
+              >
+                {phase === 'ACTION' ? '结束行动' : '结束加点'}
+              </button>
+            )}
+            {/* 对局内聊天：折叠在棋盘右下角显示最近 3 条，点击小三角展开（观战可发言） */}
+            <GameChat chat={chat} onSend={(text) => useGame.getState().sendChat(text)} className="static" />
+          </div>
         </section>
       </main>
 
