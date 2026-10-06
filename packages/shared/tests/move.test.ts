@@ -91,6 +91,10 @@ describe('§8.1.1 移动事件：三分支生成序列', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.chain[0]).toMatchObject({ kind: 'MOVE' });
+    // 断兵移动：消失事件先于生成事件（§8.1.1）
+    const kinds = chainKinds(r);
+    expect(kinds.indexOf('DESPAWN')).toBeGreaterThan(-1);
+    expect(kinds.indexOf('DESPAWN')).toBeLessThan(kinds.indexOf('SPAWN'));
     const s19 = soldierAt(r.state, 19)!;
     expect(s19.strength).toBe(2);
     expect(s19.isLinked).toBe(false);
@@ -104,6 +108,10 @@ describe('§8.1.1 移动事件：三分支生成序列', () => {
     const r = act(state, 1, { intentType: 'MOVE', from: 18, to: 19 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    // 断兵移动：消失事件先于生成事件（§8.1.1）
+    const kinds = chainKinds(r);
+    expect(kinds.indexOf('DESPAWN')).toBeGreaterThan(-1);
+    expect(kinds.indexOf('DESPAWN')).toBeLessThan(kinds.indexOf('SPAWN'));
     const s19 = soldierAt(r.state, 19)!;
     expect(s19.strength).toBe(1);
     expect(s19.isLinked).toBe(false);

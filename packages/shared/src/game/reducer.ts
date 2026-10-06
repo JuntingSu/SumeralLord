@@ -343,13 +343,13 @@ function moveEventCore(ctx: Ctx, from: number, to: number, opts?: { skipBreakDed
     updateEvent(ctx, to, { strength: mover.strength - 1 }); // ② 复制 -1
     updateEvent(ctx, from, { strength: 1 }); // ③ 原兵变 1
   } else if (mover.strength !== 1) {
-    spawnEvent(ctx, to, mover);
-    if (!opts?.skipBreakDeduction) updateEvent(ctx, to, { strength: mover.strength - 1 });
-    despawnEvent(ctx, from);
+    despawnEvent(ctx, from); // ① 断兵移动先删原兵（§8.1.1：消失先于生成）
+    spawnEvent(ctx, to, mover); // ② 生成复制
+    if (!opts?.skipBreakDeduction) updateEvent(ctx, to, { strength: mover.strength - 1 }); // ③ 复制 -1
   } else {
-    spawnEvent(ctx, to, { ...mover, strength: 1 });
-    updateEvent(ctx, to, { hasMovement: false });
-    despawnEvent(ctx, from);
+    despawnEvent(ctx, from); // ① 断兵移动先删原兵（§8.1.1：消失先于生成）
+    spawnEvent(ctx, to, { ...mover, strength: 1 }); // ② 生成兵力 1 断兵
+    updateEvent(ctx, to, { hasMovement: false }); // ③ 生成兵失去移动力
   }
   applyInactiveJudgment(ctx, from, to);
   return true;
