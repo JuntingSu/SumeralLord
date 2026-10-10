@@ -1,7 +1,8 @@
 // 个人资料（PATCH /api/users/me）与皮肤上传（POST /api/users/me/skin）接口测试
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { inflateSync } from 'node:zlib';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
@@ -50,6 +51,28 @@ function fakePng(w = 192, h = 216): Buffer {
 
 const pngDataUrl = (buf: Buffer) => `data:image/png;base64,${buf.toString('base64')}`;
 
+/** 取出 PNG 全部 IDAT 数据（本仓库自产 PNG：8bit RGBA、filter=none，可逐字节解出像素） */
+function readIdat(png: Buffer): Buffer {
+  let off = 8;
+  const parts: Buffer[] = [];
+  while (off + 8 <= png.length) {
+    const len = png.readUInt32BE(off);
+    const type = png.toString('ascii', off + 4, off + 8);
+    if (type === 'IDAT') parts.push(png.subarray(off + 8, off + 8 + len));
+    if (type === 'IEND') break;
+    off += 12 + len;
+  }
+  return Buffer.concat(parts);
+}
+
+/** 解出 (x,y) 处 RGBA 像素 */
+function pngPixel(png: Buffer, x: number, y: number): [number, number, number, number] {
+  const w = png.readUInt32BE(16);
+  const raw = inflateSync(readIdat(png));
+  const o = y * (w * 4 + 1) + 1 + x * 4;
+  return [raw[o], raw[o + 1], raw[o + 2], raw[o + 3]];
+}
+
 describe('PATCH /api/users/me', () => {
   it('未携带 token 返回 401', async () => {
     const res = await app.inject({
@@ -97,7 +120,7 @@ describe('PATCH /api/users/me', () => {
     const body = res.json();
     expect(body.success).toBe(true);
     expect(body.data.token).toBeUndefined();
-    expect(body.data.user).toMatchObject({ username: 'alice', hasSkin: false });
+    expect(body.data.user).toMatchObject({ username: 'alice', hasSkin: true });
 
     const oldLogin = await app.inject({
       method: 'POST',
@@ -178,15 +201,20 @@ describe('POST /api/users/me/skin', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('上传两张 192×216 PNG 成功，文件落盘，hasSkin 变为 true', async () => {
+  it('注册即生成默认皮肤；上传两张 192×216 PNG 覆盖成功，hasSkin 保持 true', async () => {
     const { token, userId } = await registerAndLogin('alice', 'secret1');
 
+    // 注册即分配随机配色默认皮肤：文件已落盘、hasSkin 为 true
     const before = await app.inject({
       method: 'GET',
       url: '/api/users/me',
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(before.json().data.user.hasSkin).toBe(false);
+    expect(before.json().data.user.hasSkin).toBe(true);
+    expect(existsSync(skinFilePath(app.skinDir, userId))).toBe(true);
+    expect(existsSync(skinFilePath(app.skinDir, userId, true))).toBe(true);
+    const autoSolid = readFileSync(skinFilePath(app.skinDir, userId));
+    expect([autoSolid.readUInt32BE(16), autoSolid.readUInt32BE(20)]).toEqual([192, 216]);
 
     const res = await app.inject({
       method: 'POST',
@@ -198,6 +226,8 @@ describe('POST /api/users/me/skin', () => {
     expect(res.json().data).toEqual({ hasSkin: true });
     expect(existsSync(skinFilePath(app.skinDir, userId))).toBe(true);
     expect(existsSync(skinFilePath(app.skinDir, userId, true))).toBe(true);
+    // 上传内容覆盖了注册时的默认皮肤
+    expect(readFileSync(skinFilePath(app.skinDir, userId)).equals(autoSolid)).toBe(false);
 
     const after = await app.inject({
       method: 'GET',
@@ -229,5 +259,80 @@ describe('POST /api/users/me/skin', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('INVALID_PARAMS');
+  });
+});
+
+describe('注册默认皮肤', () => {
+  it('注册后自动落盘一对 192×216 PNG，登录返回 hasSkin: true，颜色在 40–230 区间', async () => {
+    const { token, userId } = await registerAndLogin('alice', 'secret1');
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'alice', password: 'secret1' },
+    });
+    expect(login.json().data.user.hasSkin).toBe(true);
+
+    const solidPath = skinFilePath(app.skinDir, userId);
+    const hollowPath = skinFilePath(app.skinDir, userId, true);
+    expect(existsSync(solidPath)).toBe(true);
+    expect(existsSync(hollowPath)).toBe(true);
+
+    const solid = readFileSync(solidPath);
+    const hollow = readFileSync(hollowPath);
+    expect([solid.readUInt32BE(16), solid.readUInt32BE(20)]).toEqual([192, 216]);
+    expect([hollow.readUInt32BE(16), hollow.readUInt32BE(20)]).toEqual([192, 216]);
+
+    // 六边形中心为纯色填充（非描边），三通道均在 [40, 230] 且不透明
+    const [r, g, b, a] = pngPixel(solid, 96, 108);
+    expect(a).toBe(255);
+    for (const c of [r, g, b]) {
+      expect(c).toBeGreaterThanOrEqual(40);
+      expect(c).toBeLessThanOrEqual(230);
+    }
+    // 断兵 hollow 版中心实心、外圈镂空：以顶部顶点附近（y 极靠上）为透明
+    expect(pngPixel(hollow, 96, 108)[3]).toBe(255);
+    expect(pngPixel(hollow, 96, 12)[3]).toBe(0);
+
+    // 头像 URL 走皮肤（hasSkin 为 true）
+    const me = await app.inject({ method: 'GET', url: '/api/users/me', headers: { authorization: `Bearer ${token}` } });
+    expect(me.json().data.user.hasSkin).toBe(true);
+  });
+});
+
+describe('POST /api/users/me/skin/random', () => {
+  it('未携带 token 返回 401', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/users/me/skin/random' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('生成随机配色皮肤：返回色值与落盘像素一致，二次调用覆盖文件', async () => {
+    const { token, userId } = await registerAndLogin('alice', 'secret1');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/users/me/skin/random',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const { hasSkin, color } = res.json().data as { hasSkin: boolean; color: string };
+    expect(hasSkin).toBe(true);
+    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+
+    const solidPath = skinFilePath(app.skinDir, userId);
+    const first = readFileSync(solidPath);
+    const [r, g, b, a] = pngPixel(first, 96, 108);
+    expect(a).toBe(255);
+    expect(color).toBe(`#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`);
+    expect(existsSync(skinFilePath(app.skinDir, userId, true))).toBe(true);
+
+    const again = await app.inject({
+      method: 'POST',
+      url: '/api/users/me/skin/random',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(again.statusCode).toBe(200);
+    expect((again.json().data as { color: string }).color).toMatch(/^#[0-9a-f]{6}$/);
+    expect([...readFileSync(solidPath).subarray(0, 8)]).toEqual([...first.subarray(0, 8)]);
   });
 });

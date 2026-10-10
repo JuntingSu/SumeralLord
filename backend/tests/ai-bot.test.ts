@@ -88,6 +88,7 @@ beforeAll(async () => {
   app = await buildApp({
     dbPath: path.join(dir, 'test.db'),
     logger: false,
+    skinDir: path.join(dir, 'skin'),
     authRate: { registerPerMin: 1000, loginPerMin: 1000 },
     aiBotOpts: {
       bootDir: path.join(dir, 'bot_boot'),

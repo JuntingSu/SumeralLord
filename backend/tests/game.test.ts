@@ -2,13 +2,14 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { matchHistory } from '../src/db/schema.js';
 import { buildApp } from '../src/app.js';
+import { skinFilePath } from '../src/skin.js';
 import { shuffleAssignments } from '../src/game/manager.js';
 
 // 断线/共识时间线加速（须在 config 求值前设置）
@@ -166,6 +167,7 @@ beforeAll(async () => {
   app = await buildApp({
     dbPath: path.join(dir, 'test.db'),
     logger: false,
+    skinDir: path.join(dir, 'skin'),
     authRate: { registerPerMin: 1000, loginPerMin: 1000 },
     roomOpts: { gameHardCapMs: 2000, gameOverRetainMs: 1000, sweepIntervalMs: 300 },
   });
@@ -751,6 +753,9 @@ describe('randomSpawn：已选势力集合内随机重排玩家分配', () => {
       payload: { solid: pngDataUrl(fakePng()), hollow: pngDataUrl(fakePng()) },
     });
     expect(skin.statusCode).toBe(200);
+    // 注册会为每个账号自动生成默认皮肤；删掉 bob 的，保留「无皮肤玩家保持地图原旗帜」分支
+    unlinkSync(skinFilePath(app.skinDir, users.get('bob')!.id));
+    unlinkSync(skinFilePath(app.skinDir, users.get('bob')!.id, true));
     const create = await app.inject({
       method: 'POST',
       url: '/api/rooms',

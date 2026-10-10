@@ -161,6 +161,7 @@ beforeAll(async () => {
   app = await buildApp({
     dbPath: path.join(dir, 'test.db'),
     logger: false,
+    skinDir: path.join(dir, 'skin'),
     authRate: { registerPerMin: 1000, loginPerMin: 1000 },
     roomOpts: { gameHardCapMs: 2000, gameOverRetainMs: 1000, sweepIntervalMs: 300 },
   });

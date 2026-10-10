@@ -15,7 +15,7 @@ let dir: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'dl-test-'));
-  app = await buildApp({ dbPath: path.join(dir, 'test.db'), logger: false });
+  app = await buildApp({ dbPath: path.join(dir, 'test.db'), logger: false, skinDir: path.join(dir, 'skin') });
 });
 
 afterEach(async () => {

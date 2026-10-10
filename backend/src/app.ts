@@ -30,6 +30,8 @@ export interface BuildAppOptions {
   logger?: boolean;
   ticketTtlMs?: number;
   staticRoot?: string;
+  /** 个人皮肤目录（默认 staticRoot/skin）；测试可指向临时目录，避免并发写同一路径 */
+  skinDir?: string;
   authRate?: { registerPerMin?: number; loginPerMin?: number };
   roomOpts?: { idleMs?: number; sweepIntervalMs?: number; gameHardCapMs?: number; gameOverRetainMs?: number };
   mapsReloadMs?: number;
@@ -69,7 +71,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   const staticRoot = opts.staticRoot ?? path.join(__dirname, '../static');
   app.decorate('mapsDir', path.join(staticRoot, 'maps'));
   app.decorate('mapsUncensoredDir', path.join(staticRoot, 'maps-uncensored'));
-  app.decorate('skinDir', path.join(staticRoot, 'skin'));
+  app.decorate('skinDir', opts.skinDir ?? path.join(staticRoot, 'skin'));
   if (existsSync(staticRoot)) {
     await app.register(fastifyStatic, { root: staticRoot, prefix: '/static/' });
     maps.loadFromDir(path.join(staticRoot, 'maps'));

@@ -6,6 +6,7 @@ import type { LoginResult, UserPublic } from '@dl/shared';
 import { users, type UserRow } from '../db/schema.js';
 import { authenticateBearer, signAuthToken } from '../auth/jwt.js';
 import { hasSkin } from '../skin.js';
+import { writeRandomSkin } from '../skinGen.js';
 import { createRateLimiter } from '../utils/rateLimit.js';
 import { ok, fail } from '../utils/respond.js';
 
@@ -48,7 +49,14 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (app, opt
     }
     // 同步哈希 + better-sqlite3 同步写入：查重与插入之间不让出事件循环，天然免竞态
     const passwordHash = bcrypt.hashSync(password, AUTH.BCRYPT_COST);
-    app.db.insert(users).values({ username, passwordHash }).run();
+    const { lastInsertRowid } = app.db.insert(users).values({ username, passwordHash }).run();
+    // 注册即分配随机配色默认皮肤（文件落盘，hasSkin 由文件存在性判定）。
+    // 账号已入库，皮肤写入失败不应让注册整体失败（用户可在「更换皮肤」重试）。
+    try {
+      writeRandomSkin(app.skinDir, Number(lastInsertRowid));
+    } catch (err) {
+      app.log.warn({ err, userId: lastInsertRowid }, '注册默认皮肤写入失败');
+    }
     return ok(reply, undefined, '注册成功');
   });
 

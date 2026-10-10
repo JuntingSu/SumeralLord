@@ -112,6 +112,7 @@ beforeAll(async () => {
   app = await buildApp({
     dbPath: path.join(dir, 'test.db'),
     logger: false,
+    skinDir: path.join(dir, 'skin'),
     authRate: { registerPerMin: 1000, loginPerMin: 1000 },
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
