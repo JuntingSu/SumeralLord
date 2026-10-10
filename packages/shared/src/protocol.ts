@@ -85,6 +85,8 @@ export const RoomSettingsPatchSchema = z.object({
   randomSpawn: z.boolean().optional(),
   aiTakeover: z.boolean().optional(),
   usePersonalSkin: z.boolean().optional(),
+  /** 随机 1v1 地图：开启后势力重置为先手/后手两人，开局现场生成对称地图（见 RoomData.random1v1Map） */
+  random1v1Map: z.boolean().optional(),
   timeSettings: TimeSettingsSchema.optional(),
 });
 export type RoomSettingsPatch = z.infer<typeof RoomSettingsPatchSchema>;

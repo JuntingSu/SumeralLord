@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { GAME, ROOMS, AI_LEVEL } from '@dl/shared';
+import { GAME, ROOMS, AI_LEVEL, SYM_1V1_FORCES } from '@dl/shared';
 import type {
   ErrorCode,
   GameStartMsg,
@@ -43,6 +43,8 @@ interface Room {
   randomSpawn: boolean;
   aiTakeover: boolean;
   usePersonalSkin: boolean;
+  /** 随机 1v1 地图模式：忽略所选地图，势力固定先手/后手，开局现场生成对称地图 */
+  random1v1Map: boolean;
   mapId: string;
   mapTitle: string;
   mapPlayerNum: number;
@@ -99,6 +101,18 @@ function toRoomForces(map: MapFullData): RoomForce[] {
   }));
 }
 
+/** 随机 1v1 模式固定势力（先手 seat1 / 后手 seat2）；切换到该模式时玩家/AI 分配清空 */
+function toSym1v1Forces(): RoomForce[] {
+  return SYM_1V1_FORCES.map((f) => ({
+    seat: f.seat,
+    team: f.team,
+    name: f.name,
+    flag: f.flag,
+    playerId: null,
+    aiLevel: null,
+  }));
+}
+
 /** 房间内存状态机（单进程；WS 推送在 BM3 接入，本层只管状态与校验） */
 export class RoomManager {
   private readonly rooms = new Map<string, Room>();
@@ -139,6 +153,7 @@ export class RoomManager {
       randomSpawn: body.randomSpawn,
       aiTakeover: body.aiTakeover ?? false,
       usePersonalSkin: body.usePersonalSkin ?? false,
+      random1v1Map: false,
       mapId: map.id,
       mapTitle: map.title,
       mapPlayerNum: map.player_num,
@@ -381,6 +396,8 @@ export class RoomManager {
     const room = this.mustGet(roomId);
     this.touch(room);
     if (room.hostId !== hostUserId) throw new RoomError('NOT_HOST', '仅房主可执行此操作');
+    // 随机 1v1 模式不使用所选地图（势力固定先手/后手），换图会破坏该不变式
+    if (room.random1v1Map) throw new RoomError('INVALID_PARAMS', '随机 1v1 地图模式下不能更换地图');
     room.mapId = map.id;
     room.mapTitle = map.title;
     room.mapPlayerNum = map.player_num;
@@ -405,8 +422,11 @@ export class RoomManager {
       randomSpawn?: boolean;
       aiTakeover?: boolean;
       usePersonalSkin?: boolean;
+      random1v1Map?: boolean;
       timeSettings?: { stepTime: number; gameTime: number; additionalTime: number };
     },
+    /** 关闭随机 1v1 模式时用于按原地图重建势力列表（调用方从地图目录读取） */
+    map?: MapFullData,
   ): RoomData {
     const room = this.mustGet(roomId);
     this.touch(room);
@@ -424,6 +444,20 @@ export class RoomManager {
       }
     }
     if (patch.usePersonalSkin !== undefined) room.usePersonalSkin = patch.usePersonalSkin;
+    if (patch.random1v1Map !== undefined && patch.random1v1Map !== room.random1v1Map) {
+      room.random1v1Map = patch.random1v1Map;
+      // 切换模式会重建势力列表（座次含义与数量都变了）→ 清空玩家/AI 分配，已准备玩家回落未准备
+      if (patch.random1v1Map) {
+        room.forces = toSym1v1Forces();
+        room.mapPlayerNum = room.forces.length;
+      } else if (map) {
+        room.forces = toRoomForces(map);
+        room.mapPlayerNum = map.player_num;
+      }
+      for (const p of room.players.values()) {
+        if (p.state === 'prepared') p.state = 'unready';
+      }
+    }
     if (patch.timeSettings !== undefined) room.timeSettings = patch.timeSettings;
     const data = this.toRoomData(room);
     this.emit({ type: 'ROOM_UPDATE', roomId: room.id, room: data });
@@ -567,6 +601,7 @@ export class RoomManager {
       randomSpawn: room.randomSpawn,
       aiTakeover: room.aiTakeover,
       usePersonalSkin: room.usePersonalSkin,
+      random1v1Map: room.random1v1Map,
       mapId: room.mapId,
       mapTitle: room.mapTitle,
       playerNum: room.mapPlayerNum,

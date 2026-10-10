@@ -146,15 +146,19 @@ export default function Room() {
     };
   }, [roomId, me, navigate]);
 
-  // 房间地图变化 → 拉全量地图数据（预览 + 信息）
+  // 房间地图变化 → 拉全量地图数据（预览 + 信息）；随机 1v1 模式不使用所选地图，无需拉取
   useEffect(() => {
     if (!room) return;
+    if (room.random1v1Map) {
+      setMapFull(null);
+      return;
+    }
     if (mapFull?.id === room.mapId) return;
     setMapFull(null);
     getMap(room.mapId)
       .then(setMapFull)
       .catch(() => setMapFull(null));
-  }, [room?.mapId, room, mapFull?.id]);
+  }, [room?.mapId, room?.random1v1Map, room, mapFull?.id]);
 
   // 地图预览完整可见性（移动端单列布局：整幅预览未完整进入视口时，左下角浮动小预览）
   useEffect(() => {
@@ -505,22 +509,25 @@ export default function Room() {
 
         {/* 地图信息 + 房间设置 */}
         <section className="space-y-4">
-          <div className="rounded-lg bg-slate-800 p-4">
-            <h2 className="mb-2 text-sm font-bold text-slate-400">地图</h2>
-            {mapFull ? (
-              <>
-                <div ref={mapPreviewRef}>
-                  <HexMapPreview battlefield={mapFull.battlefield} column={mapFull.column} row={mapFull.row} height={200} />
-                </div>
-                <p className="mt-2 text-sm font-medium">{mapFull.title}</p>
-                <p className="text-xs text-slate-400">
-                  {mapFull.column}×{mapFull.row} · {mapFull.player_num} 势力 · {mapFull.tags.join(' / ')}
-                </p>
-              </>
-            ) : (
-              <div className="flex h-40 items-center justify-center text-slate-500">加载中…</div>
-            )}
-          </div>
+          {/* 随机 1v1 模式：不使用所选地图（每局现场生成对称地图），隐藏地图预览与地图信息 */}
+          {!room.random1v1Map && (
+            <div className="rounded-lg bg-slate-800 p-4">
+              <h2 className="mb-2 text-sm font-bold text-slate-400">地图</h2>
+              {mapFull ? (
+                <>
+                  <div ref={mapPreviewRef}>
+                    <HexMapPreview battlefield={mapFull.battlefield} column={mapFull.column} row={mapFull.row} height={200} />
+                  </div>
+                  <p className="mt-2 text-sm font-medium">{mapFull.title}</p>
+                  <p className="text-xs text-slate-400">
+                    {mapFull.column}×{mapFull.row} · {mapFull.player_num} 势力 · {mapFull.tags.join(' / ')}
+                  </p>
+                </>
+              ) : (
+                <div className="flex h-40 items-center justify-center text-slate-500">加载中…</div>
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg bg-slate-800 p-4">
             <h2 className="mb-3 text-sm font-bold text-slate-400">房间设置{isHost ? '' : '（仅房主可修改）'}</h2>
@@ -573,7 +580,19 @@ export default function Room() {
                   onChange={(e) => handleSettingsPatch({ usePersonalSkin: e.target.checked })}
                 />
               </label>
-              {isHost && (
+              <label
+                className="flex items-center justify-between"
+                title="勾选后：本房间不再使用所选地图，势力重置为「先手 / 后手」两人，开局时现场生成一张随机对称 1v1 地图作为本局地图"
+              >
+                <span className="text-slate-300">使用随机的 1v1 地图</span>
+                <input
+                  type="checkbox"
+                  checked={room.random1v1Map}
+                  disabled={!isHost}
+                  onChange={(e) => handleSettingsPatch({ random1v1Map: e.target.checked })}
+                />
+              </label>
+              {isHost && !room.random1v1Map && (
                 <div>
                   <span className="mb-1 block text-slate-300">更换地图（将清空势力分配）</span>
                   <MapPicker
@@ -633,7 +652,7 @@ export default function Room() {
       </footer>
 
       {/* 移动端：整幅地图预览未完整展示时，左下角浮动 45% 页宽、70% 透明度的等比例小预览；可关闭/恢复 */}
-      {!mapPreviewFullyVisible && mapFull && (
+      {!room.random1v1Map && !mapPreviewFullyVisible && mapFull && (
         <div className="pointer-events-none fixed bottom-3 left-3 z-10 flex items-end gap-1.5 lg:hidden">
           {mapPreviewDismissed ? (
             <button

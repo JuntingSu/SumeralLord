@@ -217,6 +217,11 @@ export interface RoomData {
   aiTakeover: boolean;
   /** 开启后，对局初始化时势力旗帜替换为扮演玩家的个人皮肤（未上传皮肤则保持原旗帜） */
   usePersonalSkin: boolean;
+  /**
+   * 开启后：房间不再使用所选地图，势力重置为两个（先手 seat1 / 后手 seat2），
+   * 开局时由服务器现场生成一张随机对称 1v1 地图作为本局地图（UI 上隐藏地图预览/地图信息与更换地图）。
+   */
+  random1v1Map: boolean;
   mapId: string;
   mapTitle: string;
   playerNum: number; // maxPlayers，来自地图
