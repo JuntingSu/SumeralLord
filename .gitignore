@@ -5,3 +5,5 @@ backend/data/
 backend/static/skin/
 mapeditor-release/
 pack.txt
+# 本地环境变量（含密钥，不入库；部署时另行注入）
+.env
