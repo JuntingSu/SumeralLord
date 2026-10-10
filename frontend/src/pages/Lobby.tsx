@@ -177,8 +177,8 @@ export default function Lobby() {
         <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-6 pb-28">
           {joinedRoom && (
             <div className="mb-6 rounded-lg border border-emerald-700 bg-emerald-900/30 px-5 py-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0">
+              <div className="flex items-center gap-4">
+                <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">
                     {joinedRoom.name}
                     <span className="ml-2 rounded bg-emerald-700 px-2 py-0.5 text-xs">
@@ -187,7 +187,7 @@ export default function Lobby() {
                   </p>
                   <p className="mt-1 truncate text-sm text-slate-400">{joinedRoom.mapTitle}</p>
                 </div>
-                <div className="flex flex-col gap-2 lg:flex-row">
+                <div className="flex shrink-0 flex-col gap-2">
                   <button
                     onClick={() => navigate(`/room/${joinedRoom.id}`)}
                     className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
