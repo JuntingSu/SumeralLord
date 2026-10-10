@@ -64,7 +64,7 @@ async function startGame(roomName = 'log测试房'): Promise<string> {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'dl-log-'));
-  app = await buildApp({ dbPath: path.join(dir, 'test.db'), logger: false });
+  app = await buildApp({ dbPath: path.join(dir, 'test.db'), logger: false, skinDir: path.join(dir, 'skin') });
   await app.ready();
   await newUser('alice');
   await newUser('bob');

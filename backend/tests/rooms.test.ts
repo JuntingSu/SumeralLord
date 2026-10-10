@@ -52,6 +52,7 @@ beforeAll(async () => {
   app = await buildApp({
     dbPath: path.join(dir, 'test.db'),
     logger: false,
+    skinDir: path.join(dir, 'skin'),
     authRate: { registerPerMin: 1000, loginPerMin: 1000 },
   });
   for (const name of ['alice', 'bob', 'carol', 'dave', 'eve']) await newUser(name);
@@ -313,6 +314,7 @@ describe('空闲自动解散（注入短超时）', () => {
     const sweepApp = await buildApp({
       dbPath: path.join(dir2, 't.db'),
       logger: false,
+      skinDir: path.join(dir2, 'skin'),
       authRate: { registerPerMin: 1000, loginPerMin: 1000 },
       roomOpts: { idleMs: 80, sweepIntervalMs: 30 },
     });

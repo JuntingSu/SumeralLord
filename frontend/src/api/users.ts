@@ -28,6 +28,11 @@ export function uploadSkin(solid: string, hollow: string): Promise<{ hasSkin: bo
   });
 }
 
+/** 生成随机配色皮肤（服务器随机取色并覆盖当前皮肤），返回所用颜色 hex */
+export function randomizeSkin(): Promise<{ hasSkin: boolean; color: string }> {
+  return api<{ hasSkin: boolean; color: string }>('/api/users/me/skin/random', { method: 'POST' });
+}
+
 /** 本人对局记录（BM7b 战绩；M5.4 回放列表同源；每行含 scoreChanges 积分明细） */
 export function fetchHistory(userId: number): Promise<{ history: MatchRecord[] }> {
   return api<{ history: MatchRecord[] }>(`/api/users/${userId}/history`);

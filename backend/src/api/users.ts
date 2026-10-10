@@ -8,6 +8,7 @@ import { signAuthToken } from '../auth/jwt.js';
 import { matchHistory, users } from '../db/schema.js';
 import { toUserPublic } from './auth.js';
 import { hasSkin, decodePngDataUrl, writeSkinPair } from '../skin.js';
+import { writeRandomSkin, rgbToHex } from '../skinGen.js';
 import { ok, fail } from '../utils/respond.js';
 
 /** 用户相关（BM7b）：战绩/对局记录 + 个人统计（M5.4 回放列表同源）+ 个人资料/皮肤 */
@@ -71,6 +72,12 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     }
     writeSkinPair(app.skinDir, request.user!.userId, solid.buf, hollow.buf);
     return ok(reply, { hasSkin: true });
+  });
+
+  /** 随机配色皮肤：服务器随机取色（每通道 40–230）渲染六边形，直接覆盖当前皮肤 */
+  app.post('/api/users/me/skin/random', async (request, reply) => {
+    const color = writeRandomSkin(app.skinDir, request.user!.userId);
+    return ok(reply, { hasSkin: true, color: rgbToHex(color) });
   });
 
   /** 本人对局记录（按结束时间倒序）；仅本人可查；每行含本局积分结算明细 */
