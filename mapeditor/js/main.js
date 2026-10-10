@@ -70,13 +70,20 @@
 
   // ==================== 状态栏 ====================
   let statusTimer = null;
+  const toastEl = $('m-toast');
   function statusMsg(text, kind = 'ok') {
     statusEl.textContent = text;
     statusEl.className = 'status ' + kind;
+    // 窄屏顶栏整体隐藏，同一条消息在浮层复现（宽屏下 #m-toast 不显示）
+    if (toastEl) {
+      toastEl.textContent = text;
+      toastEl.className = kind + ' show';
+    }
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => {
       statusEl.className = 'status';
       statusEl.textContent = '就绪';
+      if (toastEl) toastEl.className = '';
     }, 5000);
   }
 
@@ -435,34 +442,36 @@
     }
   });
 
-  async function searchServerMaps() {
-    const box = $('server-map-results');
-    box.innerHTML = '';
-    const q = $('server-map-search').value.trim();
+  /**
+   * 服务器地图搜索：顶栏下拉（宽屏）与「服务器导入」弹窗（窄屏）共用同一套渲染逻辑。
+   * onPick 收到地图 id；返回 { ok, count } 供调用方决定下拉是否展开。
+   */
+  async function renderServerResults(inputEl, boxEl, onPick) {
+    boxEl.innerHTML = '<div class="none">搜索中…</div>';
+    let list;
     try {
-      const list = await IO.loadServerMapList(serverUrl(), q);
-      if (!list.length) {
-        box.innerHTML = '<div class="none">无匹配地图</div>';
-        box.hidden = false;
-        return;
-      }
-      for (const m of list) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.textContent = `${m.title}（${m.author || '?'} · ${m.playerNum}人）`;
-        b.title = m.id;
-        b.addEventListener('click', () => {
-          box.hidden = true;
-          loadServerMapById(m.id);
-        });
-        box.appendChild(b);
-      }
-      box.hidden = false;
-      statusMsg(`找到 ${list.length} 张匹配地图`);
+      list = await IO.loadServerMapList(serverUrl(), inputEl.value.trim());
     } catch (e) {
+      boxEl.innerHTML = `<div class="none">搜索失败：${esc(e.message)}</div>`;
       statusMsg(`搜索地图失败：${e.message}`, 'error');
-      box.hidden = true;
+      return { ok: false, count: 0 };
     }
+    boxEl.innerHTML = '';
+    if (!list.length) {
+      boxEl.innerHTML = '<div class="none">无匹配地图</div>';
+      statusMsg('没有匹配的服务器地图');
+      return { ok: true, count: 0 };
+    }
+    for (const m of list) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `${m.title}（${m.author || '?'} · ${m.playerNum}人）`;
+      b.title = m.id;
+      b.addEventListener('click', () => onPick(m.id));
+      boxEl.appendChild(b);
+    }
+    statusMsg(`找到 ${list.length} 张匹配地图`);
+    return { ok: true, count: list.length };
   }
 
   async function loadServerMapById(id) {
@@ -470,19 +479,42 @@
       const map = await IO.loadServerMap(serverUrl(), id);
       Editor.setMap(map, map.id);
       statusMsg(`已加载服务器地图 ${id}`);
+      return true;
     } catch (e) {
       statusMsg(`加载地图失败：${e.message}`, 'error');
+      return false;
     }
   }
-  $('btn-server-search').addEventListener('click', searchServerMaps);
+
+  // 顶栏（宽屏）搜索：🔍 按钮 / 回车触发，结果用下拉展示
+  const topSearchBox = $('server-map-results');
+  async function searchTopbarMaps() {
+    await renderServerResults($('server-map-search'), topSearchBox, (id) => {
+      topSearchBox.hidden = true;
+      loadServerMapById(id);
+    });
+    topSearchBox.hidden = false;
+  }
+  $('btn-server-search').addEventListener('click', searchTopbarMaps);
   $('server-map-search').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') searchServerMaps();
-    else if (e.key === 'Escape') $('server-map-results').hidden = true;
+    if (e.key === 'Enter') searchTopbarMaps();
+    else if (e.key === 'Escape') topSearchBox.hidden = true;
   });
   // 点击搜索框外关闭下拉结果
   document.addEventListener('click', (e) => {
-    const box = $('server-map-results');
-    if (!box.hidden && !e.target.closest('#server-search-wrap')) box.hidden = true;
+    if (!topSearchBox.hidden && !e.target.closest('#server-search-wrap')) topSearchBox.hidden = true;
+  });
+
+  // 窄屏「服务器导入」弹窗：同一个搜索逻辑，结果常显在弹窗内
+  const dlgSearchBox = $('m-server-results');
+  async function searchDialogMaps() {
+    await renderServerResults($('m-server-search'), dlgSearchBox, async (id) => {
+      if (await loadServerMapById(id)) $('dlg-serverimport').close();
+    });
+  }
+  $('m-server-search-btn').addEventListener('click', searchDialogMaps);
+  $('m-server-search').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') searchDialogMaps();
   });
 
   // ==================== 右侧面板宽度拖拽 ====================
@@ -515,9 +547,27 @@
   // ==================== 撤销/重做 / 尺寸 / 生成 ====================
   $('btn-undo').addEventListener('click', () => Editor.undo());
   $('btn-redo').addEventListener('click', () => Editor.redo());
-  document.querySelectorAll('[data-dir]').forEach((btn) => {
+  // 四边 ±1 快捷按钮（带 data-d）；窄屏另用「方向+ 数值输入」按任意整数调节
+  document.querySelectorAll('.resize-float button[data-d]').forEach((btn) => {
     btn.addEventListener('click', () => {
       Editor.resize({ [btn.dataset.dir]: Number(btn.dataset.d) });
+    });
+  });
+  document.querySelectorAll('.resize-float .rf-apply').forEach((btn) => {
+    const input = btn.parentElement.querySelector('.rf-num');
+    const isColumn = btn.dataset.dir === 'left' || btn.dataset.dir === 'right';
+    const apply = () => {
+      const v = Math.round(Number(input.value));
+      if (!Number.isFinite(v) || v === 0) {
+        statusMsg('请输入非 0 整数（正数扩容 / 负数缩减）', 'error');
+        return;
+      }
+      Editor.resize({ [btn.dataset.dir]: v });
+      statusMsg(`已按 ${v > 0 ? '+' + v : v} 调整${isColumn ? '列' : '行'}`);
+    };
+    btn.addEventListener('click', apply);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); apply(); }
     });
   });
   $('btn-generate').addEventListener('click', () => {
@@ -536,7 +586,7 @@
     $(id).addEventListener('change', () => Editor.commit((m) => fn(m, $(id))));
   }
   bindCommit('f-title', (m, el) => { m.title = el.value.trim() || m.title; });
-  bindCommit('f-author', (m, el) => { m.author = el.value.trim(); });
+  // 作者取自当前登录账号，界面上为只读灰显，不接受编辑
   bindCommit('f-desc', (m, el) => { m.description = el.value; });
   bindCommit('f-tags', (m, el) => {
     m.tags = el.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
@@ -557,7 +607,6 @@
     };
     set($('f-title'), s.map.title);
     set($('f-author'), s.map.author);
-    set($('f-timestamp'), s.map.timestamp);
     set($('f-desc'), s.map.description);
     set($('f-tags'), (s.map.tags || []).join(', '));
     set($('f-total'), s.map.online_time_settings?.total_time ?? 0);
@@ -611,30 +660,6 @@
     statusMsg('已新增势力');
   });
 
-  // ==================== 校验面板 ====================
-  function syncValidate() {
-    const s = Editor.getState();
-    const box = $('validate-summary');
-    const list = $('validate-list');
-    if (!s.map) {
-      box.textContent = '无地图';
-      list.innerHTML = '';
-      return;
-    }
-    const issues = MapValidate.validate(s.map);
-    const errs = issues.filter((i) => i.level === 'error').length;
-    const warns = issues.filter((i) => i.level === 'warn').length;
-    box.textContent = errs === 0 && warns === 0 ? '✅ 全部通过' : `${errs ? `❌ ${errs} 错误` : ''}${warns ? ` ⚠ ${warns} 警告` : ''}`.trim();
-    box.className = errs ? 'v-err' : warns ? 'v-warn' : 'v-ok';
-    list.innerHTML = '';
-    for (const issue of issues) {
-      const li = document.createElement('li');
-      li.className = issue.level;
-      li.textContent = issue.text;
-      list.appendChild(li);
-    }
-  }
-
   // ==================== 顶栏状态 ====================
   function syncTopbar() {
     const s = Editor.getState();
@@ -648,7 +673,6 @@
     if (!s.map) return;
     syncInfo();
     syncPlayers();
-    syncValidate();
     syncToolUI();
     syncBrushUI();
     syncTopbar();
@@ -712,4 +736,9 @@
       statusMsg('已创建默认地图（未连接服务器）');
     }
   })();
+
+  // ==================== 供 mobile.js 复用的入口 ====================
+  // 窄屏顶栏整体隐藏后，服务器地址与状态提示只在这里可取；
+  // 其余「新建 / 本地导入 / 地图码导入 / 随机生成 / 保存 / 导出」沿用各自按钮的 click（事件处理器不变）。
+  window.MapEditorActions = { serverUrl, statusMsg };
 })();

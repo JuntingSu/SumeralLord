@@ -100,5 +100,20 @@ const IO = (() => {
     return result.data;
   }
 
-  return { stripJsonComments, parseMapJson, downloadMap, saveToServer, loadServerMapList, loadServerMap };
+  /**
+   * 当前登录账号的公开统计（积分 score / 对局数 matches），用于上传前的免审核资格判断。
+   * 未登录（无 token）时抛错，调用方按「无免审核资格」处理。
+   */
+  async function loadMyStats(baseUrl) {
+    const token = authToken();
+    const resp = await fetch(`${base(baseUrl)}/api/users/me`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const result = await resp.json().catch(() => ({}));
+    if (!resp.ok || !result.success) throw new Error(result.message || '获取账号信息失败');
+    const u = result.data?.user ?? {};
+    return { username: u.username ?? '', score: Number(u.score) || 0, matches: Number(u.matches) || 0 };
+  }
+
+  return { stripJsonComments, parseMapJson, downloadMap, saveToServer, loadServerMapList, loadServerMap, loadMyStats };
 })();

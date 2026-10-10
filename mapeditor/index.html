@@ -82,37 +82,54 @@
   <section id="canvas-wrap">
     <canvas id="board"></canvas>
     <div id="tooltip" hidden></div>
+    <!-- 尺寸调整：宽屏保留 ±1/±5/±10/-2；窄屏只保留 ±1，并补「方向+ 数值输入」按整数调节 -->
     <div class="resize-float" id="resize-top">
       <button data-dir="top" data-d="1">上+1</button>
-      <button data-dir="top" data-d="5">上+5</button>
-      <button data-dir="top" data-d="10">上+10</button>
       <button data-dir="top" data-d="-1">上-1</button>
-      <button data-dir="top" data-d="-2">上-2</button>
-      <button data-dir="top" data-d="-5">上-5</button>
+      <button data-dir="top" data-d="5" class="d-only">上+5</button>
+      <button data-dir="top" data-d="10" class="d-only">上+10</button>
+      <button data-dir="top" data-d="-2" class="d-only">上-2</button>
+      <button data-dir="top" data-d="-5" class="d-only">上-5</button>
+      <span class="rf-ctrl m-only">
+        <input class="rf-num" type="number" inputmode="numeric" placeholder="±n" title="输入整数后点右侧按钮：正数扩容，负数缩减">
+        <button class="rf-apply" data-dir="top" title="按输入值调整行数（正数扩容 / 负数缩减）">上+</button>
+      </span>
     </div>
     <div class="resize-float" id="resize-bottom">
       <button data-dir="bottom" data-d="1">下+1</button>
-      <button data-dir="bottom" data-d="5">下+5</button>
-      <button data-dir="bottom" data-d="10">下+10</button>
       <button data-dir="bottom" data-d="-1">下-1</button>
-      <button data-dir="bottom" data-d="-2">下-2</button>
-      <button data-dir="bottom" data-d="-5">下-5</button>
+      <button data-dir="bottom" data-d="5" class="d-only">下+5</button>
+      <button data-dir="bottom" data-d="10" class="d-only">下+10</button>
+      <button data-dir="bottom" data-d="-2" class="d-only">下-2</button>
+      <button data-dir="bottom" data-d="-5" class="d-only">下-5</button>
+      <span class="rf-ctrl m-only">
+        <input class="rf-num" type="number" inputmode="numeric" placeholder="±n" title="输入整数后点右侧按钮：正数扩容，负数缩减">
+        <button class="rf-apply" data-dir="bottom" title="按输入值调整行数（正数扩容 / 负数缩减）">下+</button>
+      </span>
     </div>
     <div class="resize-float" id="resize-left">
       <button data-dir="left" data-d="1">左+1</button>
-      <button data-dir="left" data-d="5">左+5</button>
-      <button data-dir="left" data-d="10">左+10</button>
       <button data-dir="left" data-d="-1">左-1</button>
-      <button data-dir="left" data-d="-2">左-2</button>
-      <button data-dir="left" data-d="-5">左-5</button>
+      <button data-dir="left" data-d="5" class="d-only">左+5</button>
+      <button data-dir="left" data-d="10" class="d-only">左+10</button>
+      <button data-dir="left" data-d="-2" class="d-only">左-2</button>
+      <button data-dir="left" data-d="-5" class="d-only">左-5</button>
+      <span class="rf-ctrl m-only">
+        <input class="rf-num" type="number" inputmode="numeric" placeholder="±n" title="输入整数后点右侧按钮：正数扩容，负数缩减">
+        <button class="rf-apply" data-dir="left" title="按输入值调整列数（正数扩容 / 负数缩减）">左+</button>
+      </span>
     </div>
     <div class="resize-float" id="resize-right">
       <button data-dir="right" data-d="1">右+1</button>
-      <button data-dir="right" data-d="5">右+5</button>
-      <button data-dir="right" data-d="10">右+10</button>
       <button data-dir="right" data-d="-1">右-1</button>
-      <button data-dir="right" data-d="-2">右-2</button>
-      <button data-dir="right" data-d="-5">右-5</button>
+      <button data-dir="right" data-d="5" class="d-only">右+5</button>
+      <button data-dir="right" data-d="10" class="d-only">右+10</button>
+      <button data-dir="right" data-d="-2" class="d-only">右-2</button>
+      <button data-dir="right" data-d="-5" class="d-only">右-5</button>
+      <span class="rf-ctrl m-only">
+        <input class="rf-num" type="number" inputmode="numeric" placeholder="±n" title="输入整数后点右侧按钮：正数扩容，负数缩减">
+        <button class="rf-apply" data-dir="right" title="按输入值调整列数（正数扩容 / 负数缩减）">右+</button>
+      </span>
     </div>
 
     <!-- ==================== 移动端：悬浮工具按钮（悬浮于地图之上） ==================== -->
@@ -123,15 +140,24 @@
       <button id="btn-redo-m" title="前进">↪</button>
     </div>
     <div id="mobile-actions" class="m-only" hidden>
-      <button id="btn-settings-m" title="地图信息 / 势力 / 校验">⚙</button>
-      <button id="btn-generate-m" title="随机生成地图">🎲</button>
+      <button id="btn-settings-m" title="地图信息 / 势力">⚙</button>
+      <button id="btn-more-m" title="新建 / 导入 / 随机生成">＋</button>
+      <button id="btn-upload-m" title="导出 JSON / 导出到服务器">📤</button>
+      <div id="upload-menu" hidden>
+        <button type="button" data-act="json">📥 导出 JSON</button>
+        <button type="button" data-act="server">📤 导出到服务器</button>
+      </div>
     </div>
 
-    <!-- ==================== 移动端：涂刷参数底栏（四个框，点击弹起选项面板） ==================== -->
+    <!-- ==================== 移动端：涂刷参数底栏（最左为效果预览，四个框点击弹起选项面板） ==================== -->
     <div id="mobile-brush" class="m-only" hidden>
+      <div class="mb-preview" title="当前画笔效果预览">
+        <canvas id="mb-preview-canvas" width="48" height="42"></canvas>
+      </div>
       <div class="mb-box" id="mb-mode" title="涂刷模式">
         <span class="mb-caption">模式</span>
         <span class="mb-current" id="m-mode-value">全部</span>
+        <span class="mb-arrow" aria-hidden="true">▲</span>
         <div class="mb-pop" id="mb-pop-mode" hidden>
           <label class="chk"><input type="checkbox" id="m-mode-all" checked>全部</label>
           <label class="chk"><input type="checkbox" id="m-mode-terrain">仅地形</label>
@@ -141,16 +167,19 @@
       <div class="mb-box" id="mb-terrain" title="地形">
         <span class="mb-caption">地形</span>
         <span class="mb-current" id="m-terrain-value">平原</span>
+        <span class="mb-arrow" aria-hidden="true">▲</span>
         <div class="mb-pop" id="mb-pop-terrain" hidden></div>
       </div>
       <div class="mb-box" id="mb-owner" title="归属">
         <span class="mb-caption">归属</span>
         <span class="mb-current" id="m-owner-value">无主</span>
+        <span class="mb-arrow" aria-hidden="true">▲</span>
         <div class="mb-pop" id="mb-pop-owner" hidden></div>
       </div>
       <div class="mb-box" id="mb-strength" title="兵力">
         <span class="mb-caption">兵力</span>
         <span class="mb-current" id="m-strength-value">5</span>
+        <span class="mb-arrow" aria-hidden="true">▲</span>
         <div class="mb-pop" id="mb-pop-strength" hidden>
           <input id="m-strength-input" type="number" min="0" max="255" value="5">
           <button id="m-strength-ok" type="button" class="mini">确定</button>
@@ -165,12 +194,10 @@
     <div class="tabs">
       <button data-tab="info" class="active">地图信息</button>
       <button data-tab="players">势力</button>
-      <button data-tab="validate">校验</button>
     </div>
     <div class="tab-page" id="tab-info">
       <div class="frow"><label>标题</label><input id="f-title"></div>
-      <div class="frow"><label>作者</label><input id="f-author"></div>
-      <div class="frow"><label>时间戳</label><input id="f-timestamp" disabled title="时间戳不可修改"></div>
+      <div class="frow"><label>作者</label><input id="f-author" readonly class="ro" title="作者取自当前登录账号，不可修改"></div>
       <div class="frow"><label>描述</label><textarea id="f-desc" rows="3"></textarea></div>
       <div class="frow"><label>标签（逗号分隔）</label><input id="f-tags" placeholder="2人, 1v1"></div>
       <div class="frow"><label>总时长(秒)</label><input id="f-total" type="number" min="0"></div>
@@ -185,10 +212,6 @@
       <button id="btn-add-player" class="wide">＋ 新增势力</button>
       <div id="player-list"></div>
       <p class="hint">列表按座次自动排序；拖动「⇕」手柄可把势力调整到任意座次。据点格由「地形=据点 + 归属=该势力座次 + 兵力>0」表达，直接用画笔涂色即可。</p>
-    </div>
-    <div class="tab-page" id="tab-validate" hidden>
-      <div id="validate-summary" class="v-ok">—</div>
-      <ul id="validate-list"></ul>
     </div>
   </aside>
 </main>
@@ -231,6 +254,56 @@
   </div>
   <div class="dlg-body"></div>
 </dialog>
+
+<!-- ==================== 移动端：＋ 弹窗（新建 / 三种导入 / 随机生成） ==================== -->
+<dialog id="dlg-more" class="m-dlg">
+  <div class="dlg-head">
+    <h3>新建 / 导入</h3>
+    <button id="dlg-more-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body dlg-list">
+    <button type="button" class="mm-item" data-act="new">🆕 新建</button>
+    <button type="button" class="mm-item" data-act="open">📂 本地导入</button>
+    <button type="button" class="mm-item" data-act="mapcode">🎴 地图码导入</button>
+    <button type="button" class="mm-item" data-act="server">🌐 服务器导入</button>
+    <button type="button" class="mm-item" data-act="random">🎲 随机生成</button>
+  </div>
+</dialog>
+
+<!-- ==================== 移动端：服务器导入（服务器地图搜索） ==================== -->
+<dialog id="dlg-serverimport" class="m-dlg">
+  <div class="dlg-head">
+    <h3>服务器导入</h3>
+    <button id="dlg-serverimport-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body">
+    <div class="si-search">
+      <input id="m-server-search" placeholder="搜索服务器地图（标题/作者/简介/标签）">
+      <button id="m-server-search-btn" type="button" title="搜索">🔍</button>
+    </div>
+    <div id="m-server-results" class="si-results">
+      <div class="none">输入关键词后点 🔍 搜索服务器地图</div>
+    </div>
+  </div>
+</dialog>
+
+<!-- ==================== 移动端：上传免审核资格提示 ==================== -->
+<dialog id="dlg-upload-warn" class="m-dlg">
+  <div class="dlg-head">
+    <h3>上传提示</h3>
+    <button id="dlg-upload-warn-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body">
+    <p class="uw-text">当前账号未获得免审核上传资格，地图会进入审核队列，是否继续上传？</p>
+    <div class="dlg-btns">
+      <button id="uw-cancel" type="button">取消</button>
+      <button id="uw-ok" type="button" class="primary">继续上传</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- 移动端：状态浮层（窄屏顶栏隐藏，操作结果在此提示） -->
+<div id="m-toast"></div>
 
 <script src="js/constants.js"></script>
 <script src="js/mapdata.js"></script>

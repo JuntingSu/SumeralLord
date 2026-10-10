@@ -271,15 +271,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .p-flag-grid button:hover { border-color: var(--accent); }
 .p-flag-grid button.sel { border-color: var(--accent); background: rgba(77, 163, 255, 0.18); }
 
-/* 校验 */
-#validate-summary { padding: 8px; border-radius: 5px; margin-bottom: 8px; font-weight: 700; }
-#validate-summary.v-ok { background: rgba(87,199,133,0.15); color: var(--ok); }
-#validate-summary.v-warn { background: rgba(224,169,60,0.15); color: var(--warn); }
-#validate-summary.v-err { background: rgba(224,89,75,0.18); color: var(--err); }
-#validate-list { list-style: none; }
-#validate-list li { padding: 3px 6px; border-left: 3px solid var(--dim); margin-bottom: 3px; background: var(--panel2); border-radius: 3px; }
-#validate-list li.error { border-color: var(--err); color: var(--err); }
-#validate-list li.warn { border-color: var(--warn); color: var(--warn); }
+/* 作者：灰色只读（取自当前登录账号，不可修改） */
+input.ro { color: var(--dim); cursor: default; }
+input.ro:focus { border-color: var(--border); }
 
 /* tooltip */
 #tooltip {
@@ -507,3 +501,99 @@ body.mobile .p-flag-close:hover { color: var(--text); border: none; }
 body.mobile .p-flag-grid { grid-template-columns: repeat(5, 1fr); gap: 6px; }
 body.mobile .p-flag-grid button { padding: 6px 2px; font-size: 12px; }
 body.mobile .p-flag-grid .fprev { width: 26px; height: 26px; }
+
+/* ==================== 窄屏改版：顶栏隐藏 / 尺寸按钮精简 / 预览与状态浮层 ==================== */
+
+/* 顶栏全部组件在窄屏移除（新建·导入·服务器搜索·保存·导出已移入右上角图标） */
+body.mobile #topbar { display: none !important; }
+
+/* 尺寸按钮：窄屏只保留 ±1，另补「方向+ 数值输入」按任意整数调节 */
+body.mobile .d-only { display: none !important; }
+body.mobile .resize-float .rf-ctrl { display: flex !important; align-items: center; gap: 4px; }
+body.mobile #resize-left .rf-ctrl,
+body.mobile #resize-right .rf-ctrl { flex-direction: column; }
+body.mobile .rf-num { width: 52px; padding: 2px 4px; text-align: center; }
+body.mobile .rf-apply { padding: 2px 6px; font-size: 11px; white-space: nowrap; }
+
+/* 窄屏：右上角「上传」弹出菜单（导出 JSON / 导出到服务器） */
+body.mobile #upload-menu:not([hidden]) {
+  display: flex !important;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 150px;
+  padding: 6px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+#upload-menu button { text-align: left; padding: 7px 10px; font-size: 13px; white-space: nowrap; }
+#upload-menu button:hover { border-color: var(--accent); background: var(--panel); }
+
+/* 窄屏：＋ 弹窗的列表项 */
+body.mobile .dlg-list { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+body.mobile .mm-item { text-align: left; padding: 12px 14px; font-size: 14px; border-radius: 8px; }
+
+/* 窄屏：服务器导入弹窗 */
+body.mobile #dlg-serverimport .dlg-body { padding: 12px 14px; }
+.si-search { display: flex; gap: 6px; }
+.si-search input { flex: 1; min-width: 0; }
+.si-results {
+  margin-top: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.si-results button { text-align: left; padding: 8px 10px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.si-results button:hover { border-color: var(--accent); background: var(--panel); }
+.si-results .none { color: var(--dim); padding: 8px; font-size: 12px; }
+
+/* 窄屏：上传免审核资格提示弹窗 */
+body.mobile #dlg-upload-warn .dlg-body { padding: 14px; }
+.uw-text { font-size: 13px; line-height: 1.65; }
+
+/* 窄屏：涂刷底栏最左的效果预览（把兵虚拟放在地形上） */
+body.mobile #mobile-brush .mb-preview {
+  flex: none;
+  width: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+}
+#mb-preview-canvas { width: 48px; height: 42px; display: block; }
+
+/* 四个参数框右上角的上箭头：提示点击向上弹出选项 */
+.mb-arrow { position: absolute; top: 1px; right: 3px; font-size: 7px; line-height: 1; color: var(--dim); }
+
+/* 窄屏：状态浮层（替代被移除的顶栏状态区） */
+#m-toast { display: none; }
+body.mobile #m-toast.show {
+  display: block;
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(92vw, 440px);
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--text);
+  background: rgba(38, 42, 51, 0.96);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+body.mobile #m-toast.show.ok { color: var(--ok); border-color: rgba(87, 199, 133, 0.5); }
+body.mobile #m-toast.show.error { color: var(--err); border-color: rgba(224, 89, 75, 0.6); font-weight: 700; }
