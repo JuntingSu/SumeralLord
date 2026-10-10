@@ -2,6 +2,9 @@
 // 逐链播放：链起始兵表快照 → 逐事件动画（进度 0..1）→ 事件结束时按事件自带数据推进"动画态"。
 // 动画态推进只消费事件数据（SPAWN/UPDATE/DESPAWN/BREAK_JUDGE），不重复推导规则；
 // BREAK_JUDGE 的 region 断兵/扣血/删兵与 reducer 直接修改语义一致（reducer 不为其产生 UPDATE 事件）。
+// frame() 的契约：返回 null ⟺ 队列已排空（回放已追平最新局面）。**只要队列里还有待播链就绝不返回 null**：
+// 链与链的交界帧返回「链末态」帧（event 为 null，tiles 为该链播完后的动画态）。否则观战/重连回放积压时，
+// 渲染层会在交界帧回落渲染权威 board（= 最新局面），与回放位置交替显示造成高频闪烁。
 // 本文件属 UI 层（frontend/src/canvas/），确定性 lint 不适用（允许时间戳）。
 import type { GameEvent, SoldierState } from '@dl/shared';
 
@@ -17,6 +20,7 @@ export interface EventQueueItem {
 
 /** 每帧输出：当前事件与进度 + 事件起始态兵表（BoardCanvas 据此画中间帧） */
 export interface AnimatorFrame {
+  /** 当前事件（链末态帧为 null：该链已播完、尚未取下一链） */
   event: GameEvent | null;
   /** 0..1 事件播放进度（暂停时冻结） */
   progress: number;
@@ -104,7 +108,7 @@ export class EventAnimator {
     this.clearingSeats = [];
   }
 
-  /** 每帧调用（rAF）：返回当前帧；无队列且无播放时返回 null（渲染权威 board） */
+  /** 每帧调用（rAF）：返回当前帧；**队列已排空（回放已追平最新）时返回 null（渲染权威 board）** */
   frame(now: number): AnimatorFrame | null {
     if (this.item === null) {
       const queue = this.getQueue();
@@ -138,7 +142,20 @@ export class EventAnimator {
       };
     }
     this.finishEvent(now);
-    if (this.item === null) return null;
+    if (this.item === null) {
+      // 链播完：队列仍有待播链 → 返回「链末态」帧（tiles 即该链播完后的动画态，不回落当前局面）；
+      // 队列已空（回放追平最新）→ null，由渲染层画权威 board。
+      if (this.getQueue().length > 0) {
+        return {
+          event: null,
+          progress: 1,
+          tiles: this.tiles,
+          breakTiles: this.breakTiles,
+          clearingSeats: this.clearingSeats,
+        };
+      }
+      return null;
+    }
     return this.frame(now);
   }
 
