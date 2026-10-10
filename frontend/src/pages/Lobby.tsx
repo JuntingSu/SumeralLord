@@ -14,6 +14,74 @@ function greetingFor(hour: number): string {
   return '晚上好';
 }
 
+/** 房间状态文案：等待中=可加入，对局中，结算中 */
+function statusLabel(status: RoomListItem['status']): string {
+  return status === 'waiting' ? '可加入' : status === 'in_game' ? '对局中' : '结算中';
+}
+
+/** 房间名前状态点：绿=可进入，黄=对局中，灰=结算中 */
+function statusDotClass(status: RoomListItem['status']): string {
+  return status === 'waiting' ? 'bg-emerald-500' : status === 'in_game' ? 'bg-amber-400' : 'bg-slate-500';
+}
+
+/** 观战标记：眼睛 icon；禁止观战时在眼睛上叠加一条斜线 */
+function SpectateIcon({ allowed }: { allowed: boolean }) {
+  const label = allowed ? '允许观战' : '禁止观战';
+  return (
+    <span className="relative inline-flex h-5 w-5 items-center justify-center" role="img" aria-label={label} title={label}>
+      <svg
+        viewBox="0 0 24 24"
+        className={`h-5 w-5 ${allowed ? 'text-slate-300' : 'text-slate-500'}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M2 12s3.7-6.5 10-6.5S22 12 22 12s-3.7 6.5-10 6.5S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="2.6" />
+      </svg>
+      {!allowed && (
+        <svg
+          viewBox="0 0 24 24"
+          className="absolute inset-0 h-5 w-5 text-red-400"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.2}
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <line x1="4" y1="20" x2="20" y2="4" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+/** 密码标记：锁 icon（无密码时不渲染） */
+function LockIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4 text-slate-300"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label="需要密码"
+    >
+      <rect x="4.5" y="10.5" width="15" height="9.5" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+/** 房间列表列宽（表头与数据行共用，保证对齐） */
+const ROOM_GRID = 'lg:grid lg:grid-cols-[minmax(0,1fr)_56px_48px_48px_72px_152px] lg:items-center lg:gap-3';
+
 export default function Lobby() {
   const navigate = useNavigate();
   const user = useAuth((s) => s.user);
@@ -81,10 +149,6 @@ export default function Lobby() {
     navigate('/login', { replace: true });
   };
 
-  const joinedPlayers = joinedRoom
-    ? joinedRoom.players.filter((p) => p.state !== 'spectating').length
-    : 0;
-
   const greeting = greetingFor(new Date().getHours());
   const skinSrc = user ? avatarUrl(user.id, user.flag, user.hasSkin) : '';
 
@@ -112,31 +176,31 @@ export default function Lobby() {
 
         <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-6 pb-28">
           {joinedRoom && (
-            <div className="mb-6 flex items-center justify-between rounded-lg border border-emerald-700 bg-emerald-900/30 px-5 py-4">
-              <div>
-                <p className="font-medium">
-                  已加入房间：{joinedRoom.name}
-                  <span className="ml-2 rounded bg-emerald-700 px-2 py-0.5 text-xs">
-                    {joinedRoom.status === 'waiting' ? '等待中' : joinedRoom.status === 'game_over' ? '已结束' : '对局中'}
-                  </span>
-                </p>
-                <p className="mt-1 text-sm text-slate-400">
-                  地图 {joinedRoom.mapTitle} · 玩家 {joinedPlayers}/{joinedRoom.playerNum}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => navigate(`/room/${joinedRoom.id}`)}
-                  className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-                >
-                  进入房间
-                </button>
-                <button
-                  onClick={handleLeave}
-                  className="rounded bg-red-800 px-4 py-2 text-sm text-red-100 hover:bg-red-700"
-                >
-                  离开房间
-                </button>
+            <div className="mb-6 rounded-lg border border-emerald-700 bg-emerald-900/30 px-5 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">
+                    {joinedRoom.name}
+                    <span className="ml-2 rounded bg-emerald-700 px-2 py-0.5 text-xs">
+                      {joinedRoom.status === 'waiting' ? '等待中' : joinedRoom.status === 'game_over' ? '已结束' : '对局中'}
+                    </span>
+                  </p>
+                  <p className="mt-1 truncate text-sm text-slate-400">{joinedRoom.mapTitle}</p>
+                </div>
+                <div className="flex flex-col gap-2 lg:flex-row">
+                  <button
+                    onClick={() => navigate(`/room/${joinedRoom.id}`)}
+                    className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+                  >
+                    返回
+                  </button>
+                  <button
+                    onClick={handleLeave}
+                    className="rounded bg-red-800 px-4 py-2 text-sm text-red-100 hover:bg-red-700"
+                  >
+                    离开
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -153,60 +217,96 @@ export default function Lobby() {
               暂无房间，创建一个吧
             </div>
           ) : (
-            <ul className="space-y-3">
-              {rooms.map((room) => (
-                <li key={room.id} className="flex items-center justify-between rounded-lg bg-slate-800 px-5 py-4">
-                  <div>
-                    <p className="font-medium">
-                      {room.hasPassword && <span title="需要密码">🔒</span>} {room.name}
-                      {room.status === 'in_game' && (
-                        <span className="ml-2 rounded bg-indigo-700 px-2 py-0.5 text-xs">对局中</span>
-                      )}
-                      {room.status === 'game_over' && (
-                        <span className="ml-2 rounded bg-slate-600 px-2 py-0.5 text-xs">已结束</span>
-                      )}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      玩家 {room.currentPlayers}/{room.maxPlayers}
-                      {room.spectatorCount > 0 && ` · 观战 ${room.spectatorCount}`}
-                      {room.allowSpectate && ' · 可观战'}
-                    </p>
-                  </div>
-                  {joinedRoom ? (
-                    <span className="text-sm text-slate-500">已在其他房间</span>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      {room.allowSpectate && (
-                        <button
-                          onClick={() => askJoin(room, true)}
-                          className="rounded bg-slate-600 px-4 py-1.5 text-sm text-slate-100 hover:bg-slate-500"
-                        >
-                          观战
-                        </button>
-                      )}
-                      {room.status === 'in_game' && !room.allowSpectate ? (
-                        <span className="text-sm text-slate-500">不可观战</span>
-                      ) : room.status === 'in_game' ? (
-                        <button
-                          disabled
-                          title="对局进行中，仅可观战加入"
-                          className="cursor-not-allowed rounded bg-slate-700 px-4 py-1.5 text-sm text-slate-400"
-                        >
-                          进入
-                        </button>
+            <div className="overflow-hidden rounded-lg bg-slate-800">
+              {/* 表头（窄屏隐藏） */}
+              <div className={`hidden border-b border-white px-5 py-2 text-xs text-slate-400 ${ROOM_GRID}`}>
+                <span>房间</span>
+                <span className="text-center">玩家</span>
+                <span className="text-center">观战</span>
+                <span className="text-center">密码</span>
+                <span className="text-center">房间状态</span>
+                <span className="text-center">操作</span>
+              </div>
+
+              <ul className="divide-y divide-white">
+                {rooms.map((room) => {
+                  const canJoin = room.status === 'waiting';
+                  return (
+                    <li
+                      key={room.id}
+                      className={`flex items-center justify-between gap-3 px-5 py-3 ${ROOM_GRID}`}
+                    >
+                      {/* 房间名 + 状态点；窄屏在下方补一行小字四项信息 */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusDotClass(room.status)}`}
+                            aria-hidden="true"
+                          />
+                          <span className="truncate font-medium">{room.name}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-3 text-xs text-slate-400 lg:hidden">
+                          <span>
+                            玩家 {room.currentPlayers}/{room.maxPlayers}
+                          </span>
+                          <SpectateIcon allowed={room.allowSpectate} />
+                          {room.hasPassword && <LockIcon />}
+                          <span>{statusLabel(room.status)}</span>
+                        </div>
+                      </div>
+
+                      {/* 宽屏列：玩家 / 观战 / 密码 / 房间状态 */}
+                      <span className="hidden text-center text-sm text-slate-300 lg:block">
+                        {room.currentPlayers}/{room.maxPlayers}
+                      </span>
+                      <span className="hidden lg:flex lg:justify-center">
+                        <SpectateIcon allowed={room.allowSpectate} />
+                      </span>
+                      <span className="hidden lg:flex lg:justify-center">
+                        {room.hasPassword ? <LockIcon /> : null}
+                      </span>
+                      <span className="hidden text-center text-sm text-slate-300 lg:block">
+                        {statusLabel(room.status)}
+                      </span>
+
+                      {/* 操作：加入 / 观战（窄屏上下排列，宽屏并排） */}
+                      {joinedRoom ? (
+                        <span className="shrink-0 text-center text-xs text-slate-500 lg:text-sm">
+                          已在其他房间
+                        </span>
                       ) : (
-                        <button
-                          onClick={() => askJoin(room, false)}
-                          className="rounded bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500"
-                        >
-                          {room.allowSpectate ? '进入' : '加入'}
-                        </button>
+                        <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:justify-center">
+                          <button
+                            type="button"
+                            disabled={!canJoin}
+                            onClick={() => askJoin(room, false)}
+                            className={`rounded px-3 py-1 text-xs font-medium ${
+                              canJoin
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                                : 'cursor-not-allowed bg-slate-700 text-slate-400'
+                            }`}
+                          >
+                            加入
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!room.allowSpectate}
+                            onClick={() => askJoin(room, true)}
+                            className={`rounded px-3 py-1 text-xs font-medium ${
+                              room.allowSpectate
+                                ? 'bg-slate-600 text-slate-100 hover:bg-slate-500'
+                                : 'cursor-not-allowed bg-slate-700 text-slate-400'
+                            }`}
+                          >
+                            观战
+                          </button>
+                        </div>
                       )}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           )}
         </main>
 
@@ -239,12 +339,22 @@ export default function Lobby() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Link
-              to="/create-room"
-              className="rounded-lg bg-emerald-600 px-5 py-2.5 font-medium text-white shadow-lg hover:bg-emerald-500"
-            >
-              创建房间
-            </Link>
+            {joinedRoom ? (
+              <span
+                aria-disabled="true"
+                title="已在房间中，无法再创建"
+                className="cursor-not-allowed rounded-lg bg-slate-700 px-5 py-2.5 font-medium text-slate-400 shadow-lg"
+              >
+                创建房间
+              </span>
+            ) : (
+              <Link
+                to="/create-room"
+                className="rounded-lg bg-emerald-600 px-5 py-2.5 font-medium text-white shadow-lg hover:bg-emerald-500"
+              >
+                创建房间
+              </Link>
+            )}
             <button
               type="button"
               aria-haspopup="dialog"
