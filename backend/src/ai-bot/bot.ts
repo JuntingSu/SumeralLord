@@ -3,12 +3,15 @@
 // - 订阅 /ws-bot 实时流；轮到 AI 席位时以 planAiTurn 生成意图，经 AI_INTENT_SUBMIT 逐条提交；
 // - 重启 = 全量重放（不记忆跨重启计划）→ 提交天然幂等；WS 断开即退出，由 AiBotManager 看门狗重拉；
 // - 服务器只中继不演算；本进程与各端前端以同一确定性 reducer 应用意图，逐条 ACK 推进。
+// - 难度语义：computer=1 → 规则 AI（planAiTurn）；computer=2 → 训练 MCTS AI（@dl/train，每回合规划一次、
+//   按序提交，计划耗尽/状态分歧时再规划）；3/255 → 休闲跳过。
 // boot 路径经环境变量 AI_BOT_BOOT 传入（spawn 时避免 argv 索引歧义）。
 import { openSync, readFileSync, readSync, statSync, closeSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
 import { applyIntent, initState, planAiTurn } from '@dl/shared';
 import type { GameState, GameStartMsg, PlayerIntent, RoomServerMsg, SeatAssignment } from '@dl/shared';
+import { initMctsWeights, planMctsTurn } from '@dl/train';
 
 export interface BotBoot {
   gameId: string;
@@ -17,6 +20,8 @@ export interface BotBoot {
   logFile: string;
   wsUrl: string;
   reducerVersion: string;
+  /** 难度2 训练 AI 权重文件路径（WeightRecord JSON；缺省用种子权重） */
+  weightsPath?: string;
 }
 
 /** 追加写日志的增量读取器：只读新增完整行，容忍尾部半行（服务器写入中） */
@@ -67,6 +72,9 @@ export class AiBot {
   private inflight: { clientTempId: string; seat: number; intent: PlayerIntent } | null = null;
   private tempSeq = 0;
   private finished = false;
+  /** 难度2 训练 AI：本回合已规划计划（按序提交；耗尽/分歧/重放时重新规划） */
+  private mctsPlan: PlayerIntent[] | null = null;
+  private mctsPlanSeat = -1;
   private readonly exited: Promise<void>;
   private resolveExit!: () => void;
 
@@ -103,6 +111,7 @@ export class AiBot {
     reader.dispose();
     this.board = null;
     this.appliedEventId = 0;
+    this.mctsPlan = null; // 计划不跨重放（重启后确定性重规划）
     for (const line of lines) this.consumeLogLine(line);
   }
 
@@ -217,6 +226,7 @@ export class AiBot {
         // 服务器拒绝（如非法意图）：解除在途提交，重放后继续（拒绝不留死锁）
         this.log(`收到 ERROR: ${String(msg.code)} ${String(msg.message)}`);
         this.inflight = null;
+        this.mctsPlan = null; // 计划可能与实际状态分歧：重新规划
         this.replayFromLog();
         this.drive();
         break;
@@ -236,11 +246,26 @@ export class AiBot {
     const isAiSeat = this.seatAssignments.some((a) => a.seat === seat && a.isAI);
     if (!isAiSeat) return;
     if (this.board.phase !== 'ACTION' && this.board.phase !== 'ADD_POINT') return;
-    // 每次驱动重新规划（确定性：同 seed 同状态 → 同决策），不记忆计划 → 重启幂等
-    const plan = planAiTurn(this.board, seat);
-    const intents = plan.kind === 'intents' ? plan.intents : skipIntents(this.board, seat);
-    if (intents.length === 0) return;
+    // 难度语义：2 = 训练 MCTS AI（每回合规划一次、按序提交；计划耗尽/状态分歧/重放时重新规划）；
+    // 1 = 规则 AI（每次驱动重新规划，确定性决策）；3/255 = 休闲跳过
+    const computer = this.board.forces.find((f) => f.seat === seat)?.computer ?? 255;
+    let intents: PlayerIntent[];
+    if (computer === 2) {
+      if (this.mctsPlan === null || this.mctsPlanSeat !== seat || this.mctsPlan.length === 0) {
+        this.mctsPlan = planMctsTurn(this.board, seat);
+        this.mctsPlanSeat = seat;
+      }
+      intents = this.mctsPlan;
+    } else {
+      const plan = planAiTurn(this.board, seat);
+      intents = plan.kind === 'intents' ? plan.intents : skipIntents(this.board, seat);
+    }
+    if (intents.length === 0) {
+      this.mctsPlan = null;
+      return;
+    }
     const intent = intents[0];
+    if (computer === 2) this.mctsPlan = intents.slice(1); // 已提交意图移出计划
     const clientTempId = `bot-${++this.tempSeq}`;
     this.inflight = { clientTempId, seat, intent };
     ws.send(JSON.stringify({ type: 'AI_INTENT_SUBMIT', clientTempId, aiSeat: seat, intent }));
@@ -254,6 +279,22 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const boot = JSON.parse(readFileSync(bootPath, 'utf8')) as BotBoot;
+  // 难度2 训练 AI 权重：boot.weightsPath 指向 WeightRecord JSON（{weights:{mid,late}} 或裸 {mid,late}）
+  if (boot.weightsPath) {
+    try {
+      const raw = JSON.parse(readFileSync(boot.weightsPath, 'utf8')) as unknown;
+      const rec = raw as { weights?: { mid: number[]; late: number[] } };
+      const w = (rec.weights ?? rec) as { mid: number[]; late: number[] };
+      if (Array.isArray(w.mid) && Array.isArray(w.late) && w.mid.length === 6 && w.late.length === 6) {
+        initMctsWeights(w);
+        console.log(`[ai-bot] 已加载训练权重：${boot.weightsPath}`);
+      } else {
+        console.error(`[ai-bot] 权重文件格式异常，回退种子权重：${boot.weightsPath}`);
+      }
+    } catch (e) {
+      console.error(`[ai-bot] 权重加载失败（${String(e)}），回退种子权重：${boot.weightsPath}`);
+    }
+  }
   const bot = new AiBot(boot);
   process.on('SIGTERM', () => {
     bot.log('收到 SIGTERM，退出');

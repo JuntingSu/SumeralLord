@@ -21,6 +21,8 @@ export interface AiBotManagerOptions {
   bootDir?: string;
   restartBackoffMs?: number;
   restartMax?: number;
+  /** 难度2（普通）训练 MCTS AI 权重文件路径（缺省 config.aiWeightsPath；测试可注入以断言权重加载） */
+  weightsPath?: string;
   /** 进程 stdout/stderr 输出回调（测试可注入） */
   onOutput?: (gameId: string, line: string) => void;
   /** 子进程 spawn 注入（单元测试 mock 用；缺省真实 spawn） */
@@ -45,6 +47,7 @@ export class AiBotManager {
   private readonly bootDir: string;
   private readonly restartBackoffMs: number;
   private readonly restartMax: number;
+  private readonly weightsPath: string;
   private readonly tsxCli: string;
   private readonly onOutput?: (gameId: string, line: string) => void;
   private readonly spawnFn: typeof spawn;
@@ -58,6 +61,7 @@ export class AiBotManager {
     this.bootDir = opts.bootDir ?? path.join(__dirname, '../../data/bot_boot');
     this.restartBackoffMs = opts.restartBackoffMs ?? config.aiBotRestartBackoffMs;
     this.restartMax = opts.restartMax ?? config.aiBotRestartMax;
+    this.weightsPath = opts.weightsPath ?? config.aiWeightsPath;
     this.onOutput = opts.onOutput;
     this.spawnFn = opts.spawnFn ?? spawn;
     this.tsxCli = require.resolve('tsx/cli');
@@ -83,7 +87,19 @@ export class AiBotManager {
       `&reducerVersion=${encodeURIComponent(game.reducerVersion)}`;
     writeFileSync(
       bootPath,
-      JSON.stringify({ gameId: game.id, roomId: game.roomId, logFile: game.logFile, wsUrl, reducerVersion: game.reducerVersion }, null, 2),
+      JSON.stringify(
+        {
+          gameId: game.id,
+          roomId: game.roomId,
+          logFile: game.logFile,
+          wsUrl,
+          reducerVersion: game.reducerVersion,
+          // 难度2 训练 MCTS AI 权重（格式异常/缺省时 bot 回退种子权重，不影响其他难度）
+          weightsPath: this.weightsPath || undefined,
+        },
+        null,
+        2,
+      ),
       'utf8',
     );
     this.bots.set(game.id, { game, proc: null, bootPath, restarts: 0, killed: false });

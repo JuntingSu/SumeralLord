@@ -5,7 +5,8 @@
   "workspaces": [
     "packages/*",
     "backend",
-    "frontend"
+    "frontend",
+    "train"
   ],
   "scripts": {
     "dev:backend": "npm run dev -w backend",

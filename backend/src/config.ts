@@ -6,6 +6,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const num = (v: string | undefined, d: number) => (v === undefined ? d : Number(v));
 
+const repoRoot = path.join(__dirname, '../..');
+/** 难度2（普通）训练 MCTS AI 权重文件：DL_AI_WEIGHTS 优先（相对路径按仓库根解析，不依赖子进程 cwd），缺省指向仓库内 v45 */
+const aiWeightsPath = process.env.DL_AI_WEIGHTS
+  ? path.resolve(repoRoot, process.env.DL_AI_WEIGHTS)
+  : path.join(repoRoot, 'train/v1/runs/weights/v45.json');
+
 export const config = {
   port: Number(process.env.PORT ?? 4096),
   host: process.env.HOST ?? '127.0.0.1',
@@ -30,6 +36,8 @@ export const config = {
   aiBotRestartBackoffMs: num(process.env.AI_BOT_RESTART_BACKOFF_MS, 1000),
   /** bot 崩溃重启次数上限（超出后放弃，等待对局结束） */
   aiBotRestartMax: num(process.env.AI_BOT_RESTART_MAX, 8),
+  /** 难度2（普通）训练 MCTS AI 的权重文件路径（WeightRecord JSON；缺省 bot 用种子权重见 aiWeightsPath 兜底） */
+  aiWeightsPath,
 };
 
 if (config.isProd && config.jwtSecret === 'dev-secret-do-not-use-in-prod') {

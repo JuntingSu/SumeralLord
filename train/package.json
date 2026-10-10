@@ -1,0 +1,20 @@
+{
+  "name": "@dl/train",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "v1/lib/online.ts",
+  "types": "v1/lib/online.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dl/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "~5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
