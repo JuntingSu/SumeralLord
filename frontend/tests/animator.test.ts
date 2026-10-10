@@ -2,7 +2,15 @@
 // 时间线由 frame(now) 参数驱动（不依赖真实时钟），确定性可测。
 import { describe, it, expect } from 'vitest';
 import { EventAnimator, EVENT_DURATION, type EventQueueItem } from '../src/canvas/animator';
-import type { GameEvent, SoldierState } from '@dl/shared';
+import { applyIntent, initState } from '@dl/shared';
+import type {
+  BattlefieldTile,
+  GameEvent,
+  MapFullData,
+  PlayerIntent,
+  SeatAssignment,
+  SoldierState,
+} from '@dl/shared';
 
 function soldier(owner: number, strength = 1, isLinked = true): SoldierState {
   return { owner, strength, isLinked, hasMovement: true, counter: 1 };
@@ -62,16 +70,36 @@ describe('EventAnimator 取链与播放推进', () => {
     expect(m.anim.isPlaying).toBe(false);
   });
 
-  it('多链连续播放：第一条播完，下一帧自动接第二条', () => {
+  it('多链连续播放：链条交界帧返回「链末态」帧，最后一条播完才返回 null', () => {
     const m = makeAnim([item([SWITCH()]), item([SWITCH()])]);
     const dur = EVENT_DURATION.SWITCH_PHASE;
     m.anim.frame(0); // 取链（第一条）
-    expect(m.anim.frame(dur)).toBeNull(); // 第一条链播完（当帧不接链，渲染 board）
+    const boundary = m.anim.frame(dur); // 第一条链播完：队列仍有待播链 → 链末态帧（不回落当前局面）
+    expect(boundary).not.toBeNull();
+    expect(boundary!.event).toBeNull();
     expect(m.queue.length).toBe(1);
     expect(m.anim.frame(dur + 1)!.event!.kind).toBe('SWITCH_PHASE'); // 下一帧取第二条
     expect(m.queue.length).toBe(1); // 第二条播放中未弹出
-    expect(m.anim.frame(dur + 1 + dur)).toBeNull();
+    expect(m.anim.frame(dur + 1 + dur)).toBeNull(); // 队列排空（已追平）→ null
     expect(m.queue.length).toBe(0);
+  });
+
+  it('回归：队列未排空前 frame() 不返回 null（回放期间不回落当前局面，防交替闪烁）', () => {
+    const m = makeAnim([item([SWITCH()]), item([ADD_POINT()]), item([SWITCH()])]);
+    const total = EVENT_DURATION.SWITCH_PHASE * 2 + EVENT_DURATION.ADD_POINT;
+    let firstNullAt = -1;
+    for (let i = 0, t = 0; i < 600; i++, t += 1) {
+      const f = m.anim.frame(t);
+      if (f === null) {
+        // 不变量：返回 null ⟺ 队列已排空且无播放（回放已追平最新）
+        expect(m.queue.length).toBe(0);
+        expect(m.anim.isPlaying).toBe(false);
+        if (firstNullAt < 0) firstNullAt = t;
+      }
+    }
+    expect(m.queue.length).toBe(0);
+    // 三条链全部播完（两个交界帧各占 1 帧）之后才可能出现 null
+    expect(firstNullAt).toBeGreaterThanOrEqual(total);
   });
 
   it('INIT 零时长事件立即通过', () => {
@@ -209,5 +237,94 @@ describe('EventAnimator 演出控制', () => {
     // 清队列后 frame 返回 null
     queue.length = 0;
     expect(anim.frame(0)).toBeNull();
+  });
+});
+
+// ---------- 等价性守卫（回放期间画面权威 = animator 动画态） ----------
+// 修复后：队列未排空前渲染层只画 animator 的动画态，不再回落权威 board；因此链末态必须与
+// reducer 权威态逐地块一致，否则回放结束后会出现一次"跳变"。用真实 reducer 链驱动验证。
+const PLAIN = 0;
+const CITY = 1;
+const EMPTY = 128;
+const TIME = { stepTime: 90, gameTime: 1200, additionalTime: 0 };
+const ASG: SeatAssignment[] = [
+  { seat: 1, playerId: 101, isAI: false },
+  { seat: 2, playerId: 102, isAI: false },
+];
+
+/** 小地图（4 行 5 列；tiles: index → [地形, 归属, 兵力]，未列出为 [平原, 无主, 0]） */
+function makeMap(tiles: Record<number, [number, number, number]>): MapFullData {
+  const rows = 4;
+  const columns = 5;
+  const battlefield: BattlefieldTile[] = Array.from(
+    { length: rows * columns },
+    (_, i): [number, number, number] => tiles[i] ?? [PLAIN, EMPTY, 0],
+  );
+  return {
+    id: 'test-map',
+    version: 1,
+    title: '测试图',
+    description: '',
+    author: 'test',
+    timestamp: '2026-08-16 00:00:00.0',
+    row: rows,
+    column: columns,
+    random_spawn: false,
+    cylindrical_map: false,
+    fog_mode: false,
+    online_time_settings: { total_time: 600, round_time: 60, time_bonus: 0 },
+    tags: [],
+    player_num: 2,
+    player_list: [
+      { name: '红方', team: 1, computer: 255, seat: 1, flag: 1 },
+      { name: '蓝方', team: 2, computer: 255, seat: 2, flag: 2 },
+    ],
+    battlefield,
+  };
+}
+
+/** 按意图序驱动 reducer，并把每条链（含链前兵表快照）交给 animator 逐帧播完 */
+function driveAndPlay(map: MapFullData, intents: Array<{ seat: number; intent: PlayerIntent }>) {
+  let state = initState({ map, seatAssignments: ASG, timeSettings: TIME, seed: 'test-seed' }).state;
+  let queue: EventQueueItem[] = [];
+  const kinds: string[] = [];
+  for (const { seat, intent } of intents) {
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat }, intent });
+    if (!r.ok) throw new Error(`意图被拒：seat ${seat} ${intent.intentType}（${r.reason}）`);
+    const beforeTiles = state.tiles.map((t) => (t.soldier ? { ...t.soldier } : null));
+    state = r.state;
+    kinds.push(...r.chain.map((e) => e.kind));
+    queue = [...queue, { chain: r.chain, beforeTiles }];
+  }
+  const anim = new EventAnimator(
+    () => queue,
+    () => {
+      queue = queue.slice(1);
+    },
+  );
+  for (let i = 0, t = 0; (queue.length > 0 || anim.isPlaying) && i < 10_000; i++, t += 1000) anim.frame(t);
+  return { state, anim, kinds };
+}
+
+describe('EventAnimator 动画态与 reducer 权威态等价', () => {
+  it('MOVE 链（SPAWN/UPDATE/REJOIN）：动画态与权威态一致', () => {
+    // seat1 连兵网络 6(据点) - 7 - 13；7(str2) 移动至空地 8
+    const map = makeMap({ 6: [CITY, 1, 2], 7: [PLAIN, 1, 2], 13: [PLAIN, 1, 2], 2: [CITY, 2, 6] });
+    const { state, anim, kinds } = driveAndPlay(map, [{ seat: 1, intent: { intentType: 'MOVE', from: 7, to: 8 } }]);
+    expect(kinds).toEqual(expect.arrayContaining(['MOVE', 'SPAWN', 'UPDATE']));
+    expect(anim.currentTiles).toEqual(state.tiles.map((t) => t.soldier));
+  });
+
+  it('ATTACK 致断连锁（DESPAWN/BREAK/BREAK_JUDGE）：动画态与权威态一致', () => {
+    // seat2 据点 2(str6) 击杀 7(str2) → 13 失连（断兵、兵力 -1）
+    const map = makeMap({ 6: [CITY, 1, 2], 7: [PLAIN, 1, 2], 13: [PLAIN, 1, 2], 2: [CITY, 2, 6] });
+    const { state, anim, kinds } = driveAndPlay(map, [
+      { seat: 1, intent: { intentType: 'SWITCH_PHASE' } }, // 行动 → 加点
+      { seat: 1, intent: { intentType: 'SWITCH_PHASE' } }, // 加点 → 结束（轮转至 seat2）
+      { seat: 2, intent: { intentType: 'ATTACK', from: 2, to: 7 } },
+    ]);
+    expect(kinds).toEqual(expect.arrayContaining(['DESPAWN', 'BREAK', 'BREAK_JUDGE']));
+    expect(state.tiles[13].soldier).toMatchObject({ isLinked: false, strength: 1 });
+    expect(anim.currentTiles).toEqual(state.tiles.map((t) => t.soldier));
   });
 });
