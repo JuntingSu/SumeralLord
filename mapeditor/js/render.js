@@ -203,7 +203,7 @@ const HexRender = (() => {
       const { cx, cy } = centerOf(i, column, layout);
       hexPath(ctx, cx, cy, layout.size);
       ctx.strokeStyle = MapConst.CITY_RING;
-      ctx.lineWidth = Math.max(1.5, layout.size * 0.045);
+      ctx.lineWidth = Math.max(4.5, layout.size * 0.135); // 与战斗棋盘一致：3 倍粗
       ctx.stroke();
     }
 
@@ -264,7 +264,7 @@ const HexRender = (() => {
     if (terrain === TERRAIN.CITY) {
       hexPath(ctx, cx, cy, size);
       ctx.strokeStyle = MapConst.CITY_RING;
-      ctx.lineWidth = Math.max(1.5, size * 0.045);
+      ctx.lineWidth = Math.max(4.5, size * 0.135); // 与战斗棋盘一致：3 倍粗
       ctx.stroke();
     }
   }
