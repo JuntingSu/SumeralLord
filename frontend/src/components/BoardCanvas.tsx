@@ -279,7 +279,7 @@ export default function BoardCanvas({
    *  2 行动阶段、我方无行动力的兵
    *  3 行动阶段、敌方（非我方阵营）反击次数为 0 的兵
    *  4 行动阶段、周围六格全为全断地形或同队兵（无路可走）
-   *  5 1 兵力连兵（连兵强度 1 无法进攻）
+   *  5 我方 1 兵力连兵（连兵强度 1 无法进攻；仅限我方）
    * board 每次变化（覆盖发起进攻/移动/生成/失去行动力/切阶段/结束回合/兵消失/回合开始）
    * 都整体重算一次集合，绘制时只查表；复杂度 O(地块数×6)，不影响帧率。
    */
@@ -302,8 +302,9 @@ export default function BoardCanvas({
         set.add(i); // 1
         continue;
       }
-      if (s.isLinked && s.strength === 1) {
-        set.add(i); // 5
+      // 5：1 兵力连兵（仅我方；敌方 1 力连兵仍按白色渲染）
+      if (mySeat !== null && mySide(s.owner) && s.isLinked && s.strength === 1) {
+        set.add(i);
         continue;
       }
       if (phase !== 'ACTION') continue;
