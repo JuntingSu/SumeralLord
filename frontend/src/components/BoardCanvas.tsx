@@ -1,7 +1,7 @@
 // 双层 Canvas 棋盘（前端规划 §1.3，M5.1 动画版 + M5.2 交互版）：
 // 底层静态层（地形+迷雾+据点圆点，dirty 重绘）、上层动态层（兵+动画中间帧+hover/选中/光圈/高亮，每帧）。
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
-// M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）（view 变换统一应用于两层与拾取；双击不改变视图）；
+// M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~12x）+ 进入对局按最小地块宽度自动放大（view 变换统一应用于两层与拾取；双击不改变视图）；
 // 断兵视觉：整旗等比缩小（不再单独出镂空图），据点驻军按连兵渲染。
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { TERRAIN, TILE_OWNER, isFullBreak, isNeutralOwner } from '@dl/shared';
@@ -44,7 +44,10 @@ const SQRT3 = Math.sqrt(3);
 /** 拖拽阈值（px）：位移超过视为拖拽而非点击/长按 */
 const DRAG_THRESHOLD = 4;
 const MIN_SCALE = 0.3;
-const MAX_SCALE = 4;
+/** 最大缩放：原 4x 的 3 倍 */
+const MAX_SCALE = 12;
+/** 进入对局时至少自动放大到的地块宽度（CSS px，六边形横向宽 = √3 × 边长） */
+export const INITIAL_TILE_WIDTH_PX = 48;
 /** 地块间隔：绘制六边形半径相对布局边长的缩小比例（≈4% 边长），仅对局内棋盘生效 */
 const TILE_GAP = 0.04;
 /** 旗帜图片内六边形外接圆半径（与 backend/scripts/gen-flags.mjs 的 R=100 耦合，改动需同步） */
@@ -76,6 +79,8 @@ interface BoardCanvasProps {  board: GameState;
   /** M5.1：动画播放器实例（Game 页注入；null = 无动画直渲 board） */
   animatorRef?: React.MutableRefObject<EventAnimator | null> | null;
   className?: string;
+  /** 首次布局的最小地块宽度（CSS px）；>0 时初始视图自动放大到该宽度（宽窄屏一致）。缺省 0 = 不自动缩放（回放） */
+  minInitialTileWidth?: number;
 }
 
 /** 命令式缩放接口（窄屏 +/− 按钮使用） */
@@ -203,6 +208,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
   onTilePointerUp,
   animatorRef,
   className,
+  minInitialTileWidth = 0,
 }: BoardCanvasProps, ref) {
   const staticRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -287,6 +293,22 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
       window.removeEventListener('orientationchange', update);
     };
   }, []);
+
+  // 进入对局初始视图：窄/宽屏一致，首次拿到画布尺寸后，若地块宽度不足指定值则放大到该值。
+  // 以画布中心为锚点（布局在 1x 时已把地图居中），只执行一次；回放等用法传 0 不自动缩放。
+  const initialZoomDoneRef = useRef(false);
+  useLayoutEffect(() => {
+    if (initialZoomDoneRef.current || minInitialTileWidth <= 0) return;
+    const { w, h } = canvasSize;
+    if (w <= 0 || h <= 0) return;
+    const L = computeLayout(w, h, board.rows, board.columns);
+    if (L.size <= 0) return;
+    initialZoomDoneRef.current = true;
+    const scale = Math.min(MAX_SCALE, Math.max(1, minInitialTileWidth / (SQRT3 * L.size)));
+    if (scale <= 1) return;
+    viewRef.current = { scale, offX: (w / 2) * (1 - scale), offY: (h / 2) * (1 - scale) };
+    syncView();
+  }, [canvasSize, board.rows, board.columns, minInitialTileWidth]);
 
   /** owner → 旗帜编号（预计算；野生/阻挡用各自的中立旗，未知归属沿用 8 号兜底） */
   const flagOf = useMemo(() => {
@@ -396,7 +418,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
       }
       hexPath(ctx, c.cx, c.cy, size * view.scale);
       ctx.strokeStyle = TILE_STROKE;
-      ctx.lineWidth = Math.max(1, size * view.scale * 0.035);
+      ctx.lineWidth = Math.max(0.6, size * view.scale * 0.035);
       ctx.stroke();
     }
 
@@ -484,9 +506,9 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
         const h = size * 0.6 * (broken ? BROKEN_FLAG_SCALE : 1);
         ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
       }
-      // 兵力数字：默认白字叠黑色底影（不再描边）；不可行动单位改浅灰半透明叠深灰半透明
+      // 兵力数字：随地块等比缩放
       const text = String(soldier.strength);
-      ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
+      ctx.font = `bold ${size * 0.5}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       // 灰态：浅灰半透明压上层、深灰半透明压下层（白/黑两层的顺序不变）
@@ -499,7 +521,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
       if (flash) {
         hexPath(ctx, cx, cy, size * (1 - TILE_GAP) * 0.92);
         ctx.strokeStyle = FLASH_COLORS[flash];
-        ctx.lineWidth = 3;
+        ctx.lineWidth = Math.max(1, size * 0.1);
         ctx.stroke();
       }
     },
@@ -669,7 +691,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
           if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
           const c = tx(centerOf(i, columns, size, offX, offY, totalH));
           // 描边以路径为中心向两侧展开：半径内缩半个线宽，外沿正好贴地块边界，不出框
-          const w = Math.max(3, size * v.scale * 0.09);
+          const w = Math.max(1, size * v.scale * 0.09);
           hexPath(ctx, c.cx, c.cy, size * v.scale - w / 2);
           ctx.strokeStyle = CITY_RING;
           ctx.lineWidth = w;
@@ -683,7 +705,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
 
         // 敌兵威胁环（画在兵与据点金环之上）：红=有反击、白=无反击；进攻会失败时红环叠荆棘
         for (const r of threatRings) {
-          const w = Math.max(1.5, size * v.scale * 0.045);
+          const w = Math.max(0.8, size * v.scale * 0.045);
           const rr = size * v.scale - w / 2; // 环内缩半个线宽，外沿贴地块边界
           if (r.soldier.counter > 0 && r.wouldFail) {
             // 进攻必败：荆棘环与威胁环同位，直接替代威胁环（不再画环）
@@ -699,12 +721,12 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
         // 加点阶段连兵白字高亮
         for (const i of addPointHighlights) {
           const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-          ctx.font = `bold ${Math.max(10, size * 0.5 * v.scale)}px sans-serif`;
+          ctx.font = `bold ${size * 0.5 * v.scale}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#ffffff';
           ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = Math.max(0.8, size * v.scale * 0.07);
           ctx.strokeText(String(board.tiles[i].soldier!.strength), c.cx, c.cy);
           ctx.fillText(String(board.tiles[i].soldier!.strength), c.cx, c.cy);
         }
@@ -715,7 +737,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
           ctx.beginPath();
           ctx.arc(c.cx, c.cy, size * 0.78 * v.scale, 0, Math.PI * 2);
           ctx.strokeStyle = 'rgba(255, 235, 59, 0.9)';
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = Math.max(1, size * v.scale * 0.08);
           ctx.stroke();
         }
         // hover 描边
@@ -723,7 +745,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
           const c = tx(centerOf(hoverRef.current, columns, size, offX, offY, totalH));
           hexPath(ctx, c.cx, c.cy, ts * v.scale);
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = Math.max(0.6, size * v.scale * 0.05);
           ctx.stroke();
         }
       }

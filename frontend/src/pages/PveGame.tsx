@@ -23,7 +23,7 @@ import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
 import { useNarrowScreen } from '../lib/useNarrowScreen';
 import { shouldAutoSkipPhase } from '../game/dim';
-import BoardCanvas, { type BoardCanvasHandle } from '../components/BoardCanvas';
+import BoardCanvas, { INITIAL_TILE_WIDTH_PX, type BoardCanvasHandle } from '../components/BoardCanvas';
 import PveResultModal from '../components/PveResultModal';
 
 const PHASE_LABEL: Record<string, string> = {
@@ -821,6 +821,7 @@ export default function PveGame() {
 
           <BoardCanvas
             ref={boardRef}
+            minInitialTileWidth={INITIAL_TILE_WIDTH_PX}
             board={board}
             mySeat={mySeat}
             isSpectator={isSpectator}

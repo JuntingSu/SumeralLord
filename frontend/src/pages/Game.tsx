@@ -21,7 +21,7 @@ import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
 import { useNarrowScreen } from '../lib/useNarrowScreen';
 import { shouldAutoSkipPhase } from '../game/dim';
-import BoardCanvas, { type BoardCanvasHandle } from '../components/BoardCanvas';
+import BoardCanvas, { INITIAL_TILE_WIDTH_PX, type BoardCanvasHandle } from '../components/BoardCanvas';
 import GameChat from '../components/GameChat';
 import ResultModal from './Result';
 
@@ -704,6 +704,7 @@ export default function Game() {
 
           <BoardCanvas
             ref={boardRef}
+            minInitialTileWidth={INITIAL_TILE_WIDTH_PX}
             board={board}
             mySeat={mySeat}
             isSpectator={isSpectator}
