@@ -76,8 +76,8 @@ const HexRender = (() => {
     if (sprites[flagNum] !== undefined) return;
     const solid = new Image();
     const hollow = new Image();
-    solid.src = MapConst.flagImage(flagNum);
-    hollow.src = MapConst.flagImageHollow(flagNum);
+    solid.src = MapConst.flagImageOwner(flagNum);
+    hollow.src = MapConst.flagImageOwnerHollow(flagNum);
     sprites[flagNum] = { solid, hollow };
     let fired = false;
     const fire = () => {
@@ -91,16 +91,17 @@ const HexRender = (() => {
     hollow.onerror = fire;
   }
 
-  /** 预载全部可用旗帜精灵（旗号 8 兼作阻挡/未知兜底） */
+  /** 预载全部可用旗帜精灵（含中立势力 0/255；旗号 8 兼作未知归属兜底） */
   function preloadAllFlags() {
     for (const n of MapConst.FLAG_IMAGE_NUMS) preloadFlag(n);
+    for (const n of Object.keys(MapConst.NEUTRAL_FLAG_FILES)) preloadFlag(Number(n));
     if (!MapConst.FLAG_IMAGE_NUMS.includes(8)) preloadFlag(8);
   }
 
-  /** 归属 → 旗帜编号（对齐战斗棋盘 flagOf：野生 0 无精灵走色块，阻挡/未知用 8） */
+  /** 归属 → 旗帜编号（对齐战斗棋盘 flagOf：野生 0 / 阻挡 255 各有中立旗，未知用 8） */
   function flagNumOf(map, owner) {
     if (owner === MapConst.TILE_OWNER.WILD) return 0;
-    if (owner === MapConst.TILE_OWNER.BLOCKER) return 8;
+    if (owner === MapConst.TILE_OWNER.BLOCKER) return 255;
     if (owner >= 1 && owner <= 127) {
       const p = map.player_list.find((x) => x.seat === owner);
       return p ? p.flag : 8;
@@ -152,8 +153,9 @@ const HexRender = (() => {
       }
       return;
     }
-    // 兜底：旗帜色块（wild 0 无精灵等）
-    const color = owner === MapConst.TILE_OWNER.WILD ? '#9e9e9e' : MapConst.flagColor(flagNum) ?? '#888';
+    // 兜底：旗帜色块（中立势力取中立旗主色）
+    const NEUTRAL_TONE = { [MapConst.TILE_OWNER.WILD]: '#69433d', [MapConst.TILE_OWNER.BLOCKER]: '#684f3f' };
+    const color = NEUTRAL_TONE[owner] ?? MapConst.flagColor(flagNum) ?? '#888';
     ctx.fillStyle = color;
     ctx.fillRect(cx - size * 0.22, cy - size * 0.3, size * 0.44, size * 0.6);
   }
@@ -202,7 +204,7 @@ const HexRender = (() => {
       const { cx, cy } = centerOf(i, column, layout);
       ctx.beginPath();
       ctx.arc(cx, cy, Math.max(2.5, layout.size * 0.14), 0, Math.PI * 2);
-      ctx.fillStyle = o === TILE_OWNER.WILD ? '#9e9e9e' : MapConst.seatColor(o);
+      ctx.fillStyle = o === TILE_OWNER.WILD ? '#825e54' : MapConst.seatColor(o);
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 1;
@@ -258,7 +260,7 @@ const HexRender = (() => {
       if (terrain === TERRAIN.CITY && owner !== TILE_OWNER.EMPTY && owner !== TILE_OWNER.BLOCKER) {
         ctx.beginPath();
         ctx.arc(cx, cy, Math.max(2, size * 0.14), 0, Math.PI * 2);
-        ctx.fillStyle = owner === TILE_OWNER.WILD ? '#9e9e9e' : MapConst.seatColor(owner);
+        ctx.fillStyle = owner === TILE_OWNER.WILD ? '#825e54' : MapConst.seatColor(owner);
         ctx.fill();
         ctx.strokeStyle = 'rgba(255,255,255,0.85)';
         ctx.lineWidth = 1;

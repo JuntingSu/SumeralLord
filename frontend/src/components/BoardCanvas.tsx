@@ -19,6 +19,10 @@ const TERRAIN_COLORS: Record<number, string> = {
   [TERRAIN.VOID]: '#263238',
 };
 const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#8e44ad', '#d35400'];
+/** 中立势力专属旗号：直接沿用 owner 值（0 野生 / 255 阻挡），URL 由 lib/flags 派生为 flag_wild / flag_blocker */
+const NEUTRAL_FLAG_NUMS: Record<number, number> = { [TILE_OWNER.WILD]: 0, [TILE_OWNER.BLOCKER]: 255 };
+/** 中立势力 sprite 未就绪时的兜底色（取中立旗主色） */
+const NEUTRAL_COLORS: Record<number, string> = { [TILE_OWNER.WILD]: '#69433d', [TILE_OWNER.BLOCKER]: '#684f3f' };
 const FOG_COLOR = 'rgba(10, 14, 20, 0.92)';
 const EXPLORED_DIM = 'rgba(10, 14, 20, 0.45)';
 
@@ -210,11 +214,11 @@ export default function BoardCanvas({
     };
   }, []);
 
-  /** owner → 旗帜编号（预计算；野生 0 无 sprite 走色块兜底，阻挡/未知用 8） */
+  /** owner → 旗帜编号（预计算；野生/阻挡用各自的中立旗，未知归属沿用 8 号兜底） */
   const flagOf = useMemo(() => {
     const map = new Map<number, number>();
     for (const f of board.forces) map.set(f.seat, f.flag);
-    return (owner: number): number => map.get(owner) ?? (owner === TILE_OWNER.WILD ? 0 : 8);
+    return (owner: number): number => map.get(owner) ?? NEUTRAL_FLAG_NUMS[owner] ?? 8;
   }, [board.forces]);
 
   /** 空闲时（无动画）渲染的权威兵表 */
@@ -335,7 +339,7 @@ export default function BoardCanvas({
       const c = tx(centerOf(i, columns, size, offX, offY, totalH));
       ctx.beginPath();
       ctx.arc(c.cx, c.cy, Math.max(2.5, size * 0.14) * view.scale, 0, Math.PI * 2);
-      ctx.fillStyle = belongs === TILE_OWNER.WILD ? '#9e9e9e' : SEAT_COLORS[(belongs - 1) % SEAT_COLORS.length];
+      ctx.fillStyle = belongs === TILE_OWNER.WILD ? '#825e54' : SEAT_COLORS[(belongs - 1) % SEAT_COLORS.length];
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 1;
@@ -354,6 +358,8 @@ export default function BoardCanvas({
       spritesRef.current[String(n)] = { solid, hollow };
     };
     for (let n = 1; n <= 30; n++) load(n);
+    load(NEUTRAL_FLAG_NUMS[TILE_OWNER.WILD]);
+    load(NEUTRAL_FLAG_NUMS[TILE_OWNER.BLOCKER]);
     for (const f of board.forces) load(f.flag);
   }, [board.forces]);
 
@@ -381,8 +387,8 @@ export default function BoardCanvas({
         const flagH = img.naturalHeight * scale;
         ctx.drawImage(img, cx - flagW / 2, cy - flagH / 2, flagW, flagH);
       } else {
-        // 兜底：旗帜色块
-        ctx.fillStyle = SEAT_COLORS[(soldier.owner - 1) % SEAT_COLORS.length] ?? '#888';
+        // 兜底：旗帜色块（中立势力用中立旗主色）
+        ctx.fillStyle = NEUTRAL_COLORS[soldier.owner] ?? SEAT_COLORS[(soldier.owner - 1) % SEAT_COLORS.length] ?? '#888';
         ctx.fillRect(cx - size * 0.22, cy - size * 0.3, size * 0.44, size * 0.6);
       }
       // hollow sprite 未就绪时用擦边过渡方案（沿地块边缘擦出环带）

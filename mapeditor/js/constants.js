@@ -61,6 +61,21 @@ const MapConst = (() => {
     return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}_hollow.png` : '';
   }
 
+  /** 中立势力专属旗文件（owner 0/255 → flag_wild / flag_blocker，与玩家旗 1..30 分命名） */
+  const NEUTRAL_FLAG_FILES = { [TILE_OWNER.WILD]: 'wild', [TILE_OWNER.BLOCKER]: 'blocker' };
+
+  /** 战场按 owner 取旗：中立势力走专属文件，其余同 flagImage */
+  function flagImageOwner(flag) {
+    const name = NEUTRAL_FLAG_FILES[flag];
+    return name ? `/static/flags/flag_${name}.png` : flagImage(flag);
+  }
+
+  /** 同上，镂空版 */
+  function flagImageOwnerHollow(flag) {
+    const name = NEUTRAL_FLAG_FILES[flag];
+    return name ? `/static/flags/flag_${name}_hollow.png` : flagImageHollow(flag);
+  }
+
   /** 旗帜编号 → 颜色（黄金角 HSL，确定性；同参考编辑器 flag-colors.js） */
   function flagColor(flag) {
     const special = {
@@ -84,6 +99,7 @@ const MapConst = (() => {
     TERRAIN, TERRAIN_LABELS, TERRAIN_COLORS, TERRAIN_ORDER,
     TILE_OWNER, OWNER_LABELS, OWNER_COLORS, OWNER_ORDER,
     AI_LEVELS, AI_LABELS, SEAT_COLORS, NO_SOLDIER_TERRAIN,
-    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage, flagImageHollow, seatColor,
+    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage, flagImageHollow,
+    NEUTRAL_FLAG_FILES, flagImageOwner, flagImageOwnerHollow, seatColor,
   };
 })();
