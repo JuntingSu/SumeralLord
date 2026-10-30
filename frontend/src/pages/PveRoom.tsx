@@ -295,7 +295,7 @@ export default function PveRoom() {
 
       <main className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 gap-3 px-3 py-4 sm:gap-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         {/* 势力 + 开始 */}
-        <section className="flex min-h-0 flex-col rounded-lg bg-slate-800 p-4">
+        <section className="flex min-h-0 flex-col rounded-lg bg-slate-800 p-4 max-lg:order-2">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-bold text-slate-400">势力与 AI</h2>
             {room.map && (
@@ -341,14 +341,14 @@ export default function PveRoom() {
                         <select
                           value={room.aiLevels[p.seat] ?? AI_LEVEL.EASY}
                           onChange={(e) => setAiLevel(p.seat, Number(e.target.value))}
-                          className="shrink-0 rounded bg-slate-700 px-1 py-0.5 text-[11px] text-white"
-                          title="AI 难度；新局默认全部简单"
+                          className="w-14 shrink-0 rounded bg-slate-700 px-1 py-0.5 text-[11px] text-white"
+                          title="AI 难度；新局默认全部简单；困难暂未实现"
                         >
                           <option value={AI_LEVEL.EASY}>简单</option>
                           <option value={AI_LEVEL.MEDIUM}>普通</option>
                           <option value={AI_LEVEL.LEISURE}>休闲</option>
-                          <option value={AI_LEVEL.HARD} disabled>
-                            困难（开发中）
+                          <option value={AI_LEVEL.HARD} disabled title="开发中">
+                            困难
                           </option>
                         </select>
                         <button
@@ -381,9 +381,9 @@ export default function PveRoom() {
         </section>
 
         {/* 地图 / 设置 / 存档 */}
-        <section className="min-h-0 space-y-4 lg:overflow-y-auto">
+        <section className="min-h-0 space-y-4 max-lg:contents lg:overflow-y-auto">
           {saveMeta?.exists && (
-            <div className="rounded-lg border border-amber-700 bg-amber-900/20 p-4">
+            <div className="rounded-lg border border-amber-700 bg-amber-900/20 p-4 max-lg:order-3">
               <h2 className="mb-1 text-sm font-bold text-amber-300">继续上次对局</h2>
               <p className="truncate text-sm font-medium">{saveMeta.mapTitle}</p>
               <p className="mt-0.5 text-xs text-slate-400">
@@ -414,7 +414,7 @@ export default function PveRoom() {
             </div>
           )}
 
-          <div className="rounded-lg bg-slate-800 p-4">
+          <div className="rounded-lg bg-slate-800 p-4 max-lg:order-1">
             <h2 className="mb-2 text-sm font-bold text-slate-400">地图</h2>
             {room.map ? (
               <>
@@ -489,7 +489,7 @@ export default function PveRoom() {
             </div>
           </div>
 
-          <div className="rounded-lg bg-slate-800 p-4">
+          <div className="rounded-lg bg-slate-800 p-4 max-lg:order-4">
             <h2 className="mb-3 text-sm font-bold text-slate-400">设置</h2>
             <div className="space-y-2 text-sm">
               <label className="flex items-center justify-between">
