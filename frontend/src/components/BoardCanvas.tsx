@@ -3,7 +3,7 @@
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
 // M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）（view 变换统一应用于两层与拾取；双击不改变视图）；
 // 断兵视觉：整旗等比缩小（不再单独出镂空图），据点驻军按连兵渲染。
-import { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { TERRAIN, TILE_OWNER, isFullBreak, isNeutralOwner } from '@dl/shared';
 import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
@@ -60,8 +60,7 @@ const WALL_DIR = { x: -Math.sin((80 * Math.PI) / 180), y: -Math.cos((80 * Math.P
 const THORN_IMG = '/static/effects/thorn_crimson.png';
 const THORN_RING_PX = 430;
 
-interface BoardCanvasProps {
-  board: GameState;
+interface BoardCanvasProps {  board: GameState;
   /** 视角归属（观战 null → 全图可见） */
   mySeat: number | null;
   isSpectator: boolean;
@@ -77,6 +76,12 @@ interface BoardCanvasProps {
   /** M5.1：动画播放器实例（Game 页注入；null = 无动画直渲 board） */
   animatorRef?: React.MutableRefObject<EventAnimator | null> | null;
   className?: string;
+}
+
+/** 命令式缩放接口（窄屏 +/− 按钮使用） */
+export interface BoardCanvasHandle {
+  /** 以画布中心为锚点按倍率缩放（自动夹在 0.3x~4x） */
+  zoomBy(factor: number): void;
 }
 
 interface View {
@@ -184,7 +189,7 @@ function drawThorns(ctx: CanvasRenderingContext2D, img: HTMLImageElement | null,
   ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
 }
 
-export default function BoardCanvas({
+const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function BoardCanvas({
   board,
   mySeat,
   isSpectator,
@@ -198,7 +203,7 @@ export default function BoardCanvas({
   onTilePointerUp,
   animatorRef,
   className,
-}: BoardCanvasProps) {
+}: BoardCanvasProps, ref) {
   const staticRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const hoverRef = useRef<number | null>(null);
@@ -223,6 +228,22 @@ export default function BoardCanvas({
     });
   };
   useEffect(() => () => cancelAnimationFrame(viewSyncRaf.current), []);
+
+  // 命令式缩放（窄屏 +/− 按钮）：以画布中心为锚点，倍率范围与滚轮缩放一致
+  useImperativeHandle(ref, () => ({
+    zoomBy: (factor: number) => {
+      const canvas = staticRef.current;
+      if (!canvas) return;
+      const v = viewRef.current;
+      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
+      if (scale === v.scale) return;
+      const px = canvas.clientWidth / 2;
+      const py = canvas.clientHeight / 2;
+      const k = scale / v.scale;
+      viewRef.current = { scale, offX: px - (px - v.offX) * k, offY: py - (py - v.offY) * k };
+      syncView();
+    },
+  }), []);
 
   const geoRef = useRef({ rows: board.rows, columns: board.columns, cylindrical: board.cylindrical });
 
@@ -767,4 +788,6 @@ export default function BoardCanvas({
       <canvas ref={overlayRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
     </div>
   );
-}
+});
+
+export default BoardCanvas;

@@ -23,7 +23,7 @@ import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
 import { useNarrowScreen } from '../lib/useNarrowScreen';
 import { shouldAutoSkipPhase } from '../game/dim';
-import BoardCanvas from '../components/BoardCanvas';
+import BoardCanvas, { type BoardCanvasHandle } from '../components/BoardCanvas';
 import PveResultModal from '../components/PveResultModal';
 
 const PHASE_LABEL: Record<string, string> = {
@@ -261,6 +261,8 @@ export default function PveGame() {
 
   // ---------- 动画播放器 ----------
   const animatorRef = useRef<EventAnimator | null>(null);
+  /** 棋盘命令式缩放（窄屏 +/− 按钮） */
+  const boardRef = useRef<BoardCanvasHandle>(null);
   if (animatorRef.current === null) {
     animatorRef.current = new EventAnimator(
       () => useGame.getState().eventQueue,
@@ -690,6 +692,26 @@ export default function PveGame() {
             </svg>
           </button>
 
+          {/* 窄屏右上角：地图缩放按钮 */}
+          <div className="absolute right-2 top-2 z-20 flex flex-col gap-1 lg:hidden">
+            <button
+              onClick={() => boardRef.current?.zoomBy(1.25)}
+              className="flex h-9 w-9 select-none items-center justify-center rounded bg-slate-800/80 text-xl leading-none text-white shadow hover:bg-slate-700 active:bg-slate-600"
+              title="放大地图"
+              aria-label="放大地图"
+            >
+              +
+            </button>
+            <button
+              onClick={() => boardRef.current?.zoomBy(0.8)}
+              className="flex h-9 w-9 select-none items-center justify-center rounded bg-slate-800/80 text-xl leading-none text-white shadow hover:bg-slate-700 active:bg-slate-600"
+              title="缩小地图"
+              aria-label="缩小地图"
+            >
+              −
+            </button>
+          </div>
+
           {/* 窄屏：左侧 1/4 宽（上限原固定宽）的完整卡片；非窄屏保留原来的悬浮简略列表 */}
           {compactSidebar &&
             (isNarrow ? (
@@ -798,6 +820,7 @@ export default function PveGame() {
             ))}
 
           <BoardCanvas
+            ref={boardRef}
             board={board}
             mySeat={mySeat}
             isSpectator={isSpectator}
