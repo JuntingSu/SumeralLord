@@ -106,7 +106,8 @@ export class WsGateway {
       if (game) {
         for (const conn of this.conns) {
           if (conn.roomId !== event.roomId) continue;
-          const seat = this.rooms.seatOf(conn.roomId, conn.userId);
+          // 用本局最终 seatAssignments（随机出生会重排玩家-势力），不能用房间阶段的选择
+          const seat = this.games.seatOfUser(game, conn.userId);
           if (seat !== -1) this.games.setConnected(game, seat, true, Date.now());
         }
       }
@@ -220,7 +221,8 @@ export class WsGateway {
     });
     this.rooms.setOnline(userId, roomId, true);
     // 对局进行中：参战者连接即视为重连成功（取消断线时间线、恢复在线状态）
-    const seat = this.rooms.seatOf(roomId, userId);
+    // 席位以本局最终 seatAssignments 为准（随机出生会重排玩家-势力）
+    const seat = game ? this.games.seatOfUser(game, userId) : -1;
     if (game && seat !== -1) {
       if (game.status === 'in_game') {
         this.games.setConnected(game, seat, true, Date.now());
@@ -272,7 +274,7 @@ export class WsGateway {
       // 对局进行中的参战玩家完全离线 → 启动断线时间线（t=10s 检测 / t=120s 代发投降）
       const gameId = this.rooms.gameIdOf(roomId);
       const game = gameId ? this.games.get(gameId) : undefined;
-      const seat = this.rooms.seatOf(roomId, userId);
+      const seat = game ? this.games.seatOfUser(game, userId) : -1;
       if (!stillOnline && game && game.status === 'in_game' && seat !== -1) {
         this.games.setConnected(game, seat, false, Date.now());
         this.disconnectWatch.disconnect(game.id, seat);
@@ -355,7 +357,8 @@ export class WsGateway {
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, 'INTENT_SUBMIT 对局未在进行，丢弃');
       return;
     }
-    const fromSeat = this.rooms.seatOf(conn.roomId, conn.userId);
+    // 席位以本局最终 seatAssignments 为准：随机出生后玩家落到的 seat 与房间阶段选择不同
+    const fromSeat = this.games.seatOfUser(game, conn.userId);
     if (fromSeat === -1) {
       // 观战/未分配势力者发意图：告警 + 回 ERROR，不中继
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, '观战/无席位玩家尝试发意图');
@@ -390,7 +393,7 @@ export class WsGateway {
       return;
     }
     const isBot = conn.role === 'bot';
-    const fromSeat = isBot ? -1 : this.rooms.seatOf(conn.roomId, conn.userId);
+    const fromSeat = isBot ? -1 : this.games.seatOfUser(game, conn.userId);
     if (fromSeat === -1 && !isBot) {
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, '观战/无席位玩家尝试提交 AI 意图');
       this.send(conn, { type: 'ERROR', code: 'SPECTATOR_CANNOT_ACT', message: '观战中，无法影响对局', fatal: false });
@@ -430,7 +433,7 @@ export class WsGateway {
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, 'CONSENSUS_RESULT 对局未在进行，丢弃');
       return;
     }
-    const seat = this.rooms.seatOf(conn.roomId, conn.userId);
+    const seat = this.games.seatOfUser(game, conn.userId);
     if (seat === -1) {
       this.log.warn({ roomId: conn.roomId, userId: conn.userId }, '观战发送共识上报，忽略');
       return;
@@ -504,7 +507,7 @@ export class WsGateway {
     if (!game || game.status !== 'finished') return; // 仅对局正常结束后有效
     const room = this.rooms.get(game.roomId);
     if (!room || room.status !== 'GAME_OVER') return; // 已回落/中止：忽略迟到上报
-    const seat = this.rooms.seatOf(game.roomId, conn.userId);
+    const seat = this.games.seatOfUser(game, conn.userId);
     const participant = game.participants.get(seat);
     if (!participant || participant.isAI || participant.playerId === null) return; // 观战/AI 不计
     game.dismissedPlayerIds.add(conn.userId);

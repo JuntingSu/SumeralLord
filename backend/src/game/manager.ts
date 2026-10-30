@@ -271,6 +271,11 @@ export class GameManager {
       .sort((a, b) => a - b);
   }
 
+  /** 对局内用户当前 seat：以本局最终 seatAssignments 为准（随机出生会重排玩家-势力），无则 -1 */
+  seatOfUser(game: Game, userId: number): number {
+    return game.seatAssignments.find((a) => a.playerId === userId)?.seat ?? -1;
+  }
+
   /** 参战玩家断线/重连状态更新（BM6 disconnectWatch 数据源） */
   setConnected(game: Game, seat: number, connected: boolean, at?: number): void {
     const p = game.participants.get(seat);
