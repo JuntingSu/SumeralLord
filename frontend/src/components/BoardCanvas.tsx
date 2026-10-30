@@ -520,10 +520,10 @@ export default function BoardCanvas({
       ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      // 灰态：浅灰半透明压在下层、深灰半透明压在上层（白/黑两层的顺序不变）
-      ctx.fillStyle = dimText ? 'rgba(214, 218, 224, 0.62)' : '#000000';
+      // 灰态：浅灰半透明压上层、深灰半透明压下层（白/黑两层的顺序不变）
+      ctx.fillStyle = dimText ? 'rgba(44, 48, 56, 0.62)' : '#000000';
       ctx.fillText(text, cx, cy + Math.max(1, size * 0.055));
-      ctx.fillStyle = dimText ? 'rgba(44, 48, 56, 0.62)' : '#ffffff';
+      ctx.fillStyle = dimText ? 'rgba(214, 218, 224, 0.62)' : '#ffffff';
       ctx.fillText(text, cx, cy);
       ctx.restore();
       // 闪光描边（不受兵透明度影响）
