@@ -55,6 +55,9 @@ const FLAG_COVER = 1.02;
 const BROKEN_FLAG_SCALE = 0.84;
 /** 墙壁平移方向：统一朝左上（自正上方逆时针 80°；屏幕坐标 y 向下） */
 const WALL_DIR = { x: -Math.sin((80 * Math.PI) / 180), y: -Math.cos((80 * Math.PI) / 180) };
+/** 进攻必败时的荆棘贴图（1170×1170，荆棘外接框 908×1077、中心 604.5,586） */
+const THORN_IMG = '/static/effects/thorn_crimson.png';
+const THORN_BBOX = { w: 908, h: 1077, cx: 604.5, cy: 586 };
 
 interface BoardCanvasProps {
   board: GameState;
@@ -168,33 +171,17 @@ function drawWall(
   ctx.fill();
 }
 
-/** 红环上的荆棘：沿六条边各画两道垂直于边界的细线 */
-function drawThorns(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, ringW: number): void {
-  ctx.save();
-  ctx.strokeStyle = 'rgba(16, 20, 28, 0.9)';
-  ctx.lineWidth = Math.max(1, ringW * 0.4);
-  for (let e = 0; e < 6; e++) {
-    const a1 = (Math.PI / 180) * (60 * e - 90);
-    const a2 = (Math.PI / 180) * (60 * (e + 1) - 90);
-    const x1 = cx + r * Math.cos(a1);
-    const y1 = cy + r * Math.sin(a1);
-    const x2 = cx + r * Math.cos(a2);
-    const y2 = cy + r * Math.sin(a2);
-    const nx = (x1 + x2) / 2 - cx;
-    const ny = (y1 + y2) / 2 - cy;
-    const nl = Math.hypot(nx, ny) || 1;
-    const ux = nx / nl;
-    const uy = ny / nl;
-    for (const f of [0.32, 0.68]) {
-      const px = x1 + (x2 - x1) * f;
-      const py = y1 + (y2 - y1) * f;
-      ctx.beginPath();
-      ctx.moveTo(px - ux * ringW * 1.6, py - uy * ringW * 1.6);
-      ctx.lineTo(px + ux * ringW * 1.6, py + uy * ringW * 1.6);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
+/** 进攻必败的荆棘：贴图外接框等比铺满地块（荆棘整体落在地块内），无描边 */
+function drawThorns(ctx: CanvasRenderingContext2D, img: HTMLImageElement | null, cx: number, cy: number, r: number): void {
+  if (!img || !img.complete || img.naturalWidth === 0) return;
+  const scale = (2 * r) / THORN_BBOX.h;
+  ctx.drawImage(
+    img,
+    cx - THORN_BBOX.cx * scale,
+    cy - THORN_BBOX.cy * scale,
+    img.naturalWidth * scale,
+    img.naturalHeight * scale,
+  );
 }
 
 export default function BoardCanvas({
@@ -218,6 +205,7 @@ export default function BoardCanvas({
   const dragRef = useRef<DragState | null>(null);
   const spritesRef = useRef<Record<string, SpriteEntry>>({});
   const terrainRef = useRef<Record<number, HTMLImageElement>>({});
+  const thornRef = useRef<HTMLImageElement | null>(null);
   /** 地形贴图加载计数：加载完成后让静态层重绘 */
   const [terrainVersion, setTerrainVersion] = useState(0);
 
@@ -420,6 +408,13 @@ export default function BoardCanvas({
     }
 
   }, [board, fogEnabled, fogLevels, view, canvasSize, terrainVersion]);
+
+  // 荆棘贴图预加载（overlay 每帧重绘，加载完成即可显示）
+  useEffect(() => {
+    const img = new Image();
+    img.src = THORN_IMG;
+    thornRef.current = img;
+  }, []);
 
   // 地形贴图预加载（虚空无贴图；每张加载完成触发一次静态层重绘）
   useEffect(() => {
@@ -683,7 +678,7 @@ export default function BoardCanvas({
           ctx.strokeStyle = r.soldier.counter > 0 ? '#e63946' : '#ffffff';
           ctx.lineWidth = w;
           ctx.stroke();
-          if (r.soldier.counter > 0 && r.wouldFail) drawThorns(ctx, r.c.cx, r.c.cy, rr, w);
+          if (r.soldier.counter > 0 && r.wouldFail) drawThorns(ctx, thornRef.current, r.c.cx, r.c.cy, size * v.scale);
         }
 
         // 加点阶段连兵白字高亮
