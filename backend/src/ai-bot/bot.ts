@@ -22,7 +22,12 @@ export interface BotBoot {
   reducerVersion: string;
   /** 难度2 训练 AI 权重文件路径（WeightRecord JSON；缺省用种子权重） */
   weightsPath?: string;
+  /** WS PING 间隔（毫秒）；缺省 30s。服务器 60s 无上行消息会判连接超时，玩家回合可能更久 */
+  pingIntervalMs?: number;
 }
+
+/** 默认心跳间隔：必须明显小于网关 60s 的 HEARTBEAT_TIMEOUT_MS */
+const DEFAULT_PING_INTERVAL_MS = 30_000;
 
 /** 追加写日志的增量读取器：只读新增完整行，容忍尾部半行（服务器写入中） */
 class LogTailReader {
@@ -66,6 +71,7 @@ function skipIntents(board: GameState, seat: number): PlayerIntent[] {
 
 export class AiBot {
   private ws: WebSocket | null = null;
+  private pingTimer: NodeJS.Timeout | null = null;
   private board: GameState | null = null;
   private seatAssignments: SeatAssignment[] = [];
   private appliedEventId = 0;
@@ -175,12 +181,22 @@ export class AiBot {
       ws.on('open', () => {
         clearTimeout(timer);
         this.log('ws 已连接');
+        // 心跳：bot 在人类回合内可能长时间无上行消息，不发 PING 会被网关 60s 判定超时并断开，
+        // 导致下一个 AI 回合无人驱动。定期 PING 维持 lastSeen（服务器回 PONG，本进程忽略）。
+        this.pingTimer = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'PING' }));
+        }, this.boot.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS);
+        this.pingTimer.unref();
         resolve();
       });
       ws.on('error', (err) => this.log(`ws 错误: ${err.message}`));
       ws.on('message', (data) => this.onMessage(String(data)));
       ws.on('close', (code, reason) => {
         clearTimeout(timer);
+        if (this.pingTimer) {
+          clearInterval(this.pingTimer);
+          this.pingTimer = null;
+        }
         this.log(`ws 关闭 code=${code} reason=${String(reason)}`);
         // 连接断开即退出：由 AiBotManager 看门狗按对局状态决定是否重拉
         resolve();
@@ -197,10 +213,13 @@ export class AiBot {
       return;
     }
     switch (msg.type) {
-      case 'CONNECT_ACK':
-        // 本地已按日志重放；服务器 lastEventId 仅作参考（日志为准）
+      case 'CONNECT_ACK': {
+        // 本地已按日志重放；若服务器已有更新的意图（重放后、订阅前到达的竞态），补读日志追平
+        const lastEventId = typeof msg.lastEventId === 'number' ? msg.lastEventId : 0;
+        if (lastEventId > this.appliedEventId) this.replayFromLog();
         this.drive();
         break;
+      }
       case 'INTENT_ACK': {
         const inflight = this.inflight;
         if (!inflight || msg.clientTempId !== inflight.clientTempId) return;

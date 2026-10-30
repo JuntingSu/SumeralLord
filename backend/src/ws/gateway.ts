@@ -39,6 +39,12 @@ import { settleMatch } from '../stats/settlement.js';
 const HEARTBEAT_SWEEP_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 60_000;
 
+/** 心跳节奏（测试可注入短间隔；bot/前端 PING 间隔必须小于 timeout） */
+export interface WsGatewayOptions {
+  heartbeatSweepMs?: number;
+  heartbeatTimeoutMs?: number;
+}
+
 interface RoomConnection {
   ws: WebSocket;
   roomId: string;
@@ -63,6 +69,7 @@ export class WsGateway {
   private readonly wss: WebSocketServer;
   private readonly conns = new Set<RoomConnection>();
   private readonly sweeper: NodeJS.Timeout;
+  private readonly heartbeatTimeoutMs: number;
   private readonly consensus: ConsensusManager;
   private readonly disconnectWatch: DisconnectWatch;
 
@@ -74,10 +81,12 @@ export class WsGateway {
     private readonly botSessions: BotSessionService,
     private readonly aiBots: AiBotManager,
     private readonly log: FastifyBaseLogger,
+    opts: WsGatewayOptions = {},
   ) {
     this.wss = new WebSocketServer({ noServer: true });
     this.app.server.on('upgrade', (request, socket, head) => this.handleUpgrade(request, socket as Duplex, head));
-    this.sweeper = setInterval(() => this.sweepHeartbeat(), HEARTBEAT_SWEEP_MS);
+    this.heartbeatTimeoutMs = opts.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+    this.sweeper = setInterval(() => this.sweepHeartbeat(), opts.heartbeatSweepMs ?? HEARTBEAT_SWEEP_MS);
     this.sweeper.unref();
     this.consensus = new ConsensusManager(
       this.games,
@@ -639,7 +648,7 @@ export class WsGateway {
   private sweepHeartbeat(): void {
     const now = Date.now();
     for (const conn of this.conns) {
-      if (now - conn.lastSeen > HEARTBEAT_TIMEOUT_MS) {
+      if (now - conn.lastSeen > this.heartbeatTimeoutMs) {
         this.log.info({ roomId: conn.roomId, userId: conn.userId }, 'ws heartbeat timeout');
         conn.ws.terminate(); // 触发 close 流程（离线标记在 close 回调统一处理）
       }

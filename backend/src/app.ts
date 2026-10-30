@@ -44,6 +44,8 @@ export interface BuildAppOptions {
   pveSaveMaxBytes?: number;
   /** AI 子进程管理配置（测试可注入 enabled:false / bootDir / onOutput） */
   aiBotOpts?: import('./ai-bot/manager.js').AiBotManagerOptions;
+  /** WS 网关心跳节奏（测试可注入短间隔） */
+  gatewayOpts?: import('./ws/gateway.js').WsGatewayOptions;
 }
 
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -114,7 +116,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(userRoutes);
   await app.register(leaderboardRoutes);
 
-  gatewayRef = new WsGateway(app, rooms, games, tickets, botSessions, aiBots, app.log);
+  gatewayRef = new WsGateway(app, rooms, games, tickets, botSessions, aiBots, app.log, opts.gatewayOpts);
 
   app.addHook('onClose', async () => {
     gatewayRef?.close();
