@@ -750,12 +750,11 @@ describe('randomSpawn：已选势力集合内随机重排玩家分配', () => {
       method: 'POST',
       url: '/api/users/me/skin',
       headers: auth('alice'),
-      payload: { solid: pngDataUrl(fakePng()), hollow: pngDataUrl(fakePng()) },
+      payload: { solid: pngDataUrl(fakePng()) },
     });
     expect(skin.statusCode).toBe(200);
     // 注册会为每个账号自动生成默认皮肤；删掉 bob 的，保留「无皮肤玩家保持地图原旗帜」分支
     unlinkSync(skinFilePath(app.skinDir, users.get('bob')!.id));
-    unlinkSync(skinFilePath(app.skinDir, users.get('bob')!.id, true));
     const create = await app.inject({
       method: 'POST',
       url: '/api/rooms',

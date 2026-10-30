@@ -46,17 +46,15 @@ async function main() {
   r = await U('/api/users/me', { method: 'PATCH', headers: auth2, body: JSON.stringify({ oldPassword: pw, newPassword: 'secret2' }) });
   console.log('patch pw ok:', r.status, '| token unchanged:', r.body.data.token === undefined);
 
-  // 上传皮肤（用真实 flag_1 / flag_1_hollow 两张 192×216 PNG）
+  // 上传皮肤（用真实 flag_1 张 192×216 PNG；断兵由绘制端等比缩小）
   const solid = 'data:image/png;base64,' + fs.readFileSync(path.join(REPO, 'backend/static/flags/flag_1.png')).toString('base64');
-  const hollow = 'data:image/png;base64,' + fs.readFileSync(path.join(REPO, 'backend/static/flags/flag_1_hollow.png')).toString('base64');
-  r = await U('/api/users/me/skin', { method: 'POST', headers: auth2, body: JSON.stringify({ solid, hollow }) });
+  r = await U('/api/users/me/skin', { method: 'POST', headers: auth2, body: JSON.stringify({ solid }) });
   console.log('upload skin:', r.status, JSON.stringify(r.body.data));
   if (r.status !== 200) throw new Error('皮肤上传失败');
 
   const uid = user.id;
   const solidFile = path.join(REPO, `backend/static/skin/usr_${uid}.png`);
-  const hollowFile = path.join(REPO, `backend/static/skin/usr_${uid}_hollow.png`);
-  console.log('skin files on disk:', fs.existsSync(solidFile), fs.existsSync(hollowFile));
+  console.log('skin files on disk:', fs.existsSync(solidFile));
 
   // 静态访问 + me.hasSkin
   const served = await fetch(`${BASE}/static/skin/usr_${uid}.png`);
