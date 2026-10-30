@@ -125,8 +125,8 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: nu
 }
 
 /**
- * 全断地形边界墙：沿两格共享边画一个平行四边形 ——
- * 长边贴着边界、短边水平（垂直于 y 轴）朝选中格一侧平移，模拟一堵墙。
+ * 全断地形边界墙：取两格共享边，按“向上偏 10°（与边界边成 80°）”的方向平移该边，
+ * 得到纯灰色、无边框的平行四边形（模拟立起的一堵墙）。
  */
 function drawWall(
   ctx: CanvasRenderingContext2D,
@@ -140,27 +140,30 @@ function drawWall(
   const dx = to.cx - from.cx;
   const dy = to.cy - from.cy;
   const len = Math.hypot(dx, dy) || 1;
-  // 共享边与连心线垂直，长度 = 六边形边长（R），中心在连心线中点
+  // 共享边：与连心线垂直，长度 = 六边形边长（R），中心在连心线中点
   const ex = -dy / len;
   const ey = dx / len;
-  const hx = (ex * r) / 2;
-  const hy = (ey * r) / 2;
-  const ax = mx + hx;
-  const ay = my + hy;
-  const bx = mx - hx;
-  const by = my - hy;
-  const t = (to.cx >= from.cx ? 1 : -1) * thickness;
+  const ax = mx + (ex * r) / 2;
+  const ay = my + (ey * r) / 2;
+  const bx = mx - (ex * r) / 2;
+  const by = my - (ey * r) / 2;
+  // 平移方向：连心线（指向全断地块）绕 ±10° 旋转，取更朝上的那个 —— 即“向上偏左/右”立起
+  const tilt = (10 * Math.PI) / 180;
+  const ux = dx / len;
+  const uy = dy / len;
+  const c1 = { x: ux * Math.cos(tilt) - uy * Math.sin(tilt), y: ux * Math.sin(tilt) + uy * Math.cos(tilt) };
+  const c2 = { x: ux * Math.cos(tilt) + uy * Math.sin(tilt), y: -ux * Math.sin(tilt) + uy * Math.cos(tilt) };
+  const v = c1.y <= c2.y ? c1 : c2;
+  const tx = v.x * thickness;
+  const ty = v.y * thickness;
   ctx.beginPath();
   ctx.moveTo(ax, ay);
   ctx.lineTo(bx, by);
-  ctx.lineTo(bx + t, by);
-  ctx.lineTo(ax + t, ay);
+  ctx.lineTo(bx + tx, by + ty);
+  ctx.lineTo(ax + tx, ay + ty);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.92)';
+  ctx.fillStyle = '#9ca3af';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(10, 15, 24, 0.85)';
-  ctx.lineWidth = Math.max(1, thickness * 0.35);
-  ctx.stroke();
 }
 
 /** 红环上的荆棘：沿六条边各画两道垂直于边界的细线 */
@@ -652,20 +655,20 @@ export default function BoardCanvas({
           ctx.fill();
         }
 
-        // 据点：沿地块轮廓在旗面上描一圈金色纯色（空据点同样标出；线宽为旧版的 3 倍）
+        // 据点：沿地块轮廓在旗面上描一圈金色纯色（空据点同样标出；线宽为初版的 2 倍）
         for (let i = 0; i < board.tiles.length; i++) {
           if (board.tiles[i].terrain !== TERRAIN.CITY) continue;
           if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
           const c = tx(centerOf(i, columns, size, offX, offY, totalH));
           hexPath(ctx, c.cx, c.cy, size * v.scale);
           ctx.strokeStyle = CITY_RING;
-          ctx.lineWidth = Math.max(4.5, size * v.scale * 0.135);
+          ctx.lineWidth = Math.max(3, size * v.scale * 0.09);
           ctx.stroke();
         }
 
         // 全断地形边界墙（画在兵与据点金环之上，朝全断地块一侧偏移，不遮挡选中兵的旗帜）
         for (const w of walls) {
-          drawWall(ctx, w.from, w.to, size * v.scale, size * v.scale * 0.14);
+          drawWall(ctx, w.from, w.to, size * v.scale, size * v.scale * 0.16);
         }
 
         // 敌兵威胁环（画在兵与据点金环之上）：红=有反击、白=无反击；进攻会失败时红环叠荆棘
