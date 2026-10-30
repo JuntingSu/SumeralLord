@@ -735,7 +735,7 @@ export default function PveGame() {
                             className="h-5 w-4 shrink-0 object-contain"
                             onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
                           />
-                          {/* 右上：势力名优先完整显示 +（我）；右下：加点 + 下回合加点 + 队伍；两行上下等距居中、左右靠左 */}
+                          {/* 右上：势力名优先完整显示 +（我）；右下：加点 + 下回合加点 + 队伍数字；两行上下等距居中、左右靠左 */}
                           <div className="flex h-5 min-w-0 flex-1 flex-col items-start justify-evenly">
                             <div className="flex max-w-full min-w-0 items-baseline gap-0.5">
                               <span
@@ -750,7 +750,7 @@ export default function PveGame() {
                                 <>
                                   <span className="text-white">加点 {f.points}</span>
                                   <span className="shrink-0 text-pink-400">+{linked}</span>
-                                  <span className="min-w-0 truncate text-[6px] text-slate-400">队伍 {f.team}</span>
+                                  <span className="min-w-0 truncate text-[6px] text-slate-400">{f.team}</span>
                                 </>
                               ) : (
                                 <span className="text-slate-400">已清除</span>
