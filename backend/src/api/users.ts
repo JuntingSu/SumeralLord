@@ -7,7 +7,7 @@ import { authPreHandler } from '../auth/guard.js';
 import { signAuthToken } from '../auth/jwt.js';
 import { matchHistory, users } from '../db/schema.js';
 import { toUserPublic } from './auth.js';
-import { hasSkin, decodePngDataUrl, writeSkinPair } from '../skin.js';
+import { hasSkin, decodePngDataUrl, writeSkin } from '../skin.js';
 import { writeRandomSkin, rgbToHex } from '../skinGen.js';
 import { ok, fail } from '../utils/respond.js';
 
@@ -59,18 +59,17 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     return ok(reply, { user: toUserPublic(fresh, hasSkin(app.skinDir, fresh.id)), token });
   });
 
-  /** 上传个人皮肤：一对 192×216 PNG（solid + hollow），写入 backend/static/skin */
+  /** 上传个人皮肤：单张 192×216 PNG（断兵在绘制时等比缩小；旧客户端的 hollow 字段可选并忽略） */
   app.post('/api/users/me/skin', async (request, reply) => {
     const parsed = SkinUploadBodySchema.safeParse(request.body);
     if (!parsed.success) {
-      return fail(reply, 400, ERROR_CODES.INVALID_PARAMS, '请上传两张 PNG 皮肤图片（≤2MB）');
+      return fail(reply, 400, ERROR_CODES.INVALID_PARAMS, '请上传一张 PNG 皮肤图片（≤2MB）');
     }
     const solid = decodePngDataUrl(parsed.data.solid);
-    const hollow = decodePngDataUrl(parsed.data.hollow);
-    if (!solid || !hollow) {
-      return fail(reply, 400, ERROR_CODES.INVALID_PARAMS, '皮肤文件必须为 192×216 的 PNG 图片（≤2MB）');
+    if (!solid) {
+      return fail(reply, 400, ERROR_CODES.INVALID_PARAMS, '皮肤作品必须为 192×216 的 PNG 图片（≤2MB）');
     }
-    writeSkinPair(app.skinDir, request.user!.userId, solid.buf, hollow.buf);
+    writeSkin(app.skinDir, request.user!.userId, solid.buf);
     return ok(reply, { hasSkin: true });
   });
 

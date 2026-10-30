@@ -11,6 +11,7 @@ const HexRender = (() => {
   const FLAG_COVER = 1.02;
   const TILE_SCALE = 0.96; // 与战斗棋盘 size*(1-TILE_GAP) 一致
   const PREVIEW_SOLDIER_SCALE = 0.86; // 单格预览的兵略缩，四周留出地形宽度
+  const BROKEN_FLAG_SCALE = 0.84; // 断兵：整旗等比缩小（与 BoardCanvas 一致），不再单独出镂空图
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
@@ -63,8 +64,8 @@ const HexRender = (() => {
     return bestD <= r2 ? best : -1;
   }
 
-  // ---------- 旗帜精灵缓存（实心 + 镂空） ----------
-  const sprites = {}; // flagNum -> { solid, hollow }
+  // ---------- 旗帜精灵缓存 ----------
+  const sprites = {}; // flagNum -> { img }
   const spriteWatchers = new Set();
 
   /** 注册精灵加载完成回调（主画布与移动端预览各自注册；返回取消函数） */
@@ -74,21 +75,17 @@ const HexRender = (() => {
 
   function preloadFlag(flagNum) {
     if (sprites[flagNum] !== undefined) return;
-    const solid = new Image();
-    const hollow = new Image();
-    solid.src = MapConst.flagImageOwner(flagNum);
-    hollow.src = MapConst.flagImageOwnerHollow(flagNum);
-    sprites[flagNum] = { solid, hollow };
+    const img = new Image();
+    img.src = MapConst.flagImageOwner(flagNum);
+    sprites[flagNum] = { img };
     let fired = false;
     const fire = () => {
       if (fired) return;
       fired = true;
       spriteWatchers.forEach((fn) => fn());
     };
-    solid.onload = fire;
-    hollow.onload = fire;
-    solid.onerror = fire;
-    hollow.onerror = fire;
+    img.onload = fire;
+    img.onerror = fire;
   }
 
   /** 预载全部可用旗帜精灵（含中立势力 0/255；旗号 8 兼作未知归属兜底） */
@@ -109,48 +106,18 @@ const HexRender = (() => {
     return 8;
   }
 
-  /** 断兵擦边过渡（hollow 精灵缺失/未加载时回退）：沿地块边缘擦出环带 */
-  function punchHollow(ctx, cx, cy, size) {
-    ctx.save();
-    hexPath(ctx, cx, cy, size);
-    ctx.clip();
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const a = (Math.PI / 180) * (60 * i - 30);
-      const x = cx + size * Math.cos(a);
-      const y = cy + size * Math.sin(a);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.strokeStyle = 'rgba(0,0,0,1)';
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    ctx.restore();
-  }
-
   /**
-   * 绘制一枚兵：hollow=true 按断兵（镂空精灵，缺失时擦边回退）；无精灵时回退旗帜色块。
+   * 绘制一枚兵：broken=true 时整旗等比缩小露出地形；无精灵时回退旗帜色块。
    * 主画布与单格预览共用，保证视觉一致。
    */
-  function drawSoldier(ctx, cx, cy, size, flagNum, hollow, owner) {
-    const flagScale = (size * TILE_SCALE * FLAG_COVER) / FLAG_IMG_HEX_R;
-    const entry = sprites[flagNum];
-    const primary = hollow ? entry?.hollow : entry?.solid;
-    const usable =
-      primary && primary.complete && primary.naturalWidth > 0
-        ? primary
-        : hollow
-          ? (entry?.solid && entry.solid.complete && entry.solid.naturalWidth > 0 ? entry.solid : null)
-          : null;
-    if (usable) {
-      const w = usable.naturalWidth * flagScale;
-      const h = usable.naturalHeight * flagScale;
-      ctx.drawImage(usable, cx - w / 2, cy - h / 2, w, h);
-      if (hollow && (!primary || !primary.complete || primary.naturalWidth === 0)) {
-        punchHollow(ctx, cx, cy, size * TILE_SCALE);
-      }
+  function drawSoldier(ctx, cx, cy, size, flagNum, broken, owner) {
+    const flagScale =
+      ((size * TILE_SCALE * FLAG_COVER) / FLAG_IMG_HEX_R) * (broken ? BROKEN_FLAG_SCALE : 1);
+    const img = sprites[flagNum]?.img;
+    if (img && img.complete && img.naturalWidth > 0) {
+      const w = img.naturalWidth * flagScale;
+      const h = img.naturalHeight * flagScale;
+      ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
       return;
     }
     // 兜底：旗帜色块（中立势力取中立旗主色）
@@ -211,12 +178,12 @@ const HexRender = (() => {
       ctx.stroke();
     }
 
-    // 兵：旗帜精灵（据点上的兵按断兵镂空渲染）+ 兵力数字
+    // 兵：旗帜精灵（据点驻军按连兵渲染）+ 兵力数字
     for (let i = 0; i < battlefield.length; i++) {
-      const [t, o, s] = battlefield[i];
+      const [, o, s] = battlefield[i];
       if (s <= 0) continue;
       const { cx, cy } = centerOf(i, column, layout);
-      drawSoldier(ctx, cx, cy, layout.size, flagNumOf(map, o), t === TERRAIN.CITY, o);
+      drawSoldier(ctx, cx, cy, layout.size, flagNumOf(map, o), false, o);
       drawStrength(ctx, cx, cy, layout.size, s);
     }
 
@@ -238,7 +205,7 @@ const HexRender = (() => {
    * - 仅地形：只画地形色（不画兵，也不画据点归属点）
    * - 仅兵力：不画地形，只有兵
    * - 全部：地形 + 据点归属点 + 兵 + 兵力数字
-   * 兵一律按「断兵」（镂空）渲染并整体略缩，四周留出一点地形宽度，便于看清地形底色。
+   * 兵按「断兵」比例整体略缩，四周留出一点地形宽度，便于看清地形底色。
    */
   function drawPreview(ctx, cssW, cssH, opts) {
     const { TERRAIN, TILE_OWNER } = MapConst;
@@ -270,7 +237,7 @@ const HexRender = (() => {
     if (showSoldier) {
       const flagNum = map && Array.isArray(map.player_list) ? flagNumOf(map, owner) : 8;
       const soldierSize = size * PREVIEW_SOLDIER_SCALE;
-      drawSoldier(ctx, cx, cy, soldierSize, flagNum, true, owner);
+      drawSoldier(ctx, cx, cy, soldierSize, flagNum, false, owner);
       drawStrength(ctx, cx, cy, soldierSize, strength);
     }
   }

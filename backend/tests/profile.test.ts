@@ -196,12 +196,12 @@ describe('POST /api/users/me/skin', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/users/me/skin',
-      payload: { solid: pngDataUrl(fakePng()), hollow: pngDataUrl(fakePng()) },
+      payload: { solid: pngDataUrl(fakePng()) },
     });
     expect(res.statusCode).toBe(401);
   });
 
-  it('注册即生成默认皮肤；上传两张 192×216 PNG 覆盖成功，hasSkin 保持 true', async () => {
+  it('注册即生成默认皮肤；上传 192×216 PNG 覆盖成功，hasSkin 保持 true', async () => {
     const { token, userId } = await registerAndLogin('alice', 'secret1');
 
     // 注册即分配随机配色默认皮肤：文件已落盘、hasSkin 为 true
@@ -212,7 +212,6 @@ describe('POST /api/users/me/skin', () => {
     });
     expect(before.json().data.user.hasSkin).toBe(true);
     expect(existsSync(skinFilePath(app.skinDir, userId))).toBe(true);
-    expect(existsSync(skinFilePath(app.skinDir, userId, true))).toBe(true);
     const autoSolid = readFileSync(skinFilePath(app.skinDir, userId));
     expect([autoSolid.readUInt32BE(16), autoSolid.readUInt32BE(20)]).toEqual([192, 216]);
 
@@ -220,12 +219,11 @@ describe('POST /api/users/me/skin', () => {
       method: 'POST',
       url: '/api/users/me/skin',
       headers: { authorization: `Bearer ${token}` },
-      payload: { solid: pngDataUrl(fakePng()), hollow: pngDataUrl(fakePng()) },
+      payload: { solid: pngDataUrl(fakePng()) },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual({ hasSkin: true });
     expect(existsSync(skinFilePath(app.skinDir, userId))).toBe(true);
-    expect(existsSync(skinFilePath(app.skinDir, userId, true))).toBe(true);
     // 上传内容覆盖了注册时的默认皮肤
     expect(readFileSync(skinFilePath(app.skinDir, userId)).equals(autoSolid)).toBe(false);
 
@@ -243,7 +241,7 @@ describe('POST /api/users/me/skin', () => {
       method: 'POST',
       url: '/api/users/me/skin',
       headers: { authorization: `Bearer ${token}` },
-      payload: { solid: pngDataUrl(fakePng(100, 100)), hollow: pngDataUrl(fakePng()) },
+      payload: { solid: pngDataUrl(fakePng(100, 100)) },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('INVALID_PARAMS');
@@ -255,7 +253,7 @@ describe('POST /api/users/me/skin', () => {
       method: 'POST',
       url: '/api/users/me/skin',
       headers: { authorization: `Bearer ${token}` },
-      payload: { solid: 'not-an-image', hollow: pngDataUrl(fakePng()) },
+      payload: { solid: 'not-an-image' },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('INVALID_PARAMS');
@@ -274,14 +272,10 @@ describe('注册默认皮肤', () => {
     expect(login.json().data.user.hasSkin).toBe(true);
 
     const solidPath = skinFilePath(app.skinDir, userId);
-    const hollowPath = skinFilePath(app.skinDir, userId, true);
     expect(existsSync(solidPath)).toBe(true);
-    expect(existsSync(hollowPath)).toBe(true);
 
     const solid = readFileSync(solidPath);
-    const hollow = readFileSync(hollowPath);
     expect([solid.readUInt32BE(16), solid.readUInt32BE(20)]).toEqual([192, 216]);
-    expect([hollow.readUInt32BE(16), hollow.readUInt32BE(20)]).toEqual([192, 216]);
 
     // 六边形中心为纯色填充（非描边），三通道均在 [40, 230] 且不透明
     const [r, g, b, a] = pngPixel(solid, 96, 108);
@@ -290,9 +284,6 @@ describe('注册默认皮肤', () => {
       expect(c).toBeGreaterThanOrEqual(40);
       expect(c).toBeLessThanOrEqual(230);
     }
-    // 断兵 hollow 版中心实心、外圈镂空：以顶部顶点附近（y 极靠上）为透明
-    expect(pngPixel(hollow, 96, 108)[3]).toBe(255);
-    expect(pngPixel(hollow, 96, 12)[3]).toBe(0);
 
     // 头像 URL 走皮肤（hasSkin 为 true）
     const me = await app.inject({ method: 'GET', url: '/api/users/me', headers: { authorization: `Bearer ${token}` } });
@@ -324,7 +315,6 @@ describe('POST /api/users/me/skin/random', () => {
     const [r, g, b, a] = pngPixel(first, 96, 108);
     expect(a).toBe(255);
     expect(color).toBe(`#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`);
-    expect(existsSync(skinFilePath(app.skinDir, userId, true))).toBe(true);
 
     const again = await app.inject({
       method: 'POST',

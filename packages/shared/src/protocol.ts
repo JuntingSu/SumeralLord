@@ -49,10 +49,11 @@ export const UpdateProfileBodySchema = z
   });
 export type UpdateProfileBody = z.infer<typeof UpdateProfileBodySchema>;
 
-/** 皮肤上传：solid/hollow 各为一张 192×216 RGBA PNG 的 base64（data URL 或裸 base64） */
+/** 皮肤上传：solid 为一张 192×216 RGBA PNG 的 base64（data URL 或裸 base64） */
 export const SkinUploadBodySchema = z.object({
   solid: z.string().min(1).max(4_000_000),
-  hollow: z.string().min(1).max(4_000_000),
+  /** 旧字段：断兵已改为绘制时等比缩小，保留可选以兼容老客户端，服务端忽略 */
+  hollow: z.string().min(1).max(4_000_000).optional(),
 });
 export type SkinUploadBody = z.infer<typeof SkinUploadBodySchema>;
 

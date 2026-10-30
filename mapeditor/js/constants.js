@@ -48,17 +48,12 @@ const MapConst = (() => {
   const DEFAULT_STRENGTH = 5;
   const DEFAULT_SERVER = 'http://127.0.0.1:3000';
 
-  /** 有图片的旗帜编号（static/flags/flag_N.png 实心 + flag_N_hollow.png 镂空；1..30 为标准纯色旗） */
+  /** 有图片的旗帜编号（static/flags/flag_N.png；1..30 为标准旗。断兵不单独出图，绘制时等比缩小） */
   const FLAG_IMAGE_NUMS = Array.from({ length: 30 }, (_, i) => i + 1);
 
   /** 旗帜实心文件 URL；无对应文件的旗号返回 ''（回退纯色） */
   function flagImage(flag) {
     return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}.png` : '';
-  }
-
-  /** 旗帜镂空文件 URL（断兵视觉，露出下方地形）；无对应文件的旗号返回 '' */
-  function flagImageHollow(flag) {
-    return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}_hollow.png` : '';
   }
 
   /** 中立势力专属旗文件（owner 0/255 → flag_wild / flag_blocker，与玩家旗 1..30 分命名） */
@@ -68,12 +63,6 @@ const MapConst = (() => {
   function flagImageOwner(flag) {
     const name = NEUTRAL_FLAG_FILES[flag];
     return name ? `/static/flags/flag_${name}.png` : flagImage(flag);
-  }
-
-  /** 同上，镂空版 */
-  function flagImageOwnerHollow(flag) {
-    const name = NEUTRAL_FLAG_FILES[flag];
-    return name ? `/static/flags/flag_${name}_hollow.png` : flagImageHollow(flag);
   }
 
   /** 旗帜编号 → 颜色（黄金角 HSL，确定性；同参考编辑器 flag-colors.js） */
@@ -99,7 +88,7 @@ const MapConst = (() => {
     TERRAIN, TERRAIN_LABELS, TERRAIN_COLORS, TERRAIN_ORDER,
     TILE_OWNER, OWNER_LABELS, OWNER_COLORS, OWNER_ORDER,
     AI_LEVELS, AI_LABELS, SEAT_COLORS, NO_SOLDIER_TERRAIN,
-    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage, flagImageHollow,
-    NEUTRAL_FLAG_FILES, flagImageOwner, flagImageOwnerHollow, seatColor,
+    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage,
+    NEUTRAL_FLAG_FILES, flagImageOwner, seatColor,
   };
 })();
