@@ -201,9 +201,11 @@ const HexRender = (() => {
     for (let i = 0; i < battlefield.length; i++) {
       if (battlefield[i][0] !== TERRAIN.CITY) continue;
       const { cx, cy } = centerOf(i, column, layout);
-      hexPath(ctx, cx, cy, layout.size);
+      // 内缩半个线宽：描边外沿与地块边界重合，不出框
+      const cw = Math.max(3, layout.size * 0.09); // 与战斗棋盘一致：初版 2 倍粗
+      hexPath(ctx, cx, cy, layout.size - cw / 2);
       ctx.strokeStyle = MapConst.CITY_RING;
-      ctx.lineWidth = Math.max(3, layout.size * 0.09); // 与战斗棋盘一致：初版 2 倍粗
+      ctx.lineWidth = cw;
       ctx.stroke();
     }
 
@@ -262,9 +264,10 @@ const HexRender = (() => {
     }
     // 据点金环（旗面上沿地块轮廓）
     if (terrain === TERRAIN.CITY) {
-      hexPath(ctx, cx, cy, size);
+      const cw = Math.max(3, size * 0.09); // 与战斗棋盘一致：初版 2 倍粗
+      hexPath(ctx, cx, cy, size - cw / 2); // 内缩半个线宽，不出框
       ctx.strokeStyle = MapConst.CITY_RING;
-      ctx.lineWidth = Math.max(3, size * 0.09); // 与战斗棋盘一致：初版 2 倍粗
+      ctx.lineWidth = cw;
       ctx.stroke();
     }
   }

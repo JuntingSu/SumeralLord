@@ -660,9 +660,11 @@ export default function BoardCanvas({
           if (board.tiles[i].terrain !== TERRAIN.CITY) continue;
           if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
           const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-          hexPath(ctx, c.cx, c.cy, size * v.scale);
+          // 描边以路径为中心向两侧展开：半径内缩半个线宽，外沿正好贴地块边界，不出框
+          const w = Math.max(3, size * v.scale * 0.09);
+          hexPath(ctx, c.cx, c.cy, size * v.scale - w / 2);
           ctx.strokeStyle = CITY_RING;
-          ctx.lineWidth = Math.max(3, size * v.scale * 0.09);
+          ctx.lineWidth = w;
           ctx.stroke();
         }
 
@@ -674,11 +676,12 @@ export default function BoardCanvas({
         // 敌兵威胁环（画在兵与据点金环之上）：红=有反击、白=无反击；进攻会失败时红环叠荆棘
         for (const r of threatRings) {
           const w = Math.max(1.5, size * v.scale * 0.045);
-          hexPath(ctx, r.c.cx, r.c.cy, size * v.scale);
+          const rr = size * v.scale - w / 2; // 同样内缩半个线宽，避免出框
+          hexPath(ctx, r.c.cx, r.c.cy, rr);
           ctx.strokeStyle = r.soldier.counter > 0 ? '#e63946' : '#ffffff';
           ctx.lineWidth = w;
           ctx.stroke();
-          if (r.soldier.counter > 0 && r.wouldFail) drawThorns(ctx, r.c.cx, r.c.cy, size * v.scale, w);
+          if (r.soldier.counter > 0 && r.wouldFail) drawThorns(ctx, r.c.cx, r.c.cy, rr, w);
         }
 
         // 加点阶段连兵白字高亮
