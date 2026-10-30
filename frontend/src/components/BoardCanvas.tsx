@@ -55,9 +55,9 @@ const FLAG_COVER = 1.02;
 const BROKEN_FLAG_SCALE = 0.84;
 /** 墙壁平移方向：统一朝左上（自正上方逆时针 80°；屏幕坐标 y 向下） */
 const WALL_DIR = { x: -Math.sin((80 * Math.PI) / 180), y: -Math.cos((80 * Math.PI) / 180) };
-/** 进攻必败时的荆棘贴图（1170×1170，荆棘外接框 908×1077、中心 604.5,586） */
+/** 进攻必败时的荆棘贴图（1170×1170，环心=画布中心；荆棘环中心线外接半径 430px） */
 const THORN_IMG = '/static/effects/thorn_crimson.png';
-const THORN_BBOX = { w: 908, h: 1077, cx: 604.5, cy: 586 };
+const THORN_RING_PX = 430;
 
 interface BoardCanvasProps {
   board: GameState;
@@ -171,17 +171,16 @@ function drawWall(
   ctx.fill();
 }
 
-/** 进攻必败的荆棘：贴图外接框等比铺满地块（荆棘整体落在地块内），无描边 */
-function drawThorns(ctx: CanvasRenderingContext2D, img: HTMLImageElement | null, cx: number, cy: number, r: number): void {
+/**
+ * 进攻必败的荆棘：把贴图的荆棘环中心线（素材半径 430px）缩放到目标半径并居中，
+ * 使其与威胁环轮廓重合（此处不再单独绘制威胁环）。
+ */
+function drawThorns(ctx: CanvasRenderingContext2D, img: HTMLImageElement | null, cx: number, cy: number, targetR: number): void {
   if (!img || !img.complete || img.naturalWidth === 0) return;
-  const scale = (2 * r) / THORN_BBOX.h;
-  ctx.drawImage(
-    img,
-    cx - THORN_BBOX.cx * scale,
-    cy - THORN_BBOX.cy * scale,
-    img.naturalWidth * scale,
-    img.naturalHeight * scale,
-  );
+  const scale = targetR / THORN_RING_PX;
+  const w = img.naturalWidth * scale;
+  const h = img.naturalHeight * scale;
+  ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
 }
 
 export default function BoardCanvas({
@@ -673,12 +672,16 @@ export default function BoardCanvas({
         // 敌兵威胁环（画在兵与据点金环之上）：红=有反击、白=无反击；进攻会失败时红环叠荆棘
         for (const r of threatRings) {
           const w = Math.max(1.5, size * v.scale * 0.045);
-          const rr = size * v.scale - w / 2; // 同样内缩半个线宽，避免出框
+          const rr = size * v.scale - w / 2; // 环内缩半个线宽，外沿贴地块边界
+          if (r.soldier.counter > 0 && r.wouldFail) {
+            // 进攻必败：荆棘环与威胁环同位，直接替代威胁环（不再画环）
+            drawThorns(ctx, thornRef.current, r.c.cx, r.c.cy, rr);
+            continue;
+          }
           hexPath(ctx, r.c.cx, r.c.cy, rr);
           ctx.strokeStyle = r.soldier.counter > 0 ? '#e63946' : '#ffffff';
           ctx.lineWidth = w;
           ctx.stroke();
-          if (r.soldier.counter > 0 && r.wouldFail) drawThorns(ctx, thornRef.current, r.c.cx, r.c.cy, size * v.scale);
         }
 
         // 加点阶段连兵白字高亮
