@@ -1,16 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { TERRAIN, TILE_OWNER } from '@dl/shared';
+import { TERRAIN } from '@dl/shared';
 import type { BattlefieldTile } from '@dl/shared';
 
-/** 地形色（缩略图用，与 static/terrain 主色一致）：山地底色比平原深，虚空透明不绘制 */
+/** 地形色（缩略图用）：山地用棕色以示高低起伏，虚空透明不绘制 */
 const TERRAIN_COLORS: Record<number, string> = {
   [TERRAIN.PLAIN]: '#53637c',
   [TERRAIN.CITY]: '#d4a017',
   [TERRAIN.OCEAN]: '#4fa3e3',
-  [TERRAIN.MOUNTAIN]: '#434f63',
+  [TERRAIN.MOUNTAIN]: '#8a5a33',
 };
-
-const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a'];
 
 interface HexMapPreviewProps {
   battlefield: BattlefieldTile[];
@@ -20,7 +18,7 @@ interface HexMapPreviewProps {
   className?: string;
 }
 
-/** 六边形地图缩略图：尖顶、even-r（偶数行右移）、index 0 在左下；有归属座次的据点地块标记座次颜色 */
+/** 六边形地图缩略图：尖顶、even-r（偶数行右移）、index 0 在左下；据点不标记归属（势力信息见对局侧栏） */
 export default function HexMapPreview({ battlefield, column, row, height = 260, className }: HexMapPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -86,7 +84,7 @@ export default function HexMapPreview({ battlefield, column, row, height = 260, 
         ctx.strokeStyle = 'rgba(10,15,24,0.85)';
         ctx.lineWidth = 1;
         ctx.stroke();
-        // 山地与平原同色，用深色山形标记区分
+        // 山地棕色底上用深棕山形标记，保留缩略图上的起伏观感
         if (terrain === TERRAIN.MOUNTAIN) {
           const w = size * 0.62;
           const h = size * 0.42;
@@ -96,7 +94,7 @@ export default function HexMapPreview({ battlefield, column, row, height = 260, 
           ctx.lineTo(cx - w * 0.12, baseY - h);
           ctx.lineTo(cx + w * 0.18, baseY);
           ctx.closePath();
-          ctx.fillStyle = 'rgba(30, 38, 52, 0.85)';
+          ctx.fillStyle = 'rgba(66, 39, 16, 0.85)';
           ctx.fill();
           ctx.beginPath();
           ctx.moveTo(cx + w * 0.02, baseY);
@@ -105,19 +103,6 @@ export default function HexMapPreview({ battlefield, column, row, height = 260, 
           ctx.closePath();
           ctx.fill();
         }
-      }
-
-      for (let i = 0; i < battlefield.length; i++) {
-        const [terrain, belongs] = battlefield[i];
-        if (terrain !== TERRAIN.CITY || belongs === TILE_OWNER.EMPTY || belongs === TILE_OWNER.BLOCKER || belongs === TILE_OWNER.WILD) continue;
-        const { cx, cy } = centerOf(i);
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(3, size * 0.18), 0, Math.PI * 2);
-        ctx.fillStyle = SEAT_COLORS[(belongs - 1) % SEAT_COLORS.length];
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
       }
     };
 

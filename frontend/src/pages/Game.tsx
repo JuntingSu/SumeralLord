@@ -19,6 +19,7 @@ import { computeFog, type FogLevel } from '../game/fog';
 import { formatClock } from '../game/timer';
 import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
+import { useNarrowScreen } from '../lib/useNarrowScreen';
 import BoardCanvas from '../components/BoardCanvas';
 import GameChat from '../components/GameChat';
 import ResultModal from './Result';
@@ -36,6 +37,7 @@ export default function Game() {
   const navigate = useNavigate();
   const me = useAuth((s) => s.user);
   const room = useRoom((s) => s.room);
+  const isNarrow = useNarrowScreen();
 
   const board = useGame((s) => s.board);
   const gameId = useGame((s) => s.gameId);
@@ -62,6 +64,8 @@ export default function Game() {
   });
   /** 侧边栏简略模式（默认开启：仅旗帜+势力名+点数+倒计时进度条，浮在棋盘上） */
   const [compactSidebar, setCompactSidebar] = useState(true);
+  /** 简略势力信息面板是否展开（收起后棋盘左上角只留「》」展开按钮） */
+  const [factionPanelOpen, setFactionPanelOpen] = useState(true);
   /** 击杀飘字：xxx已被击败（白色黑描边，屏幕中偏下，上浮 2s 后消失） */
   const [killFloats, setKillFloats] = useState<{ id: number; text: string }[]>([]);
   const killFloatIdRef = useRef(0);
@@ -483,7 +487,7 @@ export default function Game() {
                       className="h-5 w-4 object-contain"
                       onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
                     />
-                    <span className="flex-1 truncate text-xs font-medium" style={{ color: seatColor(f.seat) }}>
+                    <span className="flex-1 truncate text-xs font-medium text-white">
                       {f.name}
                       {isMine && <span className="ml-0.5 text-[10px] text-emerald-400">（我）</span>}
                     </span>
@@ -532,60 +536,135 @@ export default function Game() {
             </svg>
           </button>
 
-          {/* 简略模式（默认开启）：势力信息浮在棋盘左上角（旗帜+势力名+点数+倒计时进度条） */}
-          {compactSidebar && (
-            <div className="pointer-events-none absolute left-2 top-10 z-10 space-y-1.5">
-              {aliveForces.map((f) => {
-                const isCurrent = f.seat === board.currentSeat;
-                const isMine = f.seat === mySeat;
-                const clock =
-                  f.seat === mySeat
-                    ? { stepTimeRemain: timer.stepTimeRemain, gameTimeRemain: timer.gameTimeRemain }
-                    : opponentClocks[f.seat];
-                const stepPct = clock
-                  ? Math.max(0, Math.min(100, (clock.stepTimeRemain / timeSettings.stepTime) * 100))
-                  : 0;
-                return (
-                  <div
-                    key={f.seat}
-                    className={`flex items-center gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 ${!f.alive ? 'opacity-40' : ''}`}
-                  >
-                    <img
-                      src={flagImgUrl(f.flag)}
-                      alt=""
-                      className="h-5 w-4 object-contain"
-                      onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
-                    />
-                    {/* 名称+（我）+点数(+N) 与进度条合计高度 = 旗帜高度（h-5） */}
-                    <div className="flex w-32 flex-col justify-between" style={{ height: '1.25rem' }}>
-                      <div className="flex items-baseline gap-1">
-                        <span
-                          className={`min-w-0 truncate text-xs leading-none ${isCurrent ? 'font-bold' : 'font-medium'}`}
-                          style={{ color: seatColor(f.seat) }}
+          {/* 窄屏：左侧 1/4 宽（上限原固定宽）的完整卡片；非窄屏保留原来的悬浮简略列表 */}
+          {compactSidebar &&
+            (isNarrow ? (
+              factionPanelOpen ? (
+                <div className="absolute left-2 top-10 z-10 w-[min(25vw,10rem)] overflow-hidden bg-slate-800 shadow-lg">
+                  <div>
+                    {aliveForces.map((f) => {
+                      const isCurrent = f.seat === board.currentSeat;
+                      const isMine = f.seat === mySeat;
+                      const player = room?.players.find((p) => p.id === f.playerId);
+                      // AI 扮演时不显示 AI 字样
+                      const playerLabel = isMine ? '（我）' : player ? `（${player.username}）` : '';
+                      const linked = board.tiles.filter(
+                        (t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked,
+                      ).length;
+                      const clock =
+                        f.seat === mySeat
+                          ? { stepTimeRemain: timer.stepTimeRemain, gameTimeRemain: timer.gameTimeRemain }
+                          : opponentClocks[f.seat];
+                      const stepPct =
+                        clock && timeSettings.stepTime > 0
+                          ? Math.max(0, Math.min(100, (clock.stepTimeRemain / timeSettings.stepTime) * 100))
+                          : 0;
+                      const lowStep =
+                        clock !== undefined && timeSettings.stepTime > 0 && clock.stepTimeRemain < timeSettings.stepTime / 4;
+                      return (
+                        <div
+                          key={f.seat}
+                          className={`flex h-5 items-center gap-1.5 px-2 ${isCurrent ? 'bg-slate-700' : ''} ${!f.alive ? 'opacity-40' : ''}`}
                         >
-                          {f.name}
-                        </span>
-                        {isMine && <span className="shrink-0 text-[10px] leading-none text-emerald-400">（我）</span>}
-                        {f.alive ? (
-                          <>
-                            <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
-                            <span className="shrink-0 text-[10px] leading-none text-pink-400">
-                              (+{board.tiles.filter((t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked).length})
-                            </span>
-                          </>
-                        ) : (
-                          <span className="shrink-0 text-[10px] leading-none text-slate-400">已清除</span>
-                        )}
-                      </div>
-                      <div className="h-1 w-full overflow-hidden rounded bg-white/20">
-                        <div className="h-full bg-white" style={{ width: `${stepPct}%` }} />
+                          <SkinStepRing flag={f.flag} stepPct={stepPct} low={lowStep} />
+                          {/* 右上：势力名优先完整显示，扮演玩家其次；右下：加点 + 下回合加点；两行上下等距居中、左右靠左 */}
+                          <div className="flex h-5 min-w-0 flex-1 flex-col items-start justify-evenly">
+                            <div className="flex max-w-full min-w-0 items-baseline gap-0.5">
+                              <span
+                                className={`shrink-0 whitespace-nowrap text-[7px] leading-none text-white ${isCurrent ? 'font-bold' : 'font-medium'}`}
+                              >
+                                {f.name}
+                              </span>
+                              {playerLabel && (
+                                <span className="min-w-0 truncate text-[6px] leading-none text-slate-400">{playerLabel}</span>
+                              )}
+                            </div>
+                            <div className="flex max-w-full items-baseline gap-1 text-[7px] leading-none">
+                              {f.alive ? (
+                                <>
+                                  <span className="text-white">加点 {f.points}</span>
+                                  <span className="shrink-0 text-pink-400">+{linked}</span>
+                                </>
+                              ) : (
+                                <span className="text-slate-400">已清除</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setFactionPanelOpen(false)}
+                    className="flex w-full items-center justify-center gap-1 py-1 text-[7px] leading-none text-slate-300 hover:bg-slate-700"
+                    title="收起势力信息"
+                    aria-label="收起势力信息"
+                  >
+                    收起《
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setFactionPanelOpen(true)}
+                  className="absolute left-2 top-10 z-10 rounded bg-slate-800/80 px-1.5 py-1 text-sm leading-none text-white shadow hover:bg-slate-700"
+                  title="展开势力信息"
+                  aria-label="展开势力信息"
+                >
+                  》
+                </button>
+              )
+            ) : (
+              <div className="pointer-events-none absolute left-2 top-10 z-10 space-y-1.5">
+                {aliveForces.map((f) => {
+                  const isCurrent = f.seat === board.currentSeat;
+                  const isMine = f.seat === mySeat;
+                  const clock =
+                    f.seat === mySeat
+                      ? { stepTimeRemain: timer.stepTimeRemain, gameTimeRemain: timer.gameTimeRemain }
+                      : opponentClocks[f.seat];
+                  const stepPct = clock
+                    ? Math.max(0, Math.min(100, (clock.stepTimeRemain / timeSettings.stepTime) * 100))
+                    : 0;
+                  return (
+                    <div
+                      key={f.seat}
+                      className={`flex items-center gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 ${!f.alive ? 'opacity-40' : ''}`}
+                    >
+                      <img
+                        src={flagImgUrl(f.flag)}
+                        alt=""
+                        className="h-5 w-4 object-contain"
+                        onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
+                      />
+                      {/* 名称+（我）+点数(+N) 与进度条合计高度 = 旗帜高度（h-5） */}
+                      <div className="flex w-32 flex-col justify-between" style={{ height: '1.25rem' }}>
+                        <div className="flex items-baseline gap-1">
+                          <span
+                            className={`min-w-0 truncate text-xs leading-none text-white ${isCurrent ? 'font-bold' : 'font-medium'}`}
+                          >
+                            {f.name}
+                          </span>
+                          {isMine && <span className="shrink-0 text-[10px] leading-none text-emerald-400">（我）</span>}
+                          {f.alive ? (
+                            <>
+                              <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
+                              <span className="shrink-0 text-[10px] leading-none text-pink-400">
+                                (+{board.tiles.filter((t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked).length})
+                              </span>
+                            </>
+                          ) : (
+                            <span className="shrink-0 text-[10px] leading-none text-slate-400">已清除</span>
+                          )}
+                        </div>
+                        <div className="h-1 w-full overflow-hidden rounded bg-white/20">
+                          <div className="h-full bg-white" style={{ width: `${stepPct}%` }} />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            ))}
 
           <BoardCanvas
             board={board}
@@ -751,6 +830,32 @@ function nextSelectedTile(board: GameState, intent: PlayerIntent): number | null
 function seatColor(seat: number | undefined): string {
   const COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#8e44ad', '#d35400', '#16a085', '#c0392b'];
   return seat === undefined ? '#94a3b8' : COLORS[(seat - 1) % COLORS.length];
+}
+
+/** 皮肤内侧正六边形步时进度环：白色进度自顶端起顺时针，剩余不足 1/4 时变红 */
+function SkinStepRing({ flag, stepPct, low }: { flag: number; stepPct: number; low: boolean }) {
+  const HEX = '8,2 14.93,6 14.93,14 8,18 1.07,14 1.07,6';
+  return (
+    <span className="relative h-5 w-4 shrink-0">
+      <img
+        src={flagImgUrl(flag)}
+        alt=""
+        className="h-5 w-4 object-contain"
+        onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
+      />
+      <svg viewBox="0 0 16 20" className="pointer-events-none absolute inset-0 h-5 w-4" aria-hidden="true">
+        <polygon points={HEX} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.4" />
+        <polygon
+          points={HEX}
+          fill="none"
+          stroke={low ? '#ef4444' : '#ffffff'}
+          strokeWidth="1.4"
+          pathLength={100}
+          strokeDasharray={`${stepPct} 100`}
+        />
+      </svg>
+    </span>
+  );
 }
 
 // ---------- 局内系统通知文案（[势力名（玩家名）]；AI/无玩家时省略（玩家名）） ----------
