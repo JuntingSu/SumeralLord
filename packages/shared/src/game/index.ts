@@ -5,5 +5,6 @@ export * from './coord.js';
 export * from './distance.js';
 export * from './reducer.js';
 export * from './ai.js';
+export * from './diff.js';
 export * from './hash.js';
 export * from './version.js';

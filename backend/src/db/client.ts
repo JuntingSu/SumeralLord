@@ -48,6 +48,17 @@ export function openDb(dbPath?: string): DbHandle {
       score_changes TEXT NOT NULL DEFAULT '[]',
       aborted INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS pve_saves (
+      user_id INTEGER PRIMARY KEY,
+      game_id TEXT NOT NULL,
+      map_title TEXT NOT NULL,
+      turn INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      current_seat INTEGER NOT NULL,
+      current_force TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
   // 存量库补列（DEFAULT 使旧账号自动回填 100 分、旧对局 score_changes 回填 []）
   ensureColumn(sqlite, 'users', 'score', 'score REAL NOT NULL DEFAULT 100');

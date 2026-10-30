@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 import { authRoutes } from './api/auth.js';
 import { roomRoutes } from './api/rooms.js';
 import { mapRoutes } from './api/maps.js';
+import { pveRoutes } from './api/pve.js';
 import { gameRoutes } from './api/game.js';
 import { userRoutes } from './api/users.js';
 import { leaderboardRoutes } from './api/leaderboard.js';
@@ -35,6 +36,12 @@ export interface BuildAppOptions {
   authRate?: { registerPerMin?: number; loginPerMin?: number };
   roomOpts?: { idleMs?: number; sweepIntervalMs?: number; gameHardCapMs?: number; gameOverRetainMs?: number };
   mapsReloadMs?: number;
+  /** PVE 地图目录自动重扫间隔（测试可注入；默认 config.pveMapsReloadMs） */
+  pveMapsReloadMs?: number;
+  /** PVE 普通 AI 权重文件路径（测试可注入；默认 config.aiWeightsPath） */
+  pveWeightsPath?: string;
+  /** PVE 存档大小上限（测试可注入；默认 config.pveSaveMaxBytes） */
+  pveSaveMaxBytes?: number;
   /** AI 子进程管理配置（测试可注入 enabled:false / bootDir / onOutput） */
   aiBotOpts?: import('./ai-bot/manager.js').AiBotManagerOptions;
 }
@@ -45,6 +52,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   const tickets = new TicketService(opts.ticketTtlMs);
   const botSessions = new BotSessionService();
   const maps = new MapCatalog();
+  const pveMaps = new MapCatalog({ quiet: true });
   const games = new GameManager(undefined, db);
   const aiBots = new AiBotManager(botSessions, opts.aiBotOpts);
   // 房间状态事件 → WS 网关广播（网关在下方创建后开始生效）
@@ -64,6 +72,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.decorate('aiBots', aiBots);
   app.decorate('rooms', rooms);
   app.decorate('maps', maps);
+  app.decorate('pveMaps', pveMaps);
   app.decorate('games', games);
 
   await app.register(cors, { origin: true });
@@ -72,6 +81,12 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.decorate('mapsDir', path.join(staticRoot, 'maps'));
   app.decorate('mapsUncensoredDir', path.join(staticRoot, 'maps-uncensored'));
   app.decorate('skinDir', opts.skinDir ?? path.join(staticRoot, 'skin'));
+  app.decorate('pveMapsDir', path.join(staticRoot, 'pve_maps'));
+  app.decorate('pveWeightsPath', opts.pveWeightsPath ?? config.aiWeightsPath);
+  app.decorate('pveSaveMaxBytes', opts.pveSaveMaxBytes ?? config.pveSaveMaxBytes);
+  app.decorate('pveMapsReloadMs', opts.pveMapsReloadMs ?? config.pveMapsReloadMs);
+  // PVE 地图目录懒加载：首次 /api/pve/maps 或 /random 时才扫描（避免 buildApp/测试解析上千张图）
+  pveMaps.setDir(path.join(staticRoot, 'pve_maps'));
   if (existsSync(staticRoot)) {
     await app.register(fastifyStatic, { root: staticRoot, prefix: '/static/' });
     maps.loadFromDir(path.join(staticRoot, 'maps'));
@@ -94,6 +109,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
   await app.register(roomRoutes);
   await app.register(mapRoutes);
+  await app.register(pveRoutes);
   await app.register(gameRoutes);
   await app.register(userRoutes);
   await app.register(leaderboardRoutes);
@@ -108,6 +124,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     rooms.dispose();
     games.dispose();
     maps.dispose();
+    pveMaps.dispose();
     sqlite.close();
   });
 

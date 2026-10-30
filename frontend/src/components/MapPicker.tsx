@@ -9,6 +9,8 @@ interface MapPickerProps {
   onChange: (mapId: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** 下拉最多渲染多少条（PVE 地图库上千张时限制；超出提示继续输入） */
+  maxResults?: number;
 }
 
 /** 模糊匹配：输入串出现在 title、author 或任一 tag 中即命中（不区分大小写） */
@@ -18,7 +20,7 @@ function matchesQuery(m: MapMeta, query: string): boolean {
 }
 
 /** 地图筛选选择器：输入过滤 title/author/tags，点选列表项确定 */
-export default function MapPicker({ id, maps, value, onChange, disabled, placeholder }: MapPickerProps) {
+export default function MapPicker({ id, maps, value, onChange, disabled, placeholder, maxResults }: MapPickerProps) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
 
@@ -30,6 +32,7 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
   }, [value, maps]);
 
   const results = query.trim() ? maps.filter((m) => matchesQuery(m, query)) : maps;
+  const shown = maxResults !== undefined && results.length > maxResults ? results.slice(0, maxResults) : results;
   const selected = maps.find((m) => m.id === value);
 
   return (
@@ -73,7 +76,7 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
           role="listbox"
           className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded bg-slate-700 py-1 shadow-lg"
         >
-          {results.map((m) => (
+          {shown.map((m) => (
             <li key={m.id} role="option" aria-selected={m.id === value}>
               <button
                 type="button"
@@ -92,6 +95,11 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
             </li>
           ))}
           {results.length === 0 && <li className="px-3 py-2 text-sm text-slate-400">无匹配的地图</li>}
+          {shown.length < results.length && (
+            <li className="px-3 py-2 text-xs text-slate-400">
+              共 {results.length} 张，仅显示前 {shown.length} 张，请输入关键字缩小范围
+            </li>
+          )}
         </ul>
       )}
     </div>

@@ -3,11 +3,14 @@ import type { ReactNode } from 'react';
 import { useAuth } from './stores/auth';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ModeSelect from './pages/ModeSelect';
 import Lobby from './pages/Lobby';
 import CreateRoom from './pages/CreateRoom';
 import Maps from './pages/Maps';
 import Room from './pages/Room';
 import Game from './pages/Game';
+import PveRoom from './pages/PveRoom';
+import PveGame from './pages/PveGame';
 import Replay from './pages/Replay';
 import History from './pages/History';
 import Leaderboard from './pages/Leaderboard';
@@ -23,7 +26,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function Home() {
   const token = useAuth((s) => s.token);
-  return <Navigate to={token ? '/lobby' : '/login'} replace />;
+  return <Navigate to={token ? '/modes' : '/login'} replace />;
 }
 
 export default function App() {
@@ -32,6 +35,14 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route
+        path="/modes"
+        element={
+          <RequireAuth>
+            <ModeSelect />
+          </RequireAuth>
+        }
+      />
       <Route
         path="/lobby"
         element={
@@ -61,6 +72,22 @@ export default function App() {
         element={
           <RequireAuth>
             <Room />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/pve"
+        element={
+          <RequireAuth>
+            <PveRoom />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/pve/game"
+        element={
+          <RequireAuth>
+            <PveGame />
           </RequireAuth>
         }
       />

@@ -1,6 +1,7 @@
 // §8.1.1 移动事件 / §3.3 失活性 / §8.1.2 进攻事件
 import { describe, it, expect } from 'vitest';
 import { makeMap, startGame, assignments, act, force, soldierAt, chainKinds, CITY, PLAIN, OCEAN, MOUNTAIN, WILD, BLOCKER } from './helpers.js';
+import { TERRAIN_PROPS } from '../src/index.js';
 
 describe('§8.1.1 移动事件：前置判定', () => {
   const base = makeMap({ tiles: { 6: [CITY, 1, 3], 7: [PLAIN, 128, 0] } });
@@ -178,16 +179,55 @@ describe('§3.3 移动力判断（失活）', () => {
     expect(r2.ok && soldierAt(r2.state, 11)!.hasMovement).toBe(true);
   });
 
-  it('海洋-进入失活：从海洋进入据点/平原失去移动力；非海洋出发不触发', () => {
-    // 从海洋 7 进入平原 2（上面分支已覆盖）；此处验证进入据点
-    const map = makeMap({ tiles: { 6: [CITY, 1, 1], 7: [OCEAN, 1, 2], 2: [CITY, 128, 0] } });
-    const { state } = startGame(map);
-    const r = act(state, 1, { intentType: 'MOVE', from: 7, to: 2 });
+  it('海洋-进入失活：从海洋进入据点失去移动力（兵力足够也失活）；非海洋出发不触发', () => {
+    // 海洋 7 上的断兵兵力 4 → 进入空据点 2 后为「兵力 3 连兵」：若据点缺「海洋-进入失活」，
+    // 该兵此处仍具有移动力（兵力 3 连兵本回合可行动），断言与失活判定一一对应
+    const sea = makeMap({ tiles: { 6: [CITY, 1, 1], 7: [OCEAN, 1, 4], 2: [CITY, 128, 0] } });
+    const g1 = startGame(sea);
+    const r1 = act(g1.state, 1, { intentType: 'MOVE', from: 7, to: 2 });
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    expect(soldierAt(r1.state, 2)).toMatchObject({ owner: 1, strength: 3, isLinked: true, hasMovement: false });
+
+    // 对照：从平原进入据点不触发（出发地块不是海洋）
+    const land = makeMap({ tiles: { 6: [CITY, 1, 2], 7: [PLAIN, 1, 3], 2: [CITY, 128, 0] } });
+    const g2 = startGame(land);
+    const r2 = act(g2.state, 1, { intentType: 'MOVE', from: 7, to: 2 });
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    expect(soldierAt(r2.state, 2)).toMatchObject({ owner: 1, strength: 2, isLinked: true, hasMovement: true });
+  });
+
+  it('海洋-进入失活：断兵从海洋进攻上据点 → 进占后立即失去行动力（据点↔海洋 循环封闭）', () => {
+    // 海洋 7 的断兵（兵力 6）进攻敌方据点 2（1 兵、反击 ∞）：成功进占、受 1 反击 → 落点兵力 5 连兵。
+    // 全接地形强制连兵，若据点缺「海洋-进入失活」，该兵本回合还能继续行动，
+    // 即可构造「据点 → 海洋 → 据点」的无限循环（行动次数上界「兵力+1」随之失效）
+    const map = makeMap({
+      tiles: {
+        6: [CITY, 1, 1],
+        7: [OCEAN, 1, 6],
+        2: [CITY, 2, 1],
+        12: [CITY, 2, 1],
+        3: [PLAIN, 2, 2], // 进占后与 2 相邻的敌兵：用于验证无法继续行动
+        19: [PLAIN, 1, 3], // 远离据点的己方断兵：保证回合仍停在行动阶段（不被自动跳过）
+      },
+    });
+    const asg = assignments({ seat: 1, playerId: 101 }, { seat: 2, playerId: 102 });
+    const { state } = startGame(map, asg);
+    const r = act(state, 1, { intentType: 'ATTACK', from: 7, to: 2 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    const s = soldierAt(r.state, 2)!;
-    expect(s.hasMovement).toBe(false);
-    expect(s.isLinked).toBe(true); // 全接地块强制连兵
+    expect(soldierAt(r.state, 2)).toMatchObject({ owner: 1, strength: 5, isLinked: true, hasMovement: false });
+    expect(r.state.phase).toBe('ACTION'); // 另有可动兵 → 未自动切阶段
+    // 该兵本回合不能再行动：继续进攻 / 移动均被拒绝（循环无法构造）
+    expect(act(r.state, 1, { intentType: 'ATTACK', from: 2, to: 3 })).toMatchObject({ ok: false, reason: 'ILLEGAL_ATTACK' });
+    expect(act(r.state, 1, { intentType: 'MOVE', from: 2, to: 1 })).toMatchObject({ ok: false, reason: 'ILLEGAL_MOVE' });
+  });
+
+  it('地形属性表：据点与平原都具有「海洋-进入失活」（§3.1）', () => {
+    expect(TERRAIN_PROPS[CITY]?.oceanEnterInactive).toBe(true);
+    expect(TERRAIN_PROPS[PLAIN]?.oceanEnterInactive).toBe(true);
+    expect(TERRAIN_PROPS[OCEAN]?.oceanEnterInactive).toBe(false);
   });
 });
 

@@ -35,3 +35,19 @@ export const matchHistory = sqliteTable('match_history', {
 
 export type MatchHistoryRow = typeof matchHistory.$inferSelect;
 export type NewMatchHistoryRow = typeof matchHistory.$inferInsert;
+
+/** PVE 存档（一账号一行；完整 GameState 快照 + 初始地图/设置；对局结束由前端无条件删除） */
+export const pveSaves = sqliteTable('pve_saves', {
+  userId: integer('user_id').primaryKey(),
+  gameId: text('game_id').notNull(),
+  mapTitle: text('map_title').notNull(),
+  turn: integer('turn').notNull(),
+  phase: text('phase').notNull(),
+  currentSeat: integer('current_seat').notNull(),
+  currentForce: text('current_force').notNull(),
+  payload: text('payload').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type PveSaveRow = typeof pveSaves.$inferSelect;
+export type NewPveSaveRow = typeof pveSaves.$inferInsert;

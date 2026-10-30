@@ -30,6 +30,10 @@ export const config = {
   gameOverRetainMs: num(process.env.DL_GAME_OVER_RETAIN_MS, 5 * 60 * 1000),
   /** 地图目录元数据刷新间隔（完整地图按需读盘，仅小字段周期重扫） */
   mapsReloadMs: num(process.env.DL_MAPS_RELOAD_MS, 5000),
+  /** PVE 地图目录元数据刷新间隔（懒加载；上千张图时用 mtime 缓存，避免每次全量解析） */
+  pveMapsReloadMs: num(process.env.DL_PVE_MAPS_RELOAD_MS, 30000),
+  /** PVE 存档单账号上限（完整 GameState + 地图；255×255 约数 MB） */
+  pveSaveMaxBytes: num(process.env.DL_PVE_SAVE_MAX_BYTES, 48 * 1024 * 1024),
   /** AI 服务端托管：每局含 AI 席位的对局拉起 ai-bot 子进程（测试可关） */
   aiBotEnabled: process.env.AI_BOT_ENABLED !== '0',
   /** bot 崩溃重启退避（首次等待毫秒数，每次翻倍） */

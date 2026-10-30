@@ -157,6 +157,9 @@ export default function Lobby() {
       {/* 主内容区（顶部问候 + 房间列表 + 左下角操作；宽屏时右侧让位于侧边栏） */}
       <div className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-3 px-6 pb-1 pt-5">
+          <Link to="/modes" className="text-sm text-emerald-400 hover:underline">
+            ← 模式选择
+          </Link>
           {user && (
             <>
               <h1 className="text-xl font-semibold">

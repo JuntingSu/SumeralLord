@@ -226,6 +226,7 @@
     btn.addEventListener('click', () => {
       uploadMenu.hidden = true;
       if (btn.dataset.act === 'json') $('btn-export').click();
+      else if (btn.dataset.act === 'pve') window.MapEditorActions?.playPve?.();
       else exportToServerFlow();
     });
   });

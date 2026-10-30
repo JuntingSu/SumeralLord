@@ -416,6 +416,40 @@
     statusMsg(`已导出 ${s.id}.json`);
   });
 
+  // PVE游玩：当前地图经 sessionStorage 交给前端 PVE 房间（不经过服务器、不进地图库）
+  function playPve() {
+    if (!EMBEDDED) {
+      statusMsg('请从主程序（模式选择/大厅）进入地图编辑器后再使用 PVE游玩', 'error');
+      return;
+    }
+    const s = Editor.getState();
+    if (!s.map) { statusMsg('没有地图可游玩', 'error'); return; }
+    const errors = MapValidate.validate(s.map).filter((i) => i.level === 'error');
+    if (errors.length) {
+      statusMsg(`校验未通过（${errors.length} 处错误），请先修复`, 'error');
+      return;
+    }
+    if (s.map.row > 255 || s.map.column > 255) {
+      statusMsg(`地图 ${s.map.row}×${s.map.column} 超过 255×255 上限`, 'error');
+      return;
+    }
+    if (s.map.player_num < 2) {
+      statusMsg('PVE 地图至少需要 2 个势力', 'error');
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        'dl_pve_map_v1',
+        JSON.stringify({ source: 'mapeditor', id: s.id, map: MapData.serialize(s.map) }),
+      );
+    } catch {
+      statusMsg('浏览器本地存储不可用，无法带入 PVE', 'error');
+      return;
+    }
+    window.location.href = '/pve?from=mapeditor';
+  }
+  $('btn-pve-play').addEventListener('click', playPve);
+
   $('btn-save').addEventListener('click', async () => {
     const s = Editor.getState();
     if (!s.map) { statusMsg('没有地图可保存', 'error'); return; }
@@ -740,5 +774,5 @@
   // ==================== 供 mobile.js 复用的入口 ====================
   // 窄屏顶栏整体隐藏后，服务器地址与状态提示只在这里可取；
   // 其余「新建 / 本地导入 / 地图码导入 / 随机生成 / 保存 / 导出」沿用各自按钮的 click（事件处理器不变）。
-  window.MapEditorActions = { serverUrl, statusMsg };
+  window.MapEditorActions = { serverUrl, statusMsg, playPve };
 })();

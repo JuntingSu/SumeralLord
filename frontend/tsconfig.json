@@ -15,7 +15,8 @@
     "types": ["vite/client", "node"],
     "baseUrl": ".",
     "paths": {
-      "@dl/shared": ["../packages/shared/src/index.ts"]
+      "@dl/shared": ["../packages/shared/src/index.ts"],
+      "@dl/train": ["./src/types/dl-train.d.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

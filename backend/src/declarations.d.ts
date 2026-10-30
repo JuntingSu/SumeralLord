@@ -16,11 +16,21 @@ declare module 'fastify' {
     aiBots: AiBotManager;
     rooms: RoomManager;
     maps: MapCatalog;
+    /** PVE 地图目录（懒加载；backend/static/pve_maps） */
+    pveMaps: MapCatalog;
     games: GameManager;
     /** 正式地图目录（maps，条件达标的玩家保存直入，无需审查） */
     mapsDir: string;
     /** 地图编辑器保存目录（maps-uncensored 审查队列，审查后移入 maps） */
     mapsUncensoredDir: string;
+    /** PVE 地图目录路径 */
+    pveMapsDir: string;
+    /** PVE 普通 AI 权重文件路径 */
+    pveWeightsPath: string;
+    /** PVE 存档单账号大小上限（字节） */
+    pveSaveMaxBytes: number;
+    /** PVE 地图目录自动重扫间隔（毫秒） */
+    pveMapsReloadMs: number;
     /** 个人皮肤目录（static/skin；usr_{id}.png / usr_{id}_hollow.png） */
     skinDir: string;
   }

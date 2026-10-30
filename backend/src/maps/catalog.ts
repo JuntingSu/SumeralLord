@@ -1,124 +1,106 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { TERRAIN, TILE_OWNER } from '@dl/shared';
+import { stripJsonComments, validateMapData } from '@dl/shared';
 import type { MapFullData, MapMeta } from '@dl/shared';
 
-/** 剥离 // 行注释（地图文件允许带注释，字符串内的 // 不受影响） */
-function stripJsonComments(raw: string): string {
-  let out = '';
-  let inString = false;
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i];
-    if (inString) {
-      out += ch;
-      if (ch === '"') inString = false;
-      else if (ch === '\\') {
-        out += raw[i + 1] ?? '';
-        i++;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === '/' && raw[i + 1] === '/') {
-      while (i < raw.length && raw[i] !== '\n') i++;
-      out += '\n';
-      continue;
-    }
-    out += ch;
-  }
-  return out;
+export { validateMapData } from '@dl/shared';
+
+interface CachedFile {
+  mtimeMs: number;
+  size: number;
+  /** null = 文件存在但结构非法/解析失败（缓存以免每次刷新重复解析） */
+  meta: MapMeta | null;
 }
 
-/** 地图结构校验（目录加载与保存接口共用）：返回 true 表示通过 */
-export function validateMapData(raw: unknown): boolean {
-  if (raw === null || typeof raw !== 'object') return false;
-  const m = raw as Record<string, unknown>;
-  if (
-    typeof m.title !== 'string' ||
-    typeof m.row !== 'number' ||
-    typeof m.column !== 'number' ||
-    typeof m.player_num !== 'number' ||
-    !Array.isArray(m.player_list) ||
-    (m.player_list as unknown[]).length === 0 ||
-    m.player_num !== (m.player_list as unknown[]).length ||
-    !Array.isArray(m.battlefield) ||
-    (m.battlefield as unknown[]).length !== m.row * m.column
-  ) {
-    return false;
-  }
-  const seats = new Set<number>();
-  for (const p of m.player_list as Record<string, unknown>[]) {
-    if (
-      typeof p.name !== 'string' ||
-      typeof p.team !== 'number' ||
-      typeof p.computer !== 'number' ||
-      typeof p.seat !== 'number' ||
-      typeof p.flag !== 'number' ||
-      p.seat < 1 ||
-      p.seat > 127
-    ) {
-      return false;
-    }
-    seats.add(p.seat);
-  }
-  if (seats.size !== (m.player_list as unknown[]).length) return false;
-  const terrainValues = new Set<number>([TERRAIN.PLAIN, TERRAIN.CITY, TERRAIN.OCEAN, TERRAIN.MOUNTAIN, TERRAIN.VOID]);
-  for (const entry of m.battlefield as unknown[]) {
-    const tile = entry as unknown[];
-    if (!Array.isArray(tile) || tile.length !== 3 || !tile.every((v) => typeof v === 'number' && Number.isInteger(v))) {
-      return false;
-    }
-    const [terrain, owner, strength] = tile as [number, number, number];
-    if (
-      !terrainValues.has(terrain) ||
-      !(owner === TILE_OWNER.EMPTY || owner === TILE_OWNER.BLOCKER || owner === TILE_OWNER.WILD || (owner >= 1 && owner <= 127)) ||
-      strength < 0
-    ) {
-      return false;
-    }
-  }
-  return true;
+export interface MapCatalogOptions {
+  /** 静默逐文件告警，改为刷新结束时输出一条汇总（PVE 上千张图时使用） */
+  quiet?: boolean;
 }
 
 /**
  * 地图目录：只缓存元数据（小字段），完整地图数据按需从磁盘读取。
  * 支持 3000 张量级：内存占用可忽略；目录变更通过定时 refresh 反映，无需重启。
  * id 由文件名派生。
+ *
+ * refresh 带 mtime+size 缓存：首次解析全部文件，之后只 stat，未变化的文件直接复用元数据；
+ * 新增/修改/删除文件仍能反映。PVE 目录可懒加载（ensureLoaded），避免启动/测试解析上千张图。
  */
 export class MapCatalog {
   private dir = '';
   private meta = new Map<string, MapMeta>();
+  private cache = new Map<string, CachedFile>();
+  private loaded = false;
+  private lastSkipped = -1;
   private timer: NodeJS.Timeout | null = null;
 
-  loadFromDir(dir: string): number {
+  constructor(private readonly opts: MapCatalogOptions = {}) {}
+
+  /** 设置目录（目录变化时清空缓存，等待下次加载） */
+  setDir(dir: string): void {
+    if (this.dir === dir) return;
     this.dir = dir;
+    this.meta.clear();
+    this.cache.clear();
+    this.loaded = false;
+  }
+
+  /** 主动加载（常规 maps 目录在启动时使用） */
+  loadFromDir(dir: string): number {
+    this.setDir(dir);
+    this.loaded = true;
     return this.refresh();
+  }
+
+  /** 懒加载：首次访问时扫描；可选启动自动重扫（PVE 目录使用） */
+  ensureLoaded(reloadMs?: number): number {
+    if (!this.loaded) {
+      this.loaded = true;
+      this.refresh();
+    }
+    if (reloadMs !== undefined && this.timer === null) this.startAutoReload(reloadMs);
+    return this.meta.size;
   }
 
   /** 重扫目录重建元数据缓存（整体替换，删除的文件也会从缓存消失）。 */
   refresh(): number {
     const next = new Map<string, MapMeta>();
+    const nextCache = new Map<string, CachedFile>();
     let files: string[] = [];
     try {
       files = readdirSync(this.dir).filter((f) => f.endsWith('.json')).sort();
     } catch {
       this.meta.clear();
+      this.cache.clear();
       return 0;
     }
+    let skipped = 0;
     for (const file of files) {
+      const full = path.join(this.dir, file);
+      let stat: ReturnType<typeof statSync>;
       try {
-        const raw: unknown = JSON.parse(stripJsonComments(readFileSync(path.join(this.dir, file), 'utf8')));
+        stat = statSync(full);
+      } catch {
+        skipped += 1;
+        continue;
+      }
+      const cached = this.cache.get(file);
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        if (cached.meta) next.set(path.basename(file, '.json'), cached.meta);
+        else skipped += 1;
+        nextCache.set(file, cached);
+        continue;
+      }
+      try {
+        const raw: unknown = JSON.parse(stripJsonComments(readFileSync(full, 'utf8')));
         if (!validateMapData(raw)) {
-          console.warn(`[maps] ${file} 结构非法，已跳过`);
+          skipped += 1;
+          if (!this.opts.quiet) console.warn(`[maps] ${file} 结构非法，已跳过`);
+          nextCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, meta: null });
           continue;
         }
         const m = raw as MapFullData;
         const id = path.basename(file, '.json');
-        next.set(id, {
+        const meta: MapMeta = {
           id,
           title: m.title,
           author: m.author,
@@ -127,12 +109,21 @@ export class MapCatalog {
           row: m.row,
           column: m.column,
           tags: m.tags,
-        });
+        };
+        next.set(id, meta);
+        nextCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, meta });
       } catch (err) {
-        console.warn(`[maps] ${file} 解析失败:`, err);
+        skipped += 1;
+        if (!this.opts.quiet) console.warn(`[maps] ${file} 解析失败:`, err);
+        nextCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, meta: null });
       }
     }
     this.meta = next;
+    this.cache = nextCache;
+    if (this.opts.quiet && skipped > 0 && skipped !== this.lastSkipped) {
+      console.warn(`[maps] ${this.dir}: ${next.size} 张有效，${skipped} 张跳过`);
+    }
+    this.lastSkipped = skipped;
     return this.meta.size;
   }
 
@@ -179,5 +170,7 @@ export class MapCatalog {
 
   dispose(): void {
     this.stopAutoReload();
+    this.meta.clear();
+    this.cache.clear();
   }
 }

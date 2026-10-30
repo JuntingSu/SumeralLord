@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@dl/shared': fileURLToPath(new URL('../packages/shared/src/index.ts', import.meta.url)),
+      '@dl/train': fileURLToPath(new URL('../train/v1/lib/online.ts', import.meta.url)),
     },
   },
   define: {

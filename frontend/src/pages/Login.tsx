@@ -22,7 +22,7 @@ export default function Login() {
     try {
       const result = await login(username.trim(), password);
       setAuth(result.token, result.user);
-      navigate('/lobby', { replace: true });
+      navigate('/modes', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '网络错误，请稍后再试');
     } finally {

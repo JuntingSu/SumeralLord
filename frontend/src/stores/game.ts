@@ -16,8 +16,8 @@ import type {
   SeatAssignment,
   SoldierState,
 } from '@dl/shared';
-import { applyIntent, initState } from '@dl/shared';
-import type { GameState } from '@dl/shared';
+import { applyIntent, applyInverseDiff, diffGameState, initState } from '@dl/shared';
+import type { GameState, GameStateDiff } from '@dl/shared';
 import { collectConsensusNodes, sameConsensus } from '../game/consensus';
 import { initialTimer, onTurnChange, tick, type TimerState } from '../game/timer';
 import type { EventQueueItem } from '../canvas/animator';
@@ -39,6 +39,8 @@ export interface GameTransport {
   sendSettlementDismissed(gameId: string): void;
   /** EVENT_GAP / RECONNECT 续拉（同构接口） */
   fetchEvents(gameId: string, after: number, limit?: number): Promise<{ events: Array<Record<string, unknown>>; nextCursor: number }>;
+  /** PVE 悔棋：把本地影子状态回滚到指定 eventId（PVP 不实现） */
+  rewindTo?(state: GameState, eventId: number): void;
 }
 
 let tempIdSeq = 0;
@@ -50,6 +52,11 @@ function nextTempId(): string {
 export interface FatalError {
   code: string;
   message: string;
+}
+
+export interface UndoEntry {
+  eventId: number;
+  diff: GameStateDiff;
 }
 
 interface GameStore {
@@ -99,7 +106,36 @@ interface GameStore {
   /** 本局击杀计数（seat → 击杀数；驱动「大杀四方」通知） */
   killCounts: Record<number, number>;
 
+  /** PVE 悔棋：只记录玩家意图的逆 diff；AI 行动/回合切换时清空 */
+  undoMode: boolean;
+  undoStack: UndoEntry[];
+  undoBaseEventId: number;
+  undoAvailable: boolean;
+
   startGame(params: { roomId: string; startMsg: GameStartMsg; myUserId: number | null; fogMode: boolean }): void;
+  /** PVE 新局：直接用 initState 的结果启动（与 PveTransport 共用同一份 state） */
+  startPveGame(params: {
+    roomId: string;
+    gameId: string;
+    state: GameState;
+    chain: GameEvent[];
+    seatAssignments: SeatAssignment[];
+    myUserId: number;
+    fogMode: boolean;
+    map: MapFullData;
+  }): void;
+  /** PVE 读档：直接落完整 GameState，不重放历史、不产生历史动画 */
+  restorePveGame(params: {
+    roomId: string;
+    gameId: string;
+    state: GameState;
+    seatAssignments: SeatAssignment[];
+    myUserId: number;
+    fogMode: boolean;
+    map: MapFullData;
+  }): void;
+  /** PVE 悔棋：回退最后一条玩家意图 */
+  undoLastIntent(): void;
   onServerMessage(msg: RoomServerMsg): void;
   onStatus(status: WsStatus): void;
   submitIntent(intent: PlayerIntent): void;
@@ -193,7 +229,12 @@ function applyStreamMessage(
   const r = applyIntent(board, { actor: { kind: 'PLAYER', seat: fromSeat }, intent });
   if (!r.ok) {
     // 非法意图：确定性拒绝，游标照常前进（各端一致）
-    set({ appliedEventId: eventId });
+    if (s.undoMode && fromSeat !== s.mySeat) {
+      // AI 已行动：玩家不能跨 AI 回合悔棋
+      set({ appliedEventId: eventId, undoStack: [], undoBaseEventId: eventId, undoAvailable: false });
+    } else {
+      set({ appliedEventId: eventId });
+    }
     return 'applied';
   }
   // 共识节点：立即上报（与动画解耦）
@@ -215,6 +256,26 @@ function applyStreamMessage(
   const announcements = replay ? [] : collectPhaseAnnouncements(r.chain, s.mySeat);
   // 实时路径（非重放）收集局内系统通知（回合开始/被击败/大杀四方）并更新击杀计数
   const sys = replay ? null : collectSystemNotices(r.chain, fromSeat, s.killCounts);
+  // PVE 悔棋：只记录玩家意图的逆 diff；AI 意图/换回合时清空
+  let undoStack = s.undoStack;
+  let undoBaseEventId = s.undoBaseEventId;
+  if (s.undoMode) {
+    if (fromSeat !== s.mySeat) {
+      undoStack = [];
+      undoBaseEventId = eventId;
+    } else if (!replay) {
+      const diff = diffGameState(board, r.state);
+      const endTurn = r.chain.find((e) => e.kind === 'END_TURN');
+      const leavesTurn =
+        (endTurn?.kind === 'END_TURN' && endTurn.toSeat !== s.mySeat) || r.state.finished;
+      if (leavesTurn) {
+        undoStack = [];
+        undoBaseEventId = eventId;
+      } else {
+        undoStack = [...s.undoStack, { eventId, diff }];
+      }
+    }
+  }
   set({
     board: r.state,
     appliedEventId: eventId,
@@ -227,6 +288,9 @@ function applyStreamMessage(
     killCounts: sys ? sys.killCounts : s.killCounts,
     systemNotices:
       sys && sys.notices.length > 0 ? [...s.systemNotices, ...sys.notices] : s.systemNotices,
+    undoStack,
+    undoBaseEventId,
+    undoAvailable: undoStack.length > 0,
   });
   return 'applied';
 }
@@ -286,6 +350,11 @@ export const useGame = create<GameStore>((set, get) => {
     systemNotices: [],
     killCounts: {},
 
+    undoMode: false,
+    undoStack: [],
+    undoBaseEventId: 0,
+    undoAvailable: false,
+
     startGame: ({ roomId, startMsg, myUserId, fogMode }) => {
       const init = initState({
         map: startMsg.map,
@@ -327,12 +396,127 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: initAnnouncements,
         systemNotices: initNotices,
         killCounts: {},
+        undoMode: false,
+        undoStack: [],
+        undoBaseEventId: 0,
+        undoAvailable: false,
       });
       // 首个回合的计时基准（initState 已自动完成首势力准备 → 行动）
       const seat = init.state.currentSeat;
       if (seat > 0) {
         set({ timer: onTurnChange(initialTimer(startMsg.timeSettings), seat, startMsg.timeSettings) });
       }
+    },
+
+    startPveGame: ({ roomId, gameId, state, chain, seatAssignments, myUserId, fogMode, map }) => {
+      const board = structuredClone(state);
+      const mySeat = seatAssignments.find((a) => a.playerId !== null && a.playerId === myUserId)?.seat ?? null;
+      const announcements = collectPhaseAnnouncements(chain, mySeat);
+      if (mySeat !== null && mySeat === board.currentSeat) announcements.unshift('你的回合');
+      const notices: SystemNotice[] = [];
+      if (board.currentSeat > 0) notices.push({ kind: 'turnStart', seat: board.currentSeat });
+      set({
+        gameId,
+        roomId,
+        map,
+        seatAssignments,
+        mySeat,
+        isSpectator: mySeat === null,
+        timeSettings: board.timeSettings,
+        fogMode,
+        board,
+        appliedEventId: 0,
+        eventQueue: [],
+        lastChain: chain,
+        ackMap: {},
+        localIntents: {},
+        pendingConsensus: {},
+        lastPointTile: null,
+        timer: initialTimer(board.timeSettings),
+        gameOver: null,
+        fatal: null,
+        disconnectedSeats: [],
+        opponentClocks: {},
+        chat: [],
+        phaseAnnouncements: announcements,
+        systemNotices: notices,
+        killCounts: {},
+        undoMode: true,
+        undoStack: [],
+        undoBaseEventId: 0,
+        undoAvailable: false,
+      });
+      if (board.currentSeat > 0) {
+        set({ timer: onTurnChange(initialTimer(board.timeSettings), board.currentSeat, board.timeSettings) });
+      }
+    },
+
+    restorePveGame: ({ roomId, gameId, state, seatAssignments, myUserId, fogMode, map }) => {
+      const board = structuredClone(state);
+      const mySeat = board.forces.find((f) => f.playerId !== null && f.playerId === myUserId)?.seat ?? null;
+      set({
+        gameId,
+        roomId,
+        map,
+        seatAssignments,
+        mySeat,
+        isSpectator: mySeat === null,
+        timeSettings: board.timeSettings,
+        fogMode,
+        board,
+        appliedEventId: 0,
+        eventQueue: [],
+        lastChain: [],
+        ackMap: {},
+        localIntents: {},
+        pendingConsensus: {},
+        lastPointTile: null,
+        timer: initialTimer(board.timeSettings),
+        gameOver: null,
+        fatal: null,
+        disconnectedSeats: [],
+        opponentClocks: {},
+        chat: [],
+        phaseAnnouncements: [],
+        systemNotices: [],
+        killCounts: {},
+        undoMode: true,
+        undoStack: [],
+        undoBaseEventId: 0,
+        undoAvailable: false,
+      });
+      if (board.currentSeat > 0) {
+        set({ timer: onTurnChange(initialTimer(board.timeSettings), board.currentSeat, board.timeSettings) });
+      }
+    },
+
+    undoLastIntent: () => {
+      const s = get();
+      if (!s.undoMode || s.board === null || s.undoStack.length === 0) return;
+      if (s.mySeat === null || s.board.currentSeat !== s.mySeat) return;
+      if (s.board.phase !== 'ACTION' && s.board.phase !== 'ADD_POINT') return;
+      if (s.gameOver || s.fatal) return;
+      const entry = s.undoStack[s.undoStack.length - 1];
+      const restored = applyInverseDiff(s.board, entry.diff);
+      const stack = s.undoStack.slice(0, -1);
+      const newEventId = stack.length > 0 ? stack[stack.length - 1].eventId : s.undoBaseEventId;
+      s.transport?.rewindTo?.(restored, newEventId);
+      set({
+        board: restored,
+        appliedEventId: newEventId,
+        eventQueue: [],
+        lastChain: [],
+        lastPointTile: null,
+        pendingConsensus: {},
+        ackMap: {},
+        localIntents: {},
+        submitting: false,
+        phaseAnnouncements: [],
+        systemNotices: [],
+        killCounts: {},
+        undoStack: stack,
+        undoAvailable: stack.length > 0,
+      });
     },
 
     onServerMessage: (msg) => {
@@ -375,7 +559,7 @@ export const useGame = create<GameStore>((set, get) => {
           return;
         }
         case 'GAME_OVER': {
-          set({ gameOver: msg });
+          set({ gameOver: msg, undoStack: [], undoAvailable: false });
           return;
         }
         case 'TIME_SYNC': {
@@ -560,6 +744,10 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: [],
         systemNotices: [],
         killCounts: {},
+        undoMode: false,
+        undoStack: [],
+        undoBaseEventId: 0,
+        undoAvailable: false,
       });
     },
   };
@@ -573,6 +761,7 @@ export function attachTransport(t: GameTransport): () => void {
   return () => {
     offMsg();
     offStatus();
-    useGame.setState({ transport: null });
+    // 只清理自己注入的通道：StrictMode/重新开局时旧 effect 的清理不能把新 transport 置空
+    if (useGame.getState().transport === t) useGame.setState({ transport: null });
   };
 }

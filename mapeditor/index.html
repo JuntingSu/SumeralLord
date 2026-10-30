@@ -9,7 +9,7 @@
 <body>
 
 <header id="topbar">
-  <div class="brand">🗺 数字领主 · 地图编辑器 <a id="btn-back-lobby" href="/lobby" style="display:none" class="back">← 返回大厅</a></div>
+  <div class="brand">🗺 数字领主 · 地图编辑器 <a id="btn-back-lobby" href="/modes" style="display:none" class="back">← 返回模式选择</a></div>
   <div class="grp">
     <button id="btn-new" title="新建地图">新建</button>
     <button id="btn-open" title="从本地 JSON 文件导入编辑">📂 本地导入</button>
@@ -27,6 +27,7 @@
     </label>
     <button id="btn-save" title="保存到服务器（对局数>15 或积分>150 时直存正式地图，否则进审查队列）">💾 保存到服务器</button>
     <button id="btn-export" title="导出为 JSON 文件下载">📥 导出 JSON</button>
+    <button id="btn-pve-play" title="把当前地图带到 PVE 房间（不保存到服务器）">🎮 PVE游玩</button>
   </div>
   <div id="status" class="status">就绪</div>
 </header>
@@ -142,10 +143,11 @@
     <div id="mobile-actions" class="m-only" hidden>
       <button id="btn-settings-m" title="地图信息 / 势力">⚙</button>
       <button id="btn-more-m" title="新建 / 导入 / 随机生成">＋</button>
-      <button id="btn-upload-m" title="导出 JSON / 导出到服务器">📤</button>
+      <button id="btn-upload-m" title="导出 JSON / 导出到服务器 / PVE游玩">📤</button>
       <div id="upload-menu" hidden>
         <button type="button" data-act="json">📥 导出 JSON</button>
         <button type="button" data-act="server">📤 导出到服务器</button>
+        <button type="button" data-act="pve">🎮 PVE游玩</button>
       </div>
     </div>
 
