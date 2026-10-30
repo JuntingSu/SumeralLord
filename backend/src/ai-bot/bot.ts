@@ -281,6 +281,15 @@ export class AiBot {
     }
     if (intents.length === 0) {
       this.mctsPlan = null;
+      // 加点阶段点数耗尽：AI 驱动代其发起一次 SWITCH_PHASE 结束回合。
+      // 行动阶段不代发（由 AI 计划自行切换阶段，见 planAiTurn/planMctsTurn）。
+      const force = this.board.forces.find((f) => f.seat === seat);
+      if (this.board.phase === 'ADD_POINT' && force && force.points === 0) {
+        const intent: PlayerIntent = { intentType: 'SWITCH_PHASE' };
+        const clientTempId = `bot-${++this.tempSeq}`;
+        this.inflight = { clientTempId, seat, intent };
+        ws.send(JSON.stringify({ type: 'AI_INTENT_SUBMIT', clientTempId, aiSeat: seat, intent }));
+      }
       return;
     }
     const intent = intents[0];

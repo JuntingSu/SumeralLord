@@ -20,6 +20,7 @@ import { formatClock } from '../game/timer';
 import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
 import { useNarrowScreen } from '../lib/useNarrowScreen';
+import { shouldAutoSkipPhase } from '../game/dim';
 import BoardCanvas from '../components/BoardCanvas';
 import GameChat from '../components/GameChat';
 import ResultModal from './Result';
@@ -49,6 +50,7 @@ export default function Game() {
   const timeSettings = useGame((s) => s.timeSettings);
   const gameOver = useGame((s) => s.gameOver);
   const fatal = useGame((s) => s.fatal);
+  const appliedEventId = useGame((s) => s.appliedEventId);
   const disconnectedSeats = useGame((s) => s.disconnectedSeats);
   const eventQueue = useGame((s) => s.eventQueue);
   const fogMode = useGame((s) => s.fogMode);
@@ -275,6 +277,18 @@ export default function Game() {
     }, 5000);
     return () => window.clearInterval(iv);
   }, [myTurn, gameId, mySeat]);
+
+  // ---------- 自动跳过阶段：前端判定后以 SWITCH_PHASE 发起（reducer 不再自动跳转） ----------
+  // 行动阶段：自己席位的兵全部按渲染规则变灰；加点阶段：点数耗尽。同一局面状态只发一次。
+  const autoSkipKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!board || mySeat === null || isSpectator || gameOver || fatal) return;
+    if (!shouldAutoSkipPhase(board, mySeat)) return;
+    const key = `${appliedEventId}:${board.currentSeat}:${board.phase}`;
+    if (autoSkipKeyRef.current === key) return;
+    autoSkipKeyRef.current = key;
+    useGame.getState().submitIntent({ intentType: 'SWITCH_PHASE' });
+  }, [board, mySeat, isSpectator, gameOver, fatal, appliedEventId]);
 
   // ---------- 迷雾 ----------
   const fogEnabled = fogMode && !isSpectator;

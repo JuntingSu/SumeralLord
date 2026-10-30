@@ -27,7 +27,7 @@ describe('planAiTurn：难度分派', () => {
     expect(planAiTurn(state, 2)).toEqual({ kind: 'skip' });
   });
 
-  it('难度1 返回 intents；整个计划可完整应用并完成 AI 回合', () => {
+  it('难度1 返回 intents；计划 + 驱动的加点结束可完成 AI 回合', () => {
     const map = makeMap({
       players: [
         { seat: 1, team: 1, computer: 1 },
@@ -43,7 +43,7 @@ describe('planAiTurn：难度分派', () => {
     expect(plan.kind).toBe('intents');
     if (plan.kind !== 'intents') return;
     expect(plan.intents.length).toBeGreaterThan(0);
-    // 逐步应用整个计划（模拟与真实应用共用同一 reducer）：全部可执行，AI 回合完成
+    // 逐步应用计划（模拟与真实应用共用同一 reducer）：全部可执行
     let cur = state;
     for (const intent of plan.intents) {
       const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat: 1 }, intent });
@@ -51,8 +51,15 @@ describe('planAiTurn：难度分派', () => {
       if (!r.ok) return;
       cur = r.state;
     }
-    expect(cur.currentSeat).toBe(2);
-    expect(cur.phase).toBe('ACTION');
+    // 加点耗尽后计划停在 ADD_POINT；由 AI 驱动补发 SWITCH_PHASE 结束回合（reducer 不再自动跳转）
+    expect(cur.currentSeat).toBe(1);
+    expect(cur.phase).toBe('ADD_POINT');
+    expect(cur.forces.find((f) => f.seat === 1)!.points).toBe(0);
+    const end = applyIntent(cur, { actor: { kind: 'PLAYER', seat: 1 }, intent: { intentType: 'SWITCH_PHASE' } });
+    expect(end.ok).toBe(true);
+    if (!end.ok) return;
+    expect(end.state.currentSeat).toBe(2);
+    expect(end.state.phase).toBe('ACTION');
   });
 
   it('确定性：同 seed 同局面两次决策结果全等', () => {

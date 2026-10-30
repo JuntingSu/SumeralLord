@@ -22,6 +22,7 @@ import { computeFog, type FogLevel } from '../game/fog';
 import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
 import { useNarrowScreen } from '../lib/useNarrowScreen';
+import { shouldAutoSkipPhase } from '../game/dim';
 import BoardCanvas from '../components/BoardCanvas';
 import PveResultModal from '../components/PveResultModal';
 
@@ -65,6 +66,7 @@ export default function PveGame() {
   const isSpectator = useGame((s) => s.isSpectator);
   const gameOver = useGame((s) => s.gameOver);
   const fatal = useGame((s) => s.fatal);
+  const appliedEventId = useGame((s) => s.appliedEventId);
   const eventQueue = useGame((s) => s.eventQueue);
   const fogMode = useGame((s) => s.fogMode);
   const undoAvailable = useGame((s) => s.undoAvailable);
@@ -446,6 +448,18 @@ export default function PveGame() {
   );
 
   useEffect(() => () => cancelAddPoint(), [cancelAddPoint]);
+
+  // ---------- 自动跳过阶段：前端判定后以 SWITCH_PHASE 发起（reducer 不再自动跳转） ----------
+  // 行动阶段：自己席位的兵全部按渲染规则变灰；加点阶段：点数耗尽。同一局面状态只发一次。
+  const autoSkipKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!board || mySeat === null || isSpectator || gameOver || fatal) return;
+    if (!shouldAutoSkipPhase(board, mySeat)) return;
+    const key = `${appliedEventId}:${board.currentSeat}:${board.phase}`;
+    if (autoSkipKeyRef.current === key) return;
+    autoSkipKeyRef.current = key;
+    useGame.getState().submitIntent({ intentType: 'SWITCH_PHASE' });
+  }, [board, mySeat, isSpectator, gameOver, fatal, appliedEventId]);
 
   // ---------- 操作 ----------
   const phase = board?.phase ?? 'PREPARE';

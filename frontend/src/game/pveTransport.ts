@@ -217,7 +217,16 @@ export class PveTransport implements GameTransport {
 
     const plan = planAiTurn(this.board, seat);
     const intents = plan.kind === 'intents' ? plan.intents : skipIntents(this.board, seat);
-    if (intents.length === 0) return;
+    if (intents.length === 0) {
+      // 加点阶段点数耗尽：AI 驱动代其发起一次 SWITCH_PHASE 结束回合；行动阶段由 AI 计划自行切换
+      const force = this.board.forces.find((f) => f.seat === seat);
+      if (this.board.phase === 'ADD_POINT' && force && force.points === 0) {
+        this.planSeat = seat;
+        this.planQueue = [{ intentType: 'SWITCH_PHASE' }];
+        this.pump();
+      }
+      return;
+    }
     this.planSeat = seat;
     this.planQueue = intents;
     this.pump();
