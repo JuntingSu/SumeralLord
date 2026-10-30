@@ -141,16 +141,16 @@ const HexRender = (() => {
     ctx.fillRect(cx - size * 0.22, cy - size * 0.3, size * 0.44, size * 0.6);
   }
 
-  /** 兵力数字：地块中心（深色字 + 白描边，对齐战斗棋盘） */
+  /** 兵力数字：白字 + 下方黑色底影（对齐战斗棋盘；不描边） */
   function drawStrength(ctx, cx, cy, size, strength) {
+    const text = String(strength);
     ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#111';
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 2.5;
-    ctx.strokeText(String(strength), cx, cy);
-    ctx.fillText(String(strength), cx, cy);
+    ctx.fillStyle = '#000';
+    ctx.fillText(text, cx, cy + Math.max(1, size * 0.055));
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, cx, cy);
   }
 
   /**

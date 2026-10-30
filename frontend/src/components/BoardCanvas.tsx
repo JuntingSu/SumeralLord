@@ -213,6 +213,20 @@ export default function BoardCanvas({
     return (owner: number): number => map.get(owner) ?? NEUTRAL_FLAG_NUMS[owner] ?? 8;
   }, [board.forces]);
 
+  /** 兵力数字变灰的兵：先按阶段预计算集合，绘制时只做查表（非我方回合/观战为空集） */
+  const dimTiles = useMemo(() => {
+    const set = new Set<number>();
+    if (isSpectator || mySeat === null || board.currentSeat !== mySeat) return set;
+    if (board.phase !== 'ACTION' && board.phase !== 'ADD_POINT') return set;
+    for (let i = 0; i < board.tiles.length; i++) {
+      const s = board.tiles[i].soldier;
+      if (!s) continue;
+      // 行动阶段：我方无行动力的兵；加点阶段：断兵（不分归属）
+      if (board.phase === 'ACTION' ? s.owner === mySeat && !s.hasMovement : !s.isLinked) set.add(i);
+    }
+    return set;
+  }, [board.tiles, board.phase, board.currentSeat, mySeat, isSpectator]);
+
   /** 空闲时（无动画）渲染的权威兵表 */
   const boardSoldiers = useMemo<Array<SoldierState | null>>(
     () => board.tiles.map((t) => t.soldier),
@@ -373,6 +387,7 @@ export default function BoardCanvas({
       alpha: number,
       flash: FlashKind | null,
       broken: boolean,
+      dimText: boolean,
     ) => {
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
@@ -391,15 +406,15 @@ export default function BoardCanvas({
         const h = size * 0.6 * (broken ? BROKEN_FLAG_SCALE : 1);
         ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
       }
-      // 兵力数字：地块正中心（旗帜上方）
+      // 兵力数字：默认白字叠黑色底影（不再描边）；不可行动单位改浅灰半透明叠深灰半透明
+      const text = String(soldier.strength);
       ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#111';
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-      ctx.lineWidth = 2.5;
-      ctx.strokeText(String(soldier.strength), cx, cy);
-      ctx.fillText(String(soldier.strength), cx, cy);
+      ctx.fillStyle = dimText ? 'rgba(44, 48, 56, 0.62)' : '#000000';
+      ctx.fillText(text, cx, cy + Math.max(1, size * 0.055));
+      ctx.fillStyle = dimText ? 'rgba(214, 218, 224, 0.62)' : '#ffffff';
+      ctx.fillText(text, cx, cy);
       ctx.restore();
       // 闪光描边（不受兵透明度影响）
       if (flash) {
@@ -505,12 +520,13 @@ export default function BoardCanvas({
               1,
               null,
               broken,
+              dimTiles.has(i),
             );
             continue;
           }
           // DESPAWN：淡出
           if (ev?.kind === 'DESPAWN' && ev.tile === i) {
-            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null, broken);
+            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null, broken, dimTiles.has(i));
             continue;
           }
           // 闪光判定
@@ -519,7 +535,7 @@ export default function BoardCanvas({
           else if (af && af.breakTiles.includes(i)) flash = 'break';
           else if (ev?.kind === 'REJOIN' && ev.tile === i) flash = 'rejoin';
           else if (victorySeats.includes(soldier.owner)) flash = 'victory';
-          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash, broken);
+          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash, broken, dimTiles.has(i));
         }
         // SPAWN：目标地块淡入（起点 30% 保证移动连续性）
         if (ev?.kind === 'SPAWN') {
@@ -535,6 +551,7 @@ export default function BoardCanvas({
               0.3 + 0.7 * progress,
               null,
               !ev.soldier.isLinked,
+              dimTiles.has(ev.tile),
             );
           }
         }
@@ -592,7 +609,7 @@ export default function BoardCanvas({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier, canvasSize]);
+  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier, dimTiles, canvasSize]);
 
   return (
     <div ref={containerRef} className={className} style={{ position: 'relative', overflow: 'hidden' }}>
