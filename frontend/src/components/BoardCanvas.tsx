@@ -10,14 +10,19 @@ import { neighborsOf } from '@dl/shared';
 import type { FogLevel } from '../game/fog';
 import type { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
+import { terrainImgUrl, TERRAIN_TEXTURE_KEYS } from '../lib/terrain';
 
+// 地形贴图加载前的兜底色（与 static/terrain 主色一致；虚空不填色）
 const TERRAIN_COLORS: Record<number, string> = {
-  [TERRAIN.PLAIN]: '#7cb342',
+  [TERRAIN.PLAIN]: '#53637c',
   [TERRAIN.CITY]: '#d4a017',
   [TERRAIN.OCEAN]: '#4fa3e3',
-  [TERRAIN.MOUNTAIN]: '#a1887f',
-  [TERRAIN.VOID]: '#263238',
+  [TERRAIN.MOUNTAIN]: '#53637c',
 };
+/** 地块轮廓线（相邻地块共用边，深色细线） */
+const TILE_STROKE = 'rgba(10, 15, 24, 0.85)';
+/** 据点金环（旗面上沿地块轮廓描一圈纯色金） */
+const CITY_RING = '#f2c14a';
 const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#8e44ad', '#d35400'];
 /** 中立势力专属旗号：直接沿用 owner 值（0 野生 / 255 阻挡），URL 由 lib/flags 派生为 flag_wild / flag_blocker */
 const NEUTRAL_FLAG_NUMS: Record<number, number> = { [TILE_OWNER.WILD]: 0, [TILE_OWNER.BLOCKER]: 255 };
@@ -139,6 +144,9 @@ export default function BoardCanvas({
   const hoverRef = useRef<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const spritesRef = useRef<Record<string, SpriteEntry>>({});
+  const terrainRef = useRef<Record<number, HTMLImageElement>>({});
+  /** 地形贴图加载计数：加载完成后让静态层重绘 */
+  const [terrainVersion, setTerrainVersion] = useState(0);
 
   // M5.2：视图变换（缩放/平移）。viewRef 为实时权威值（拖拽/滚轮直接改，rAF 层与拾取每帧读取）；
   // view state 仅是 viewRef 的 rAF 节流镜像，用于触发静态层重绘。
@@ -281,19 +289,29 @@ export default function BoardCanvas({
     const { rows, columns } = board;
     const L = computeLayout(cssW, cssH, rows, columns);
     const { size, offX, offY, totalH } = L;
-    // 地块间隔：绘制半径缩小，相邻地块之间留缝（布局/拾取仍用 size）
-    const ts = size * (1 - TILE_GAP);
     // M5.2：视图变换
     const tx = (c: { cx: number; cy: number }) => ({ cx: view.offX + c.cx * view.scale, cy: view.offY + c.cy * view.scale });
 
-    // 1. 地形底色
+    // 1. 地形（static/terrain 贴图；虚空完全透明 —— 不填充也不描边）
     for (let i = 0; i < board.tiles.length; i++) {
+      const terrain = board.tiles[i].terrain;
+      if (terrain === TERRAIN.VOID) continue;
       const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-      hexPath(ctx, c.cx, c.cy, ts * view.scale);
-      ctx.fillStyle = TERRAIN_COLORS[board.tiles[i].terrain] ?? '#9e9e9e';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      ctx.lineWidth = 1;
+      const img = terrainRef.current[terrain];
+      if (img && img.complete && img.naturalWidth > 0) {
+        // 贴图与旗帜同规格（六边形 R=100），按地块半径铺满整格
+        const s = (size * view.scale) / FLAG_IMG_HEX_R;
+        const w = img.naturalWidth * s;
+        const h = img.naturalHeight * s;
+        ctx.drawImage(img, c.cx - w / 2, c.cy - h / 2, w, h);
+      } else {
+        hexPath(ctx, c.cx, c.cy, size * view.scale);
+        ctx.fillStyle = TERRAIN_COLORS[terrain] ?? '#9e9e9e';
+        ctx.fill();
+      }
+      hexPath(ctx, c.cx, c.cy, size * view.scale);
+      ctx.strokeStyle = TILE_STROKE;
+      ctx.lineWidth = Math.max(1, size * view.scale * 0.035);
       ctx.stroke();
     }
 
@@ -303,33 +321,31 @@ export default function BoardCanvas({
         const c = tx(centerOf(i, columns, size, offX, offY, totalH));
         const level = fogLevels[i];
         if (level === 'hidden') {
-          hexPath(ctx, c.cx, c.cy, ts * view.scale);
+          hexPath(ctx, c.cx, c.cy, size * view.scale);
           ctx.fillStyle = FOG_COLOR;
           ctx.fill();
         } else if (level === 'explored') {
-          hexPath(ctx, c.cx, c.cy, ts * view.scale);
+          hexPath(ctx, c.cx, c.cy, size * view.scale);
           ctx.fillStyle = EXPLORED_DIM;
           ctx.fill();
         }
       }
     }
 
-    // 3. 据点归属圆点（中立/无主据点也标）
-    for (let i = 0; i < board.tiles.length; i++) {
-      const t = board.tiles[i];
-      if (t.terrain !== TERRAIN.CITY) continue;
-      const belongs = t.soldier?.owner ?? TILE_OWNER.EMPTY;
-      if (belongs === TILE_OWNER.EMPTY || belongs === TILE_OWNER.BLOCKER) continue;
-      const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-      ctx.beginPath();
-      ctx.arc(c.cx, c.cy, Math.max(2.5, size * 0.14) * view.scale, 0, Math.PI * 2);
-      ctx.fillStyle = belongs === TILE_OWNER.WILD ? '#825e54' : SEAT_COLORS[(belongs - 1) % SEAT_COLORS.length];
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+  }, [board, fogEnabled, fogLevels, view, canvasSize, terrainVersion]);
+
+  // 地形贴图预加载（虚空无贴图；每张加载完成触发一次静态层重绘）
+  useEffect(() => {
+    for (const t of TERRAIN_TEXTURE_KEYS) {
+      if (terrainRef.current[t] !== undefined) continue;
+      const url = terrainImgUrl(t);
+      if (!url) continue;
+      const img = new Image();
+      img.onload = () => setTerrainVersion((v) => v + 1);
+      img.src = url;
+      terrainRef.current[t] = img;
     }
-  }, [board, fogEnabled, fogLevels, view, canvasSize]);
+  }, []);
 
   // 旗帜 sprite 预加载（flag 为负数 → 个人皮肤 usr_{-flag}，加载失败自然走色块兜底）
   useEffect(() => {
@@ -528,6 +544,17 @@ export default function BoardCanvas({
           hexPath(ctx, c.cx, c.cy, ts * v.scale);
           ctx.fillStyle = `rgba(230, 57, 70, ${0.25 * Math.sin(progress * Math.PI)})`;
           ctx.fill();
+        }
+
+        // 据点：沿地块轮廓在旗面上描一圈金色纯色（空据点同样标出）
+        for (let i = 0; i < board.tiles.length; i++) {
+          if (board.tiles[i].terrain !== TERRAIN.CITY) continue;
+          if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
+          const c = tx(centerOf(i, columns, size, offX, offY, totalH));
+          hexPath(ctx, c.cx, c.cy, size * v.scale);
+          ctx.strokeStyle = CITY_RING;
+          ctx.lineWidth = Math.max(1.5, size * v.scale * 0.045);
+          ctx.stroke();
         }
 
         // 加点阶段连兵白字高亮

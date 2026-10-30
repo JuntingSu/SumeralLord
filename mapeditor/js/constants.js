@@ -14,13 +14,28 @@ const MapConst = (() => {
     [TERRAIN.MOUNTAIN]: '山地',
     [TERRAIN.VOID]: '虚空',
   };
+  // 与 static/terrain 贴图主色一致（虚空完全透明，仅作调色板色块）
   const TERRAIN_COLORS = {
-    [TERRAIN.PLAIN]: '#7cb342',
+    [TERRAIN.PLAIN]: '#53637c',
     [TERRAIN.CITY]: '#d4a017',
     [TERRAIN.OCEAN]: '#4fa3e3',
-    [TERRAIN.MOUNTAIN]: '#a1887f',
-    [TERRAIN.VOID]: '#263238',
+    [TERRAIN.MOUNTAIN]: '#53637c',
+    [TERRAIN.VOID]: 'transparent',
   };
+  /** 地形贴图文件名（static/terrain/terrain_{name}.png；虚空无贴图） */
+  const TERRAIN_IMAGE_FILES = {
+    [TERRAIN.PLAIN]: 'plain',
+    [TERRAIN.CITY]: 'city',
+    [TERRAIN.OCEAN]: 'ocean',
+    [TERRAIN.MOUNTAIN]: 'mountain',
+  };
+  const TERRAIN_IMAGE_KEYS = Object.keys(TERRAIN_IMAGE_FILES).map(Number);
+  function terrainImage(terrain) {
+    const name = TERRAIN_IMAGE_FILES[terrain];
+    return name ? `/static/terrain/terrain_${name}.png` : null;
+  }
+  /** 据点金环（旗面上沿地块轮廓的纯色金） */
+  const CITY_RING = '#f2c14a';
   // 工具调色板顺序（当前项目合法地形码，绝不含 2）
   const TERRAIN_ORDER = [TERRAIN.PLAIN, TERRAIN.CITY, TERRAIN.OCEAN, TERRAIN.MOUNTAIN, TERRAIN.VOID];
 
@@ -86,6 +101,7 @@ const MapConst = (() => {
 
   return {
     TERRAIN, TERRAIN_LABELS, TERRAIN_COLORS, TERRAIN_ORDER,
+    TERRAIN_IMAGE_FILES, TERRAIN_IMAGE_KEYS, terrainImage, CITY_RING,
     TILE_OWNER, OWNER_LABELS, OWNER_COLORS, OWNER_ORDER,
     AI_LEVELS, AI_LABELS, SEAT_COLORS, NO_SOLDIER_TERRAIN,
     DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage,

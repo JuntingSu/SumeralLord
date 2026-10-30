@@ -73,26 +73,40 @@ const HexRender = (() => {
   /** 兼容旧调用名：等价于 onSpriteReady */
   function setSpriteWatcher(fn) { return onSpriteReady(fn); }
 
+  function fireSpriteWatchers() { spriteWatchers.forEach((fn) => fn()); }
+
   function preloadFlag(flagNum) {
     if (sprites[flagNum] !== undefined) return;
     const img = new Image();
     img.src = MapConst.flagImageOwner(flagNum);
     sprites[flagNum] = { img };
-    let fired = false;
-    const fire = () => {
-      if (fired) return;
-      fired = true;
-      spriteWatchers.forEach((fn) => fn());
-    };
-    img.onload = fire;
-    img.onerror = fire;
+    img.onload = fireSpriteWatchers;
+    img.onerror = fireSpriteWatchers;
   }
 
-  /** 预载全部可用旗帜精灵（含中立势力 0/255；旗号 8 兼作未知归属兜底） */
+  // ---------- 地形贴图缓存（static/terrain；虚空无贴图） ----------
+  const terrainSprites = {}; // terrain -> Image | null
+
+  function preloadTerrain(terrain) {
+    if (terrainSprites[terrain] !== undefined) return;
+    const url = MapConst.terrainImage(terrain);
+    if (!url) {
+      terrainSprites[terrain] = null;
+      return;
+    }
+    const img = new Image();
+    img.src = url;
+    img.onload = fireSpriteWatchers;
+    img.onerror = fireSpriteWatchers;
+    terrainSprites[terrain] = img;
+  }
+
+  /** 预载全部精灵：旗帜（含中立 0/255）与地形贴图 */
   function preloadAllFlags() {
     for (const n of MapConst.FLAG_IMAGE_NUMS) preloadFlag(n);
     for (const n of Object.keys(MapConst.NEUTRAL_FLAG_FILES)) preloadFlag(Number(n));
     if (!MapConst.FLAG_IMAGE_NUMS.includes(8)) preloadFlag(8);
+    for (const t of MapConst.TERRAIN_IMAGE_KEYS) preloadTerrain(t);
   }
 
   /** 归属 → 旗帜编号（对齐战斗棋盘 flagOf：野生 0 / 阻挡 255 各有中立旗，未知用 8） */
@@ -146,35 +160,31 @@ const HexRender = (() => {
     const { column, row, battlefield } = map;
     const layout = computeLayout(column, row, cssW, cssH, view.zoom, view.panX, view.panY);
     const { hover } = opts;
-    const { TERRAIN, TILE_OWNER } = MapConst;
+    const { TERRAIN } = MapConst;
 
     ctx.clearRect(0, 0, cssW, cssH);
     ctx.fillStyle = '#16181d';
     ctx.fillRect(0, 0, cssW, cssH);
 
-    // 地形层
+    // 地形层（static/terrain 贴图；虚空完全透明 —— 不填充也不描边）
     for (let i = 0; i < battlefield.length; i++) {
+      const terrain = battlefield[i][0];
+      if (terrain === TERRAIN.VOID) continue;
       const { cx, cy } = centerOf(i, column, layout);
-      hexPath(ctx, cx, cy, layout.size * 0.98);
-      ctx.fillStyle = MapConst.TERRAIN_COLORS[battlefield[i][0]] ?? '#888888';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.30)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // 据点归属圆点（对齐战斗棋盘静态层：中立/无主据点也标，阻挡不标）
-    for (let i = 0; i < battlefield.length; i++) {
-      const [t, o] = battlefield[i];
-      if (t !== TERRAIN.CITY) continue;
-      if (o === TILE_OWNER.EMPTY || o === TILE_OWNER.BLOCKER) continue;
-      const { cx, cy } = centerOf(i, column, layout);
-      ctx.beginPath();
-      ctx.arc(cx, cy, Math.max(2.5, layout.size * 0.14), 0, Math.PI * 2);
-      ctx.fillStyle = o === TILE_OWNER.WILD ? '#825e54' : MapConst.seatColor(o);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth = 1;
+      const img = terrainSprites[terrain];
+      if (img && img.complete && img.naturalWidth > 0) {
+        const sc = layout.size / FLAG_IMG_HEX_R;
+        const w = img.naturalWidth * sc;
+        const h = img.naturalHeight * sc;
+        ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+      } else {
+        hexPath(ctx, cx, cy, layout.size);
+        ctx.fillStyle = MapConst.TERRAIN_COLORS[terrain] ?? '#888888';
+        ctx.fill();
+      }
+      hexPath(ctx, cx, cy, layout.size);
+      ctx.strokeStyle = 'rgba(10,15,24,0.85)';
+      ctx.lineWidth = Math.max(1, layout.size * 0.035);
       ctx.stroke();
     }
 
@@ -185,6 +195,16 @@ const HexRender = (() => {
       const { cx, cy } = centerOf(i, column, layout);
       drawSoldier(ctx, cx, cy, layout.size, flagNumOf(map, o), false, o);
       drawStrength(ctx, cx, cy, layout.size, s);
+    }
+
+    // 据点金环（旗面上沿地块轮廓；空据点同样标出）
+    for (let i = 0; i < battlefield.length; i++) {
+      if (battlefield[i][0] !== TERRAIN.CITY) continue;
+      const { cx, cy } = centerOf(i, column, layout);
+      hexPath(ctx, cx, cy, layout.size);
+      ctx.strokeStyle = MapConst.CITY_RING;
+      ctx.lineWidth = Math.max(1.5, layout.size * 0.045);
+      ctx.stroke();
     }
 
     // 悬停描边
@@ -204,11 +224,11 @@ const HexRender = (() => {
    * opts: { map, mode: 'all'|'terrain'|'strength', terrain, owner, strength }
    * - 仅地形：只画地形色（不画兵，也不画据点归属点）
    * - 仅兵力：不画地形，只有兵
-   * - 全部：地形 + 据点归属点 + 兵 + 兵力数字
+   * - 全部：地形 + 据点金环 + 兵 + 兵力数字
    * 兵按「断兵」比例整体略缩，四周留出一点地形宽度，便于看清地形底色。
    */
   function drawPreview(ctx, cssW, cssH, opts) {
-    const { TERRAIN, TILE_OWNER } = MapConst;
+    const { TERRAIN } = MapConst;
     const { map, mode = 'all', terrain, owner, strength = 0 } = opts;
     ctx.clearRect(0, 0, cssW, cssH);
     const size = Math.min(cssW / SQRT3, cssH / 2) * 0.94;
@@ -217,28 +237,35 @@ const HexRender = (() => {
     const showTerrain = mode !== 'strength';
     const showSoldier = mode !== 'terrain' && strength > 0;
 
-    if (showTerrain) {
-      hexPath(ctx, cx, cy, size);
-      ctx.fillStyle = MapConst.TERRAIN_COLORS[terrain] ?? '#888888';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      if (terrain === TERRAIN.CITY && owner !== TILE_OWNER.EMPTY && owner !== TILE_OWNER.BLOCKER) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(2, size * 0.14), 0, Math.PI * 2);
-        ctx.fillStyle = owner === TILE_OWNER.WILD ? '#825e54' : MapConst.seatColor(owner);
+    if (showTerrain && terrain !== TERRAIN.VOID) {
+      const img = terrainSprites[terrain];
+      if (img && img.complete && img.naturalWidth > 0) {
+        const sc = size / FLAG_IMG_HEX_R;
+        const w = img.naturalWidth * sc;
+        const h = img.naturalHeight * sc;
+        ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+      } else {
+        hexPath(ctx, cx, cy, size);
+        ctx.fillStyle = MapConst.TERRAIN_COLORS[terrain] ?? '#888888';
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
       }
+      hexPath(ctx, cx, cy, size);
+      ctx.strokeStyle = 'rgba(10,15,24,0.85)';
+      ctx.lineWidth = Math.max(1, size * 0.035);
+      ctx.stroke();
     }
     if (showSoldier) {
       const flagNum = map && Array.isArray(map.player_list) ? flagNumOf(map, owner) : 8;
       const soldierSize = size * PREVIEW_SOLDIER_SCALE;
       drawSoldier(ctx, cx, cy, soldierSize, flagNum, false, owner);
       drawStrength(ctx, cx, cy, soldierSize, strength);
+    }
+    // 据点金环（旗面上沿地块轮廓）
+    if (terrain === TERRAIN.CITY) {
+      hexPath(ctx, cx, cy, size);
+      ctx.strokeStyle = MapConst.CITY_RING;
+      ctx.lineWidth = Math.max(1.5, size * 0.045);
+      ctx.stroke();
     }
   }
 

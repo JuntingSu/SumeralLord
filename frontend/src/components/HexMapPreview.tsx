@@ -2,13 +2,12 @@ import { useEffect, useRef } from 'react';
 import { TERRAIN, TILE_OWNER } from '@dl/shared';
 import type { BattlefieldTile } from '@dl/shared';
 
-/** 地形色：0 平原 1 据点（原王城色已并入据点）3 海洋 4 山地 5 虚空；编码 2 已废弃空缺 */
+/** 地形色（缩略图用，与 static/terrain 主色一致）：平原/山地同灰，虚空透明不绘制 */
 const TERRAIN_COLORS: Record<number, string> = {
-  [TERRAIN.PLAIN]: '#7cb342',
+  [TERRAIN.PLAIN]: '#53637c',
   [TERRAIN.CITY]: '#d4a017',
   [TERRAIN.OCEAN]: '#4fa3e3',
-  [TERRAIN.MOUNTAIN]: '#a1887f',
-  [TERRAIN.VOID]: '#263238',
+  [TERRAIN.MOUNTAIN]: '#53637c',
 };
 
 const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a'];
@@ -78,13 +77,34 @@ export default function HexMapPreview({ battlefield, column, row, height = 260, 
       };
 
       for (let i = 0; i < battlefield.length; i++) {
+        const terrain = battlefield[i][0];
+        if (terrain === TERRAIN.VOID) continue; // 虚空完全透明
         const { cx, cy } = centerOf(i);
         hexPath(cx, cy, size);
-        ctx.fillStyle = TERRAIN_COLORS[battlefield[i][0]] ?? '#9e9e9e';
+        ctx.fillStyle = TERRAIN_COLORS[terrain] ?? '#9e9e9e';
         ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        ctx.strokeStyle = 'rgba(10,15,24,0.85)';
         ctx.lineWidth = 1;
         ctx.stroke();
+        // 山地与平原同色，用深色山形标记区分
+        if (terrain === TERRAIN.MOUNTAIN) {
+          const w = size * 0.62;
+          const h = size * 0.42;
+          const baseY = cy + h * 0.45;
+          ctx.beginPath();
+          ctx.moveTo(cx - w / 2, baseY);
+          ctx.lineTo(cx - w * 0.12, baseY - h);
+          ctx.lineTo(cx + w * 0.18, baseY);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(30, 38, 52, 0.85)';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(cx + w * 0.02, baseY);
+          ctx.lineTo(cx + w * 0.28, baseY - h * 0.62);
+          ctx.lineTo(cx + w / 2, baseY);
+          ctx.closePath();
+          ctx.fill();
+        }
       }
 
       for (let i = 0; i < battlefield.length; i++) {
