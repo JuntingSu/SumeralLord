@@ -273,19 +273,61 @@ export default function BoardCanvas({
     return (owner: number): number => map.get(owner) ?? NEUTRAL_FLAG_NUMS[owner] ?? 8;
   }, [board.forces]);
 
-  /** 兵力数字变灰的兵：先按阶段预计算集合，绘制时只做查表（非我方回合/观战为空集） */
+  /**
+   * 兵力数字变灰判定（除下列条件外一律白色）：
+   *  1 加点阶段的断兵
+   *  2 行动阶段、我方无行动力的兵
+   *  3 行动阶段、敌方（非我方阵营）反击次数为 0 的兵
+   *  4 行动阶段、周围六格全为全断地形或同队兵（无路可走）
+   *  5 1 兵力连兵（连兵强度 1 无法进攻）
+   * board 每次变化（覆盖发起进攻/移动/生成/失去行动力/切阶段/结束回合/兵消失/回合开始）
+   * 都整体重算一次集合，绘制时只查表；复杂度 O(地块数×6)，不影响帧率。
+   */
   const dimTiles = useMemo(() => {
     const set = new Set<number>();
-    if (isSpectator || mySeat === null || board.currentSeat !== mySeat) return set;
-    if (board.phase !== 'ACTION' && board.phase !== 'ADD_POINT') return set;
-    for (let i = 0; i < board.tiles.length; i++) {
-      const s = board.tiles[i].soldier;
+    const { phase, tiles, forces } = board;
+    const teamOf = (seat: number) => forces.find((f) => f.seat === seat)?.team;
+    // 阵营判定：中立兵按 owner 相等，势力兵按队伍
+    const sameSide = (a: number, b: number) => {
+      if (isNeutralOwner(a) || isNeutralOwner(b)) return a === b;
+      const ta = teamOf(a);
+      return ta !== undefined && ta === teamOf(b);
+    };
+    const mySide = (owner: number) => mySeat !== null && sameSide(owner, mySeat);
+    const geo = { rows: board.rows, columns: board.columns, cylindrical: board.cylindrical };
+    for (let i = 0; i < tiles.length; i++) {
+      const s = tiles[i].soldier;
       if (!s) continue;
-      // 行动阶段：我方无行动力的兵；加点阶段：断兵（不分归属）
-      if (board.phase === 'ACTION' ? s.owner === mySeat && !s.hasMovement : !s.isLinked) set.add(i);
+      if (phase === 'ADD_POINT' && !s.isLinked) {
+        set.add(i); // 1
+        continue;
+      }
+      if (s.isLinked && s.strength === 1) {
+        set.add(i); // 5
+        continue;
+      }
+      if (phase !== 'ACTION') continue;
+      if (mySeat !== null && mySide(s.owner) && !s.hasMovement) {
+        set.add(i); // 2
+        continue;
+      }
+      if (mySeat !== null && !mySide(s.owner) && s.counter === 0) {
+        set.add(i); // 3
+        continue;
+      }
+      // 4：周围六格全为全断地形/同队兵
+      let trapped = true;
+      for (const n of neighborsOf(i, geo)) {
+        const t = tiles[n];
+        if (isFullBreak(t.terrain)) continue;
+        if (t.soldier && sameSide(t.soldier.owner, s.owner)) continue;
+        trapped = false;
+        break;
+      }
+      if (trapped) set.add(i);
     }
     return set;
-  }, [board.tiles, board.phase, board.currentSeat, mySeat, isSpectator]);
+  }, [board, mySeat]);
 
   /** 空闲时（无动画）渲染的权威兵表 */
   const boardSoldiers = useMemo<Array<SoldierState | null>>(
@@ -478,9 +520,10 @@ export default function BoardCanvas({
       ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = dimText ? 'rgba(44, 48, 56, 0.62)' : '#000000';
+      // 灰态：浅灰半透明压在下层、深灰半透明压在上层（白/黑两层的顺序不变）
+      ctx.fillStyle = dimText ? 'rgba(214, 218, 224, 0.62)' : '#000000';
       ctx.fillText(text, cx, cy + Math.max(1, size * 0.055));
-      ctx.fillStyle = dimText ? 'rgba(214, 218, 224, 0.62)' : '#ffffff';
+      ctx.fillStyle = dimText ? 'rgba(44, 48, 56, 0.62)' : '#ffffff';
       ctx.fillText(text, cx, cy);
       ctx.restore();
       // 闪光描边（不受兵透明度影响）
