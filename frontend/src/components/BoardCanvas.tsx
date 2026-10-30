@@ -160,6 +160,10 @@ function drawWall(
   ctx.closePath();
   ctx.fillStyle = '#9ca3af';
   ctx.fill();
+  // 细黑描边（线宽随时块尺寸微调，保持 1px 量级）
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = Math.max(1, r * 0.015);
+  ctx.stroke();
 }
 
 /** 红环上的荆棘：沿六条边各画两道垂直于边界的细线 */
