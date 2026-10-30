@@ -128,7 +128,7 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: nu
 
 /**
  * 全断地形边界墙：取两格共享边，统一朝左上方向平移该边，
- * 得到纯灰色、无边框的平行四边形（模拟立起的一堵墙）。
+ * 得到半透明玻璃质感的平行四边形（模拟立起的一堵玻璃墙）。
  */
 function drawWall(
   ctx: CanvasRenderingContext2D,
@@ -158,12 +158,14 @@ function drawWall(
   ctx.lineTo(bx + tx, by + ty);
   ctx.lineTo(ax + tx, ay + ty);
   ctx.closePath();
-  ctx.fillStyle = '#9ca3af';
+  // 玻璃质感：沿平移方向做半透明高光渐变（两端亮、中间透），无描边
+  const grad = ctx.createLinearGradient(ax, ay, ax + tx, ay + ty);
+  grad.addColorStop(0, 'rgba(255, 255, 255, 0.46)');
+  grad.addColorStop(0.28, 'rgba(214, 232, 248, 0.22)');
+  grad.addColorStop(0.72, 'rgba(198, 222, 242, 0.13)');
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0.36)');
+  ctx.fillStyle = grad;
   ctx.fill();
-  // 细黑描边（线宽随时块尺寸微调，保持 1px 量级）
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth = Math.max(1, r * 0.015);
-  ctx.stroke();
 }
 
 /** 红环上的荆棘：沿六条边各画两道垂直于边界的细线 */
