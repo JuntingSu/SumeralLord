@@ -21,6 +21,7 @@ import { ApiError } from '../api/client';
 import { computeFog, type FogLevel } from '../game/fog';
 import { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
+import { useNarrowScreen } from '../lib/useNarrowScreen';
 import BoardCanvas from '../components/BoardCanvas';
 import PveResultModal from '../components/PveResultModal';
 
@@ -57,6 +58,7 @@ function nextSelectedTile(board: GameState, intent: PlayerIntent): number | null
 export default function PveGame() {
   const navigate = useNavigate();
   const user = useAuth((s) => s.user);
+  const isNarrow = useNarrowScreen();
 
   const board = useGame((s) => s.board);
   const mySeat = useGame((s) => s.mySeat);
@@ -91,6 +93,8 @@ export default function PveGame() {
     lastSend: 0,
   });
   const [compactSidebar, setCompactSidebar] = useState(true);
+  /** 简略势力信息面板是否展开（收起后棋盘左上角只留「》」展开按钮） */
+  const [factionPanelOpen, setFactionPanelOpen] = useState(true);
   const [killFloats, setKillFloats] = useState<{ id: number; text: string }[]>([]);
   const killFloatIdRef = useRef(0);
 
@@ -635,7 +639,7 @@ export default function PveGame() {
                       className="h-5 w-4 object-contain"
                       onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
                     />
-                    <span className="flex-1 truncate text-xs font-medium" style={{ color: seatColor(f.seat) }}>
+                    <span className="flex-1 truncate text-xs font-medium text-white">
                       {f.name}
                       {isMine && <span className="ml-0.5 text-[10px] text-emerald-400">（我）</span>}
                     </span>
@@ -672,45 +676,112 @@ export default function PveGame() {
             </svg>
           </button>
 
-          {compactSidebar && (
-            <div className="pointer-events-none absolute left-2 top-10 z-10 space-y-1.5">
-              {aliveForces.map((f) => {
-                const isCurrent = f.seat === board.currentSeat;
-                const isMine = f.seat === mySeat;
-                const linked = board.tiles.filter((t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked).length;
-                return (
-                  <div key={f.seat} className={`flex items-center gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 ${!f.alive ? 'opacity-40' : ''}`}>
-                    <img
-                      src={flagImgUrl(f.flag)}
-                      alt=""
-                      className="h-5 w-4 object-contain"
-                      onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
-                    />
-                    <div className="flex w-44 flex-col justify-center">
-                      <div className="flex items-baseline gap-1">
-                        <span
-                          className={`min-w-0 truncate text-xs leading-none ${isCurrent ? 'font-bold' : 'font-medium'}`}
-                          style={{ color: seatColor(f.seat) }}
+          {/* 窄屏：左侧 1/4 宽（上限原固定宽）的完整卡片；非窄屏保留原来的悬浮简略列表 */}
+          {compactSidebar &&
+            (isNarrow ? (
+              factionPanelOpen ? (
+                <div className="absolute left-2 top-10 z-10 w-[min(25vw,10rem)] overflow-hidden bg-slate-800 shadow-lg">
+                  <div>
+                    {aliveForces.map((f) => {
+                      const isCurrent = f.seat === board.currentSeat;
+                      const isMine = f.seat === mySeat;
+                      const linked = board.tiles.filter(
+                        (t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked,
+                      ).length;
+                      return (
+                        <div
+                          key={f.seat}
+                          className={`flex h-5 items-center gap-1.5 px-2 ${isCurrent ? 'bg-slate-700' : ''} ${!f.alive ? 'opacity-40' : ''}`}
                         >
-                          {f.name}
-                        </span>
-                        {isMine && <span className="shrink-0 text-[10px] leading-none text-emerald-400">（我）</span>}
-                        <span className="shrink-0 text-[10px] leading-none text-slate-400">队伍 {f.team}</span>
-                        {f.alive ? (
-                          <>
-                            <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
-                            <span className="shrink-0 text-[10px] leading-none text-pink-400">(+{linked})</span>
-                          </>
-                        ) : (
-                          <span className="shrink-0 text-[10px] leading-none text-slate-400">已清除</span>
-                        )}
+                          <img
+                            src={flagImgUrl(f.flag)}
+                            alt=""
+                            className="h-5 w-4 shrink-0 object-contain"
+                            onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
+                          />
+                          {/* 右上：势力名优先完整显示 +（我）；右下：加点 + 下回合加点 + 队伍；两行上下等距居中、左右靠左 */}
+                          <div className="flex h-5 min-w-0 flex-1 flex-col items-start justify-evenly">
+                            <div className="flex max-w-full min-w-0 items-baseline gap-0.5">
+                              <span
+                                className={`shrink-0 whitespace-nowrap text-[7px] leading-none text-white ${isCurrent ? 'font-bold' : 'font-medium'}`}
+                              >
+                                {f.name}
+                              </span>
+                              {isMine && <span className="shrink-0 text-[6px] leading-none text-emerald-400">（我）</span>}
+                            </div>
+                            <div className="flex max-w-full items-baseline gap-1 text-[7px] leading-none">
+                              {f.alive ? (
+                                <>
+                                  <span className="text-white">加点 {f.points}</span>
+                                  <span className="shrink-0 text-pink-400">+{linked}</span>
+                                  <span className="min-w-0 truncate text-[6px] text-slate-400">队伍 {f.team}</span>
+                                </>
+                              ) : (
+                                <span className="text-slate-400">已清除</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setFactionPanelOpen(false)}
+                    className="flex w-full items-center justify-center gap-1 py-1 text-[7px] leading-none text-slate-300 hover:bg-slate-700"
+                    title="收起势力信息"
+                    aria-label="收起势力信息"
+                  >
+                    收起《
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setFactionPanelOpen(true)}
+                  className="absolute left-2 top-10 z-10 rounded bg-slate-800/80 px-1.5 py-1 text-sm leading-none text-white shadow hover:bg-slate-700"
+                  title="展开势力信息"
+                  aria-label="展开势力信息"
+                >
+                  》
+                </button>
+              )
+            ) : (
+              <div className="pointer-events-none absolute left-2 top-10 z-10 space-y-1.5">
+                {aliveForces.map((f) => {
+                  const isCurrent = f.seat === board.currentSeat;
+                  const isMine = f.seat === mySeat;
+                  const linked = board.tiles.filter((t) => t.soldier !== null && t.soldier.owner === f.seat && t.soldier.isLinked).length;
+                  return (
+                    <div key={f.seat} className={`flex items-center gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 ${!f.alive ? 'opacity-40' : ''}`}>
+                      <img
+                        src={flagImgUrl(f.flag)}
+                        alt=""
+                        className="h-5 w-4 object-contain"
+                        onError={(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')}
+                      />
+                      <div className="flex w-44 flex-col justify-center">
+                        <div className="flex items-baseline gap-1">
+                          <span
+                            className={`min-w-0 truncate text-xs leading-none text-white ${isCurrent ? 'font-bold' : 'font-medium'}`}
+                          >
+                            {f.name}
+                          </span>
+                          {isMine && <span className="shrink-0 text-[10px] leading-none text-emerald-400">（我）</span>}
+                          <span className="shrink-0 text-[10px] leading-none text-slate-400">队伍 {f.team}</span>
+                          {f.alive ? (
+                            <>
+                              <span className="shrink-0 text-xs leading-none text-white">{f.points}</span>
+                              <span className="shrink-0 text-[10px] leading-none text-pink-400">(+{linked})</span>
+                            </>
+                          ) : (
+                            <span className="shrink-0 text-[10px] leading-none text-slate-400">已清除</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            ))}
 
           <BoardCanvas
             board={board}
