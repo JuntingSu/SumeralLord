@@ -508,7 +508,8 @@ export class RoomManager {
     return this.toRoomData(room);
   }
 
-  /** 某玩家对局中的 seat（无则 -1；观战 -1） */
+  /** 某玩家「房间阶段选择的」势力 seat（无则 -1；观战 -1）。
+   *  仅用于开局前；对局内请用 GameManager.seatOfUser（随机出生会在开局时重排玩家-势力）。 */
   seatOf(roomId: string, userId: number): number {
     const room = this.rooms.get(roomId);
     if (!room) return -1;

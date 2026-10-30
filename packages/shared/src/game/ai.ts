@@ -560,8 +560,9 @@ function maxEnemyStrength(state: GameState, tile: number, seat: number): number 
 
 /**
  * 状态Ⅱ 加点意图序列：四分类（只统计连兵）依次补防守压力/进攻阈值，剩余随机分配给沿海类。
- * 各类 D_k / A_k 超过当前点数时逐点随机全分并结束回合；点数归零由 reducer 自动切阶段，
- * 因此本序列总和恰为可用点数时无需额外 SWITCH_PHASE（剩余无法分配时才追加）。
+ * 各类 D_k / A_k 超过当前点数时逐点随机全分并结束回合；点数归零后由 AI 驱动
+ *（bot / PvE transport）补发 SWITCH_PHASE 结束加点，因此本序列总和恰为可用点数时
+ * 无需额外 SWITCH_PHASE（剩余无法分配时才追加）。
  */
 function planAddPoints(state: GameState, seat: number, rng: () => number): PlayerIntent[] {
   const intents: PlayerIntent[] = [];

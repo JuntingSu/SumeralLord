@@ -222,15 +222,16 @@ describe('§8.1.7 加点事件 / §5 点数', () => {
   });
 });
 
-describe('自动切换（补充规则）', () => {
-  it('进入行动阶段无可动兵：代玩家自动切换至加点阶段', () => {
-    // seat1 仅一个兵力1连兵（无移动力）→ 自动切到 ADD_POINT
+describe('阶段跳过不再由 reducer 自动执行（由前端判定后显式发起）', () => {
+  it('进入行动阶段无可动兵：停留在行动阶段（不自动切换）', () => {
+    // seat1 仅一个兵力1连兵（无移动力）→ 保持 ACTION，由前端判定后发 SWITCH_PHASE
     const map = makeMap({ tiles: { 6: [CITY, 1, 1], 12: [CITY, 2, 2] } });
     const { state, chain } = startGame(map, ASG);
     expect(state.currentSeat).toBe(1);
-    expect(state.phase).toBe('ADD_POINT');
+    expect(state.phase).toBe('ACTION');
+    // 开局 PREPARE→ACTION 仍是一条 SWITCH_PHASE；但不再自动 ACTION→ADD_POINT
     const switches = chain.filter((e) => e.kind === 'SWITCH_PHASE').map((e) => ({ from: e.from, to: e.to }));
-    expect(switches).toContainEqual({ from: 'ACTION', to: 'ADD_POINT' });
+    expect(switches).not.toContainEqual({ from: 'ACTION', to: 'ADD_POINT' });
   });
 
   it('有可动兵时保持行动阶段（不自动切换）', () => {
@@ -238,7 +239,7 @@ describe('自动切换（补充规则）', () => {
     expect(state.phase).toBe('ACTION');
   });
 
-  it('加点用尽：自动切换结束回合；未用尽保持加点阶段', () => {
+  it('加点用尽：保持加点阶段；显式 SWITCH_PHASE 才结束回合', () => {
     // seat1 连兵 6(str1)+7(str2) → 点数 2；7 可动 → 正常进入行动阶段
     const map = makeMap({ tiles: { 6: [CITY, 1, 1], 7: [PLAIN, 1, 2], 12: [CITY, 2, 2] } });
     const { state } = startGame(map, ASG);
@@ -251,29 +252,37 @@ describe('自动切换（补充规则）', () => {
     if (!s2.ok) return;
     expect(force(s2.state, 1).points).toBe(1);
     expect(s2.state.phase).toBe('ADD_POINT');
-    // 再加 1 点：点数归零 → 自动切换结束回合
+    // 再加 1 点：点数归零 → 仍停在加点阶段（不再自动结束回合）
     const s3 = act(s2.state, 1, { intentType: 'ADD_POINT', coordinate: 7, amount: 1 });
     expect(s3.ok).toBe(true);
     if (!s3.ok) return;
     expect(force(s3.state, 1).points).toBe(0);
-    expect(s3.state.currentSeat).toBe(2);
-    expect(s3.state.phase).toBe('ACTION'); // seat2 进入其行动阶段
-    expect(chainKinds(s3)).toContain('END_TURN');
+    expect(s3.state.currentSeat).toBe(1);
+    expect(s3.state.phase).toBe('ADD_POINT');
+    expect(chainKinds(s3)).not.toContain('END_TURN');
+    // 前端判定点数耗尽后显式发起 SWITCH_PHASE → 结束回合
+    const s4 = act(s3.state, 1, { intentType: 'SWITCH_PHASE' });
+    expect(s4.ok).toBe(true);
+    if (!s4.ok) return;
+    expect(s4.state.currentSeat).toBe(2);
+    expect(s4.state.phase).toBe('ACTION');
+    expect(chainKinds(s4)).toContain('END_TURN');
   });
 
-  it('一次性加完所有点数：直接自动结束回合', () => {
+  it('一次性加完所有点数：仍停在加点阶段，需显式结束', () => {
     const map = makeMap({ tiles: { 6: [CITY, 1, 1], 7: [PLAIN, 1, 2], 12: [CITY, 2, 2] } });
     const { state } = startGame(map, ASG);
     const s1 = act(state, 1, { intentType: 'SWITCH_PHASE' });
     const r = act(s1.state, 1, { intentType: 'ADD_POINT', coordinate: 7, amount: 2 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.state.currentSeat).toBe(2);
-    expect(chainKinds(r)).toContain('END_TURN');
+    expect(r.state.currentSeat).toBe(1);
+    expect(r.state.phase).toBe('ADD_POINT');
+    expect(chainKinds(r)).not.toContain('END_TURN');
   });
 
-  it('玩家事件结算后：全部兵不可行动 → 代玩家自动切换至加点阶段', () => {
-    // seat1 仅据点 6 连兵 str2；移动 6→7 后两处均为兵力 1 连兵（带移动力标志但不可行动）→ 自动切换
+  it('玩家事件结算后：全部兵不可行动也停留在行动阶段', () => {
+    // seat1 仅据点 6 连兵 str2；移动 6→7 后两处均为兵力 1 连兵（不可行动）→ 前端判定后跳过
     const map = makeMap({ tiles: { 6: [CITY, 1, 2], 7: [PLAIN, 128, 0], 14: [CITY, 2, 2] } });
     const { state } = startGame(map, ASG);
     expect(state.phase).toBe('ACTION');
@@ -283,11 +292,11 @@ describe('自动切换（补充规则）', () => {
     expect(soldierAt(r.state, 6)).toMatchObject({ owner: 1, strength: 1, hasMovement: true });
     expect(soldierAt(r.state, 7)).toMatchObject({ owner: 1, strength: 1, hasMovement: true });
     expect(r.state.currentSeat).toBe(1);
-    expect(r.state.phase).toBe('ADD_POINT');
-    expect(chainKinds(r)).toContain('SWITCH_PHASE');
+    expect(r.state.phase).toBe('ACTION');
+    expect(chainKinds(r)).not.toContain('SWITCH_PHASE');
   });
 
-  it('玩家事件结算后：最后可动兵行动力耗尽 → 代玩家自动切换至加点阶段', () => {
+  it('玩家事件结算后：最后可动兵行动力耗尽也停留在行动阶段', () => {
     // seat1 仅据点 6 连兵 str3；移动 6→11 接触失活（邻接 seat2 据点 12），原 6 变兵力 1 连兵不可行动
     const map = makeMap({ tiles: { 6: [CITY, 1, 3], 11: [PLAIN, 128, 0], 12: [CITY, 2, 1] } });
     const { state } = startGame(map, ASG);
@@ -296,7 +305,7 @@ describe('自动切换（补充规则）', () => {
     if (!r.ok) return;
     expect(soldierAt(r.state, 11)!.hasMovement).toBe(false);
     expect(r.state.currentSeat).toBe(1);
-    expect(r.state.phase).toBe('ADD_POINT');
+    expect(r.state.phase).toBe('ACTION');
   });
 
   it('玩家事件结算后仍有可行动兵 → 保持行动阶段（不自动切换）', () => {

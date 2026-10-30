@@ -25,6 +25,8 @@ export interface AiBotManagerOptions {
   weightsPath?: string;
   /** 进程 stdout/stderr 输出回调（测试可注入） */
   onOutput?: (gameId: string, line: string) => void;
+  /** bot WS PING 间隔（缺省 30s；测试可注入短间隔以加速心跳用例） */
+  botPingIntervalMs?: number;
   /** 子进程 spawn 注入（单元测试 mock 用；缺省真实 spawn） */
   spawnFn?: typeof spawn;
 }
@@ -48,6 +50,7 @@ export class AiBotManager {
   private readonly restartBackoffMs: number;
   private readonly restartMax: number;
   private readonly weightsPath: string;
+  private readonly botPingIntervalMs?: number;
   private readonly tsxCli: string;
   private readonly onOutput?: (gameId: string, line: string) => void;
   private readonly spawnFn: typeof spawn;
@@ -62,6 +65,7 @@ export class AiBotManager {
     this.restartBackoffMs = opts.restartBackoffMs ?? config.aiBotRestartBackoffMs;
     this.restartMax = opts.restartMax ?? config.aiBotRestartMax;
     this.weightsPath = opts.weightsPath ?? config.aiWeightsPath;
+    this.botPingIntervalMs = opts.botPingIntervalMs;
     this.onOutput = opts.onOutput;
     this.spawnFn = opts.spawnFn ?? spawn;
     this.tsxCli = require.resolve('tsx/cli');
@@ -96,6 +100,8 @@ export class AiBotManager {
           reducerVersion: game.reducerVersion,
           // 难度2 训练 MCTS AI 权重（格式异常/缺省时 bot 回退种子权重，不影响其他难度）
           weightsPath: this.weightsPath || undefined,
+          // 心跳间隔（缺省在 bot 端取 30s）；测试注入短间隔
+          pingIntervalMs: this.botPingIntervalMs,
         },
         null,
         2,

@@ -268,3 +268,69 @@ describe('WS 网关（顺序执行）', () => {
     await alice.waitClose();
   });
 });
+
+/**
+ * 随机出生（randomSpawn）只重排 GAME_START 的 seatAssignments，房间阶段的玩家-势力选择保持不变。
+ * 对局内的席位解析（意图/共识/断线/重连）必须以本局最终 seatAssignments 为准，否则会把玩家
+ * 的意图标成其房间阶段选择的 seat，导致对端 reducer 判 NOT_YOUR_TURN、回合与计时不跟随。
+ */
+describe('对局内席位按最终 seatAssignments 解析（顺序执行）', () => {
+  it('随机出生换位后，意图中继与重连广播使用玩家最终 seat', async () => {
+    const aliceId = users.get('alice')!.id;
+    const bobId = users.get('bob')!.id;
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      headers: auth('alice'),
+      payload: {
+        name: '随机席位房',
+        allowSpectate: false,
+        fogMode: false,
+        randomSpawn: false,
+        mapId: 'map_duo_plain',
+        timeSettings: { stepTime: 90, gameTime: 1200, additionalTime: 0 },
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const rid = create.json().data.roomId as string;
+    await app.inject({ method: 'POST', url: `/api/rooms/${rid}/join`, headers: auth('bob'), payload: {} });
+    // 房间阶段：alice 选 seat1、bob 选 seat2
+    await app.inject({ method: 'POST', url: `/api/rooms/${rid}/select-force`, headers: auth('alice'), payload: { seat: 1 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${rid}/select-force`, headers: auth('bob'), payload: { seat: 2 } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${rid}/ready`, headers: auth('alice'), payload: { ready: true } });
+    await app.inject({ method: 'POST', url: `/api/rooms/${rid}/ready`, headers: auth('bob'), payload: { ready: true } });
+
+    const alice = await wsConnect(rid, 'alice');
+    const bob = await wsConnect(rid, 'bob');
+    const start = await app.inject({ method: 'POST', url: `/api/rooms/${rid}/start`, headers: auth('alice'), payload: {} });
+    expect(start.statusCode).toBe(200);
+    const gs = await alice.waitFor('GAME_START');
+    await bob.waitFor('GAME_START');
+    const game = app.games.get(gs.gameId as string)!;
+
+    // 模拟随机出生换位后的最终分配：alice（房间 seat1）落到对局 seat2，bob（房间 seat2）落到 seat1
+    for (const a of game.seatAssignments) {
+      if (a.playerId === aliceId) a.playerId = bobId;
+      else if (a.playerId === bobId) a.playerId = aliceId;
+    }
+    expect(app.games.seatOfUser(game, aliceId)).toBe(2);
+    expect(app.games.seatOfUser(game, bobId)).toBe(1);
+
+    // alice 在对局中已成为 seat2：对端收到的 fromSeat 必须是 2（而不是房间阶段的 1）
+    alice.send({ type: 'INTENT_SUBMIT', clientTempId: 'c-spawn-1', intent: { intentType: 'SWITCH_PHASE' } });
+    const cast = await bob.waitFor('INTENT_BROADCAST');
+    expect(cast.fromSeat).toBe(2);
+
+    // 重连广播同样按最终 seat
+    alice.close();
+    await alice.waitClose();
+    const alice2 = await wsConnect(rid, 'alice');
+    const reconnect = await bob.waitFor('PLAYER_RECONNECT');
+    expect(reconnect.seat).toBe(2);
+
+    alice2.close();
+    bob.close();
+    await app.inject({ method: 'POST', url: `/api/rooms/${rid}/disband`, headers: auth('alice') });
+  });
+});

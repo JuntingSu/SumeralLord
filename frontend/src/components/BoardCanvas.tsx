@@ -1,12 +1,13 @@
 // 双层 Canvas 棋盘（前端规划 §1.3，M5.1 动画版 + M5.2 交互版）：
 // 底层静态层（地形+迷雾+据点圆点，dirty 重绘）、上层动态层（兵+动画中间帧+hover/选中/光圈/高亮，每帧）。
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
-// M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）+ 双击复位（view 变换统一应用于两层与拾取）；
+// M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）（view 变换统一应用于两层与拾取；双击不改变视图）；
 // 断兵视觉：整旗等比缩小（不再单独出镂空图），据点驻军按连兵渲染。
 import { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { TERRAIN, TILE_OWNER, isFullBreak, isNeutralOwner } from '@dl/shared';
 import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
+import { computeDimTiles } from '../game/dim';
 import type { FogLevel } from '../game/fog';
 import type { EventAnimator } from '../canvas/animator';
 import { flagImgUrl } from '../lib/flags';
@@ -273,63 +274,8 @@ export default function BoardCanvas({
     return (owner: number): number => map.get(owner) ?? NEUTRAL_FLAG_NUMS[owner] ?? 8;
   }, [board.forces]);
 
-  /**
-   * 兵力数字变灰判定（除下列条件外一律白色）：
-   *  1 加点阶段的断兵
-   *  2 行动阶段、我方无行动力的兵
-   *  3 行动阶段、敌方（非我方阵营）反击次数为 0 的兵
-   *  4 行动阶段、我方兵周围六格全为全断地形或同队兵（无路可走；仅限我方）
-   *  5 我方 1 兵力连兵（连兵强度 1 无法进攻；仅限我方）
-   * board 每次变化（覆盖发起进攻/移动/生成/失去行动力/切阶段/结束回合/兵消失/回合开始）
-   * 都整体重算一次集合，绘制时只查表；复杂度 O(地块数×6)，不影响帧率。
-   */
-  const dimTiles = useMemo(() => {
-    const set = new Set<number>();
-    const { phase, tiles, forces } = board;
-    const teamOf = (seat: number) => forces.find((f) => f.seat === seat)?.team;
-    // 阵营判定：中立兵按 owner 相等，势力兵按队伍
-    const sameSide = (a: number, b: number) => {
-      if (isNeutralOwner(a) || isNeutralOwner(b)) return a === b;
-      const ta = teamOf(a);
-      return ta !== undefined && ta === teamOf(b);
-    };
-    const mySide = (owner: number) => mySeat !== null && sameSide(owner, mySeat);
-    const geo = { rows: board.rows, columns: board.columns, cylindrical: board.cylindrical };
-    for (let i = 0; i < tiles.length; i++) {
-      const s = tiles[i].soldier;
-      if (!s) continue;
-      if (phase === 'ADD_POINT' && !s.isLinked) {
-        set.add(i); // 1
-        continue;
-      }
-      // 5：1 兵力连兵（仅我方；敌方 1 力连兵仍按白色渲染）
-      if (mySeat !== null && mySide(s.owner) && s.isLinked && s.strength === 1) {
-        set.add(i);
-        continue;
-      }
-      if (phase !== 'ACTION') continue;
-      if (mySeat !== null && mySide(s.owner) && !s.hasMovement) {
-        set.add(i); // 2
-        continue;
-      }
-      if (mySeat !== null && !mySide(s.owner) && s.counter === 0) {
-        set.add(i); // 3
-        continue;
-      }
-      // 4：周围六格全为全断地形/同队兵（仅我方；敌方被围仍按白色渲染）
-      if (mySeat === null || !mySide(s.owner)) continue;
-      let trapped = true;
-      for (const n of neighborsOf(i, geo)) {
-        const t = tiles[n];
-        if (isFullBreak(t.terrain)) continue;
-        if (t.soldier && sameSide(t.soldier.owner, s.owner)) continue;
-        trapped = false;
-        break;
-      }
-      if (trapped) set.add(i);
-    }
-    return set;
-  }, [board, mySeat]);
+  /** 兵力数字变灰集合（规则见 game/dim.ts；board 变化时整体重算） */
+  const dimTiles = useMemo(() => computeDimTiles(board, mySeat), [board, mySeat]);
 
   /** 空闲时（无动画）渲染的权威兵表 */
   const boardSoldiers = useMemo<Array<SoldierState | null>>(
@@ -812,10 +758,6 @@ export default function BoardCanvas({
           dragRef.current = null;
           syncView();
           onTilePointerUp?.();
-        }}
-        onDoubleClick={() => {
-          viewRef.current = { scale: 1, offX: 0, offY: 0 };
-          syncView();
         }}
         onPointerLeave={() => {
           hoverRef.current = null;
