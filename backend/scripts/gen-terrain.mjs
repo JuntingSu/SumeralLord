@@ -1,6 +1,7 @@
 // 地形贴图生成（static/terrain）：与旗帜同规格 192x216 RGBA、尖顶六边形 R=100 居中。
 // 虚空不生成贴图（完全透明，由渲染层直接跳过）。
-// 配色取自参考图：地块 #53637C→#4A576C 竖向渐变、山体 #333D4A（受光面 #46505F）、山脚线 #4C5968。
+// 配色：平原纯色 #53637C；山地底色取比平原更深的纯色 #434F63，上叠双峰剪影与山脚线；
+// 城市/海洋保留竖向渐变。
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -121,18 +122,19 @@ function gradient(topHex, botHex) {
 }
 
 /* ---------------- 各地形 ---------------- */
-// 平原 / 城市 / 海洋：纯渐变
-const PLAIN_TOP = '#566680';
-const PLAIN_BOT = '#4A576C';
+// 平原：纯色；城市 / 海洋：渐变
+const PLAIN = '#53637C';
+/** 山地底色：比平原更深的纯色 */
+const MOUNTAIN_BG = '#434F63';
 const CITY_TOP = '#E3B02E';
 const CITY_BOT = '#C08F12';
 const OCEAN_TOP = '#58ADEB';
 const OCEAN_BOT = '#4596D6';
 
 // 山地：平原渐变 + 山体剪影（双峰 + 受光面 + 山脚线）
-const ROCK_DARK = hex2rgb('#333D4A');
-const ROCK_LIT = hex2rgb('#46505F');
-const BASE_LINE = hex2rgb('#4C5968');
+const ROCK_DARK = hex2rgb('#2E3744');
+const ROCK_LIT = hex2rgb('#3A4759');
+const BASE_LINE = hex2rgb('#4E5B6E');
 
 const PEAK_MAIN = [
   [74, 58],
@@ -150,17 +152,18 @@ const PEAK_SIDE = [
   [166, 146],
 ];
 
-const plains = gradient(PLAIN_TOP, PLAIN_BOT);
+const PLAIN_RGB = hex2rgb(PLAIN);
+const MOUNTAIN_RGB = hex2rgb(MOUNTAIN_BG);
 const mountainPixel = (x, y) => {
   if (y >= 146 && y < 149.5 && x > 18 && x < 168) return BASE_LINE;
   if (inPoly(x, y, PEAK_SIDE)) return ROCK_DARK;
   if (inPoly(x, y, PEAK_MAIN)) return inPoly(x, y, PEAK_MAIN_LIT) ? ROCK_LIT : ROCK_DARK;
-  return plains(x, y);
+  return MOUNTAIN_RGB;
 };
 
 mkdirSync(outDir, { recursive: true });
 const tiles = {
-  plain: gradient(PLAIN_TOP, PLAIN_BOT),
+  plain: () => PLAIN_RGB,
   city: gradient(CITY_TOP, CITY_BOT),
   ocean: gradient(OCEAN_TOP, OCEAN_BOT),
   mountain: mountainPixel,

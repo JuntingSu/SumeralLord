@@ -19,7 +19,7 @@ const MapConst = (() => {
     [TERRAIN.PLAIN]: '#53637c',
     [TERRAIN.CITY]: '#d4a017',
     [TERRAIN.OCEAN]: '#4fa3e3',
-    [TERRAIN.MOUNTAIN]: '#53637c',
+    [TERRAIN.MOUNTAIN]: '#434f63',
     [TERRAIN.VOID]: 'transparent',
   };
   /** 地形贴图文件名（static/terrain/terrain_{name}.png；虚空无贴图） */

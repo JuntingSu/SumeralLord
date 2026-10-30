@@ -17,7 +17,7 @@ const TERRAIN_COLORS: Record<number, string> = {
   [TERRAIN.PLAIN]: '#53637c',
   [TERRAIN.CITY]: '#d4a017',
   [TERRAIN.OCEAN]: '#4fa3e3',
-  [TERRAIN.MOUNTAIN]: '#53637c',
+  [TERRAIN.MOUNTAIN]: '#434f63',
 };
 /** 地块轮廓线（相邻地块共用边，深色细线） */
 const TILE_STROKE = 'rgba(10, 15, 24, 0.85)';

@@ -2,12 +2,12 @@ import { useEffect, useRef } from 'react';
 import { TERRAIN, TILE_OWNER } from '@dl/shared';
 import type { BattlefieldTile } from '@dl/shared';
 
-/** 地形色（缩略图用，与 static/terrain 主色一致）：平原/山地同灰，虚空透明不绘制 */
+/** 地形色（缩略图用，与 static/terrain 主色一致）：山地底色比平原深，虚空透明不绘制 */
 const TERRAIN_COLORS: Record<number, string> = {
   [TERRAIN.PLAIN]: '#53637c',
   [TERRAIN.CITY]: '#d4a017',
   [TERRAIN.OCEAN]: '#4fa3e3',
-  [TERRAIN.MOUNTAIN]: '#53637c',
+  [TERRAIN.MOUNTAIN]: '#434f63',
 };
 
 const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a'];
