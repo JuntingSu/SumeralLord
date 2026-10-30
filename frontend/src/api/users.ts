@@ -20,11 +20,11 @@ export function updateProfile(body: UpdateProfileBody): Promise<{ user: UserPubl
   });
 }
 
-/** 上传一对个人皮肤 PNG（solid + hollow，192×216 base64 data URL） */
-export function uploadSkin(solid: string, hollow: string): Promise<{ hasSkin: boolean }> {
+/** 上传个人皮肤 PNG（单张 192×216 base64 data URL；断兵由绘制端等比缩小） */
+export function uploadSkin(solid: string): Promise<{ hasSkin: boolean }> {
   return api<{ hasSkin: boolean }>('/api/users/me/skin', {
     method: 'POST',
-    body: JSON.stringify({ solid, hollow }),
+    body: JSON.stringify({ solid }),
   });
 }
 

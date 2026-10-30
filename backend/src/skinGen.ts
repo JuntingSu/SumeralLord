@@ -1,10 +1,9 @@
 // 随机配色皮肤生成：把手写零依赖 PNG 编码器（源自 backend/scripts/gen-flags.mjs）参数化为任意
-// 纯色六边形，产出与内置旗帜同规格的一对 192×216 PNG（solid + hollow）。
-// 几何与 gen-flags.mjs、frontend/src/pages/SkinStudio.tsx 耦合（尖顶六边形 R=100 居中、
-// hollow 环宽 16px），改动需三处同步。
+// 纯色六边形，产出与内置旗帜同规格的单张 192×216 PNG（断兵在绘制时等比缩小，不再单独出图）。
+// 几何与 gen-flags.mjs、frontend/src/pages/SkinStudio.tsx 耦合（尖顶六边形 R=100 居中），改动需三处同步。
 import { randomInt } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
-import { writeSkinPair } from './skin.js';
+import { writeSkin } from './skin.js';
 
 /** 皮肤 PNG 画布尺寸（与 backend/static/flags/*.png 一致） */
 const W = 192;
@@ -14,8 +13,6 @@ const CY = H / 2;
 /** 尖顶六边形外接圆半径：高 2R=200 ≤ 216，宽 √3R≈173 ≤ 192 */
 const R = 100;
 const SQRT3 = Math.sqrt(3);
-/** 断兵镂空环宽（与 gen-flags.mjs / SkinStudio.tsx 的 HOLLOW_RING 一致） */
-const HOLLOW_RING = 16;
 /** 边缘深色描边宽度（px）与压暗系数 */
 const EDGE_PX = 3;
 const EDGE_DARKEN = 0.55;
@@ -110,29 +107,21 @@ export function rgbToHex({ r, g, b }: Rgb): string {
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
-/** 由纯色渲染 solid + hollow（断兵）两张 PNG；内容与内置旗帜同规格 */
-export function renderSkinPng(color: Rgb): { solid: Buffer; hollow: Buffer } {
+/** 由纯色渲染一张 PNG；内容与内置旗帜同规格 */
+export function renderSkinPng(color: Rgb): Buffer {
   const { r, g, b } = color;
-  const solid = encodePng(W, H, (x, y) => {
+  return encodePng(W, H, (x, y) => {
     if (!insideHex(x, y)) return [0, 0, 0, 0];
     if (edgeDistance(x, y) < EDGE_PX) {
       return [Math.round(r * EDGE_DARKEN), Math.round(g * EDGE_DARKEN), Math.round(b * EDGE_DARKEN), 255];
     }
     return [r, g, b, 255];
   });
-  // 断兵视觉：外缘 HOLLOW_RING px 透明
-  const hollow = encodePng(W, H, (x, y) => {
-    if (!insideHex(x, y)) return [0, 0, 0, 0];
-    if (edgeDistance(x, y) < HOLLOW_RING) return [0, 0, 0, 0];
-    return [r, g, b, 255];
-  });
-  return { solid, hollow };
 }
 
 /** 随机取色 → 渲染 → 覆盖写入该用户皮肤文件，返回所用颜色 */
 export function writeRandomSkin(skinDir: string, userId: number): Rgb {
   const color = randomSkinColor();
-  const { solid, hollow } = renderSkinPng(color);
-  writeSkinPair(skinDir, userId, solid, hollow);
+  writeSkin(skinDir, userId, renderSkinPng(color));
   return color;
 }

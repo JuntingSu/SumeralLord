@@ -31,7 +31,7 @@ declare module 'fastify' {
     pveSaveMaxBytes: number;
     /** PVE 地图目录自动重扫间隔（毫秒） */
     pveMapsReloadMs: number;
-    /** 个人皮肤目录（static/skin；usr_{id}.png / usr_{id}_hollow.png） */
+    /** 个人皮肤目录（static/skin；usr_{id}.png） */
     skinDir: string;
   }
 

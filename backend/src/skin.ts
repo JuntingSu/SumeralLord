@@ -1,4 +1,4 @@
-// 个人皮肤（usr_{id}.png / usr_{id}_hollow.png）读写与校验：
+// 个人皮肤（usr_{id}.png）读写与校验：断兵不再单独出图，绘制时对同一张皮肤等比缩小：
 // - 存放于 backend/static/skin（@fastify/static 已把 /static/** 映射到该目录，新文件无需重启即可访问）
 // - hasSkin 按文件存在性判定（用户资料 / 房间玩家 / 排行榜共用）
 // - 尺寸与本地旗帜一致：192×216 RGBA（六边形内容由前端生成）
@@ -38,16 +38,15 @@ export function decodePngDataUrl(value: string): DecodedPng | null {
   return { buf, width, height };
 }
 
-export function skinFilePath(skinDir: string, userId: number, hollow = false): string {
-  return path.join(skinDir, `usr_${userId}${hollow ? '_hollow' : ''}.png`);
+export function skinFilePath(skinDir: string, userId: number): string {
+  return path.join(skinDir, `usr_${userId}.png`);
 }
 
 export function hasSkin(skinDir: string, userId: number): boolean {
   return existsSync(skinFilePath(skinDir, userId));
 }
 
-export function writeSkinPair(skinDir: string, userId: number, solid: Buffer, hollow: Buffer): void {
+export function writeSkin(skinDir: string, userId: number, solid: Buffer): void {
   mkdirSync(skinDir, { recursive: true });
   writeFileSync(skinFilePath(skinDir, userId), solid);
-  writeFileSync(skinFilePath(skinDir, userId, true), hollow);
 }

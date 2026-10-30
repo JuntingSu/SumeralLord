@@ -2,23 +2,32 @@
 // 底层静态层（地形+迷雾+据点圆点，dirty 重绘）、上层动态层（兵+动画中间帧+hover/选中/光圈/高亮，每帧）。
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
 // M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~4x）+ 双击复位（view 变换统一应用于两层与拾取）；
-// 断兵视觉正式化：flag_{n}_hollow.png 镂空 sprite（未加载完成时回退 punchHollow 擦边）。
+// 断兵视觉：整旗等比缩小（不再单独出镂空图），据点驻军按连兵渲染。
 import { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
-import { TERRAIN, TILE_OWNER } from '@dl/shared';
+import { TERRAIN, TILE_OWNER, isFullBreak, isNeutralOwner } from '@dl/shared';
 import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
 import type { FogLevel } from '../game/fog';
 import type { EventAnimator } from '../canvas/animator';
-import { flagImgUrl, flagHollowImgUrl } from '../lib/flags';
+import { flagImgUrl } from '../lib/flags';
+import { terrainImgUrl, TERRAIN_TEXTURE_KEYS } from '../lib/terrain';
 
+// 地形贴图加载前的兜底色（与 static/terrain 主色一致；虚空不填色）
 const TERRAIN_COLORS: Record<number, string> = {
-  [TERRAIN.PLAIN]: '#7cb342',
+  [TERRAIN.PLAIN]: '#53637c',
   [TERRAIN.CITY]: '#d4a017',
   [TERRAIN.OCEAN]: '#4fa3e3',
-  [TERRAIN.MOUNTAIN]: '#a1887f',
-  [TERRAIN.VOID]: '#263238',
+  [TERRAIN.MOUNTAIN]: '#434f63',
 };
+/** 地块轮廓线（相邻地块共用边，深色细线） */
+const TILE_STROKE = 'rgba(10, 15, 24, 0.85)';
+/** 据点金环（旗面上沿地块轮廓描一圈纯色金） */
+const CITY_RING = '#f2c14a';
 const SEAT_COLORS = ['#e63946', '#457b9d', '#2a9d8f', '#e9c46a', '#8e44ad', '#d35400'];
+/** 中立势力专属旗号：直接沿用 owner 值（0 野生 / 255 阻挡），URL 由 lib/flags 派生为 flag_wild / flag_blocker */
+const NEUTRAL_FLAG_NUMS: Record<number, number> = { [TILE_OWNER.WILD]: 0, [TILE_OWNER.BLOCKER]: 255 };
+/** 中立势力 sprite 未就绪时的兜底色（取中立旗主色） */
+const NEUTRAL_COLORS: Record<number, string> = { [TILE_OWNER.WILD]: '#69433d', [TILE_OWNER.BLOCKER]: '#684f3f' };
 const FOG_COLOR = 'rgba(10, 14, 20, 0.92)';
 const EXPLORED_DIM = 'rgba(10, 14, 20, 0.45)';
 
@@ -40,7 +49,15 @@ const TILE_GAP = 0.04;
 /** 旗帜图片内六边形外接圆半径（与 backend/scripts/gen-flags.mjs 的 R=100 耦合，改动需同步） */
 const FLAG_IMG_HEX_R = 100;
 /** 连兵旗帜覆盖放大系数：略大于地块本体以盖住抗锯齿接缝，不侵占间隔 */
+/** 旗帜绘制覆盖系数（略大于地块本体，避免相邻旗之间露缝） */
 const FLAG_COVER = 1.02;
+/** 断兵：整旗等比缩小到该比例（与旧 16% 镂空环的有效轮廓一致），露出四周地形 */
+const BROKEN_FLAG_SCALE = 0.84;
+/** 墙壁平移方向：统一朝左上（自正上方逆时针 80°；屏幕坐标 y 向下） */
+const WALL_DIR = { x: -Math.sin((80 * Math.PI) / 180), y: -Math.cos((80 * Math.PI) / 180) };
+/** 进攻必败时的荆棘贴图（1170×1170，环心=画布中心；荆棘环中心线外接半径 430px） */
+const THORN_IMG = '/static/effects/thorn_crimson.png';
+const THORN_RING_PX = 430;
 
 interface BoardCanvasProps {
   board: GameState;
@@ -76,8 +93,7 @@ interface DragState {
 }
 
 interface SpriteEntry {
-  solid: HTMLImageElement | null;
-  hollow: HTMLImageElement | null;
+  img: HTMLImageElement | null;
 }
 
 function centerOf(index: number, column: number, size: number, offX: number, offY: number, totalH: number) {
@@ -100,24 +116,6 @@ function computeLayout(cssW: number, cssH: number, rows: number, columns: number
   return { size, offX: (cssW - totalW) / 2, offY: (cssH - totalH) / 2, totalH };
 }
 
-/** 断兵 2px 镂空（过渡方案；hollow sprite 未加载时回退） */
-function punchHollow(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
-  ctx.save();
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i - 30);
-    const x = cx + size * Math.cos(angle);
-    const y = cy + size * Math.sin(angle);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.strokeStyle = 'rgba(0,0,0,1)';
-  ctx.lineWidth = 4;
-  ctx.stroke();
-  ctx.restore();
-}
 
 function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
   ctx.beginPath();
@@ -129,6 +127,60 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: nu
     else ctx.lineTo(x, y);
   }
   ctx.closePath();
+}
+
+/**
+ * 全断地形边界墙：取两格共享边，统一朝左上方向平移该边，
+ * 得到半透明玻璃质感的平行四边形（模拟立起的一堵玻璃墙）。
+ */
+function drawWall(
+  ctx: CanvasRenderingContext2D,
+  from: { cx: number; cy: number },
+  to: { cx: number; cy: number },
+  r: number,
+  thickness: number,
+): void {
+  const mx = (from.cx + to.cx) / 2;
+  const my = (from.cy + to.cy) / 2;
+  const dx = to.cx - from.cx;
+  const dy = to.cy - from.cy;
+  const len = Math.hypot(dx, dy) || 1;
+  // 共享边：与连心线垂直，长度 = 六边形边长（R），中心在连心线中点
+  const ex = -dy / len;
+  const ey = dx / len;
+  const ax = mx + (ex * r) / 2;
+  const ay = my + (ey * r) / 2;
+  const bx = mx - (ex * r) / 2;
+  const by = my - (ey * r) / 2;
+  // 平移方向固定：所有墙统一朝左上（自正上方逆时针 80°，屏幕坐标 y 向下）
+  const tx = WALL_DIR.x * thickness;
+  const ty = WALL_DIR.y * thickness;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.lineTo(bx + tx, by + ty);
+  ctx.lineTo(ax + tx, ay + ty);
+  ctx.closePath();
+  // 玻璃质感：沿平移方向做半透明高光渐变（两端亮、中间透），无描边
+  const grad = ctx.createLinearGradient(ax, ay, ax + tx, ay + ty);
+  grad.addColorStop(0, 'rgba(255, 255, 255, 0.46)');
+  grad.addColorStop(0.28, 'rgba(214, 232, 248, 0.22)');
+  grad.addColorStop(0.72, 'rgba(198, 222, 242, 0.13)');
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0.36)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+/**
+ * 进攻必败的荆棘：把贴图的荆棘环中心线（素材半径 430px）缩放到目标半径并居中，
+ * 使其与威胁环轮廓重合（此处不再单独绘制威胁环）。
+ */
+function drawThorns(ctx: CanvasRenderingContext2D, img: HTMLImageElement | null, cx: number, cy: number, targetR: number): void {
+  if (!img || !img.complete || img.naturalWidth === 0) return;
+  const scale = targetR / THORN_RING_PX;
+  const w = img.naturalWidth * scale;
+  const h = img.naturalHeight * scale;
+  ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
 }
 
 export default function BoardCanvas({
@@ -151,6 +203,10 @@ export default function BoardCanvas({
   const hoverRef = useRef<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const spritesRef = useRef<Record<string, SpriteEntry>>({});
+  const terrainRef = useRef<Record<number, HTMLImageElement>>({});
+  const thornRef = useRef<HTMLImageElement | null>(null);
+  /** 地形贴图加载计数：加载完成后让静态层重绘 */
+  const [terrainVersion, setTerrainVersion] = useState(0);
 
   // M5.2：视图变换（缩放/平移）。viewRef 为实时权威值（拖拽/滚轮直接改，rAF 层与拾取每帧读取）；
   // view state 仅是 viewRef 的 rAF 节流镜像，用于触发静态层重绘。
@@ -210,12 +266,70 @@ export default function BoardCanvas({
     };
   }, []);
 
-  /** owner → 旗帜编号（预计算；野生 0 无 sprite 走色块兜底，阻挡/未知用 8） */
+  /** owner → 旗帜编号（预计算；野生/阻挡用各自的中立旗，未知归属沿用 8 号兜底） */
   const flagOf = useMemo(() => {
     const map = new Map<number, number>();
     for (const f of board.forces) map.set(f.seat, f.flag);
-    return (owner: number): number => map.get(owner) ?? (owner === TILE_OWNER.WILD ? 0 : 8);
+    return (owner: number): number => map.get(owner) ?? NEUTRAL_FLAG_NUMS[owner] ?? 8;
   }, [board.forces]);
+
+  /**
+   * 兵力数字变灰判定（除下列条件外一律白色）：
+   *  1 加点阶段的断兵
+   *  2 行动阶段、我方无行动力的兵
+   *  3 行动阶段、敌方（非我方阵营）反击次数为 0 的兵
+   *  4 行动阶段、我方兵周围六格全为全断地形或同队兵（无路可走；仅限我方）
+   *  5 我方 1 兵力连兵（连兵强度 1 无法进攻；仅限我方）
+   * board 每次变化（覆盖发起进攻/移动/生成/失去行动力/切阶段/结束回合/兵消失/回合开始）
+   * 都整体重算一次集合，绘制时只查表；复杂度 O(地块数×6)，不影响帧率。
+   */
+  const dimTiles = useMemo(() => {
+    const set = new Set<number>();
+    const { phase, tiles, forces } = board;
+    const teamOf = (seat: number) => forces.find((f) => f.seat === seat)?.team;
+    // 阵营判定：中立兵按 owner 相等，势力兵按队伍
+    const sameSide = (a: number, b: number) => {
+      if (isNeutralOwner(a) || isNeutralOwner(b)) return a === b;
+      const ta = teamOf(a);
+      return ta !== undefined && ta === teamOf(b);
+    };
+    const mySide = (owner: number) => mySeat !== null && sameSide(owner, mySeat);
+    const geo = { rows: board.rows, columns: board.columns, cylindrical: board.cylindrical };
+    for (let i = 0; i < tiles.length; i++) {
+      const s = tiles[i].soldier;
+      if (!s) continue;
+      if (phase === 'ADD_POINT' && !s.isLinked) {
+        set.add(i); // 1
+        continue;
+      }
+      // 5：1 兵力连兵（仅我方；敌方 1 力连兵仍按白色渲染）
+      if (mySeat !== null && mySide(s.owner) && s.isLinked && s.strength === 1) {
+        set.add(i);
+        continue;
+      }
+      if (phase !== 'ACTION') continue;
+      if (mySeat !== null && mySide(s.owner) && !s.hasMovement) {
+        set.add(i); // 2
+        continue;
+      }
+      if (mySeat !== null && !mySide(s.owner) && s.counter === 0) {
+        set.add(i); // 3
+        continue;
+      }
+      // 4：周围六格全为全断地形/同队兵（仅我方；敌方被围仍按白色渲染）
+      if (mySeat === null || !mySide(s.owner)) continue;
+      let trapped = true;
+      for (const n of neighborsOf(i, geo)) {
+        const t = tiles[n];
+        if (isFullBreak(t.terrain)) continue;
+        if (t.soldier && sameSide(t.soldier.owner, s.owner)) continue;
+        trapped = false;
+        break;
+      }
+      if (trapped) set.add(i);
+    }
+    return set;
+  }, [board, mySeat]);
 
   /** 空闲时（无动画）渲染的权威兵表 */
   const boardSoldiers = useMemo<Array<SoldierState | null>>(
@@ -293,19 +407,29 @@ export default function BoardCanvas({
     const { rows, columns } = board;
     const L = computeLayout(cssW, cssH, rows, columns);
     const { size, offX, offY, totalH } = L;
-    // 地块间隔：绘制半径缩小，相邻地块之间留缝（布局/拾取仍用 size）
-    const ts = size * (1 - TILE_GAP);
     // M5.2：视图变换
     const tx = (c: { cx: number; cy: number }) => ({ cx: view.offX + c.cx * view.scale, cy: view.offY + c.cy * view.scale });
 
-    // 1. 地形底色
+    // 1. 地形（static/terrain 贴图；虚空完全透明 —— 不填充也不描边）
     for (let i = 0; i < board.tiles.length; i++) {
+      const terrain = board.tiles[i].terrain;
+      if (terrain === TERRAIN.VOID) continue;
       const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-      hexPath(ctx, c.cx, c.cy, ts * view.scale);
-      ctx.fillStyle = TERRAIN_COLORS[board.tiles[i].terrain] ?? '#9e9e9e';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      ctx.lineWidth = 1;
+      const img = terrainRef.current[terrain];
+      if (img && img.complete && img.naturalWidth > 0) {
+        // 贴图与旗帜同规格（六边形 R=100），按地块半径铺满整格
+        const s = (size * view.scale) / FLAG_IMG_HEX_R;
+        const w = img.naturalWidth * s;
+        const h = img.naturalHeight * s;
+        ctx.drawImage(img, c.cx - w / 2, c.cy - h / 2, w, h);
+      } else {
+        hexPath(ctx, c.cx, c.cy, size * view.scale);
+        ctx.fillStyle = TERRAIN_COLORS[terrain] ?? '#9e9e9e';
+        ctx.fill();
+      }
+      hexPath(ctx, c.cx, c.cy, size * view.scale);
+      ctx.strokeStyle = TILE_STROKE;
+      ctx.lineWidth = Math.max(1, size * view.scale * 0.035);
       ctx.stroke();
     }
 
@@ -315,49 +439,54 @@ export default function BoardCanvas({
         const c = tx(centerOf(i, columns, size, offX, offY, totalH));
         const level = fogLevels[i];
         if (level === 'hidden') {
-          hexPath(ctx, c.cx, c.cy, ts * view.scale);
+          hexPath(ctx, c.cx, c.cy, size * view.scale);
           ctx.fillStyle = FOG_COLOR;
           ctx.fill();
         } else if (level === 'explored') {
-          hexPath(ctx, c.cx, c.cy, ts * view.scale);
+          hexPath(ctx, c.cx, c.cy, size * view.scale);
           ctx.fillStyle = EXPLORED_DIM;
           ctx.fill();
         }
       }
     }
 
-    // 3. 据点归属圆点（中立/无主据点也标）
-    for (let i = 0; i < board.tiles.length; i++) {
-      const t = board.tiles[i];
-      if (t.terrain !== TERRAIN.CITY) continue;
-      const belongs = t.soldier?.owner ?? TILE_OWNER.EMPTY;
-      if (belongs === TILE_OWNER.EMPTY || belongs === TILE_OWNER.BLOCKER) continue;
-      const c = tx(centerOf(i, columns, size, offX, offY, totalH));
-      ctx.beginPath();
-      ctx.arc(c.cx, c.cy, Math.max(2.5, size * 0.14) * view.scale, 0, Math.PI * 2);
-      ctx.fillStyle = belongs === TILE_OWNER.WILD ? '#9e9e9e' : SEAT_COLORS[(belongs - 1) % SEAT_COLORS.length];
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-  }, [board, fogEnabled, fogLevels, view, canvasSize]);
+  }, [board, fogEnabled, fogLevels, view, canvasSize, terrainVersion]);
 
-  // 旗帜 sprite 预加载（实心 + 镂空；flag 为负数 → 个人皮肤 usr_{-flag}，加载失败自然走色块/擦边兜底）
+  // 荆棘贴图预加载（overlay 每帧重绘，加载完成即可显示）
+  useEffect(() => {
+    const img = new Image();
+    img.src = THORN_IMG;
+    thornRef.current = img;
+  }, []);
+
+  // 地形贴图预加载（虚空无贴图；每张加载完成触发一次静态层重绘）
+  useEffect(() => {
+    for (const t of TERRAIN_TEXTURE_KEYS) {
+      if (terrainRef.current[t] !== undefined) continue;
+      const url = terrainImgUrl(t);
+      if (!url) continue;
+      const img = new Image();
+      img.onload = () => setTerrainVersion((v) => v + 1);
+      img.src = url;
+      terrainRef.current[t] = img;
+    }
+  }, []);
+
+  // 旗帜 sprite 预加载（flag 为负数 → 个人皮肤 usr_{-flag}，加载失败自然走色块兜底）
   useEffect(() => {
     const load = (n: number) => {
       if (spritesRef.current[String(n)] !== undefined) return;
-      const solid = new Image();
-      solid.src = flagImgUrl(n);
-      const hollow = new Image();
-      hollow.src = flagHollowImgUrl(n);
-      spritesRef.current[String(n)] = { solid, hollow };
+      const img = new Image();
+      img.src = flagImgUrl(n);
+      spritesRef.current[String(n)] = { img };
     };
     for (let n = 1; n <= 30; n++) load(n);
+    load(NEUTRAL_FLAG_NUMS[TILE_OWNER.WILD]);
+    load(NEUTRAL_FLAG_NUMS[TILE_OWNER.BLOCKER]);
     for (const f of board.forces) load(f.flag);
   }, [board.forces]);
 
-  /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；hollow=true 用镂空 sprite 露出地形，未加载时擦边回退） */
+  /** 画单个兵（旗帜 sprite + 兵力数字 + 闪光描边；broken=true 时整旗等比缩小露出地形） */
   const drawSoldier = useCallback(
     (
       ctx: CanvasRenderingContext2D,
@@ -368,36 +497,36 @@ export default function BoardCanvas({
       flagNum: number,
       alpha: number,
       flash: FlashKind | null,
-      hollow: boolean,
+      broken: boolean,
+      dimText: boolean,
     ) => {
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      const entry = spritesRef.current[String(flagNum)];
-      const img = hollow ? entry?.hollow : entry?.solid;
+      const img = spritesRef.current[String(flagNum)]?.img;
       // 旗帜按图片内六边形（FLAG_IMG_HEX_R）等比放大到地块本体（含小幅覆盖），中心对准地块中心
-      const scale = (size * (1 - TILE_GAP) * FLAG_COVER) / FLAG_IMG_HEX_R;
+      const scale =
+        ((size * (1 - TILE_GAP) * FLAG_COVER) / FLAG_IMG_HEX_R) * (broken ? BROKEN_FLAG_SCALE : 1);
       if (img && img.complete && img.naturalWidth > 0) {
         const flagW = img.naturalWidth * scale;
         const flagH = img.naturalHeight * scale;
         ctx.drawImage(img, cx - flagW / 2, cy - flagH / 2, flagW, flagH);
       } else {
-        // 兜底：旗帜色块
-        ctx.fillStyle = SEAT_COLORS[(soldier.owner - 1) % SEAT_COLORS.length] ?? '#888';
-        ctx.fillRect(cx - size * 0.22, cy - size * 0.3, size * 0.44, size * 0.6);
+        // 兜底：旗帜色块（中立势力用中立旗主色；断兵按同比例缩小）
+        ctx.fillStyle = NEUTRAL_COLORS[soldier.owner] ?? SEAT_COLORS[(soldier.owner - 1) % SEAT_COLORS.length] ?? '#888';
+        const w = size * 0.44 * (broken ? BROKEN_FLAG_SCALE : 1);
+        const h = size * 0.6 * (broken ? BROKEN_FLAG_SCALE : 1);
+        ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
       }
-      // hollow sprite 未就绪时用擦边过渡方案（沿地块边缘擦出环带）
-      if (hollow && (!entry?.hollow || !entry.hollow.complete || entry.hollow.naturalWidth === 0)) {
-        punchHollow(ctx, cx, cy, size * (1 - TILE_GAP));
-      }
-      // 兵力数字：地块正中心（旗帜上方）
+      // 兵力数字：默认白字叠黑色底影（不再描边）；不可行动单位改浅灰半透明叠深灰半透明
+      const text = String(soldier.strength);
       ctx.font = `bold ${Math.max(10, size * 0.5)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#111';
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-      ctx.lineWidth = 2.5;
-      ctx.strokeText(String(soldier.strength), cx, cy);
-      ctx.fillText(String(soldier.strength), cx, cy);
+      // 灰态：浅灰半透明压上层、深灰半透明压下层（白/黑两层的顺序不变）
+      ctx.fillStyle = dimText ? 'rgba(44, 48, 56, 0.62)' : '#000000';
+      ctx.fillText(text, cx, cy + Math.max(1, size * 0.055));
+      ctx.fillStyle = dimText ? 'rgba(214, 218, 224, 0.62)' : '#ffffff';
+      ctx.fillText(text, cx, cy);
       ctx.restore();
       // 闪光描边（不受兵透明度影响）
       if (flash) {
@@ -445,26 +574,47 @@ export default function BoardCanvas({
 
         const isMyTurn = mySeat !== null && board.currentSeat === mySeat && !isSpectator;
 
-        // 行动阶段：选中兵 → 周围地块反击状态着色 + 可选目标高亮（兵之下）
+        // 行动阶段：选中我方兵 → 六个邻格的提示
+        //  同队：无效果；全断地形：边界墙体；空位：当前淡白底；
+        //  敌兵：红环（有反击）/白环（无反击），进攻会失败时红环叠荆棘（环画在兵之上，先收集后统一绘制）
+        const threatRings: Array<{ c: { cx: number; cy: number }; soldier: SoldierState; wouldFail: boolean }> = [];
+        const walls: Array<{ from: { cx: number; cy: number }; to: { cx: number; cy: number } }> = [];
         if (selected !== null && phase === 'ACTION' && isMyTurn) {
           const sel = board.tiles[selected].soldier;
           if (sel && sel.owner === mySeat) {
             const geo = { rows, columns, cylindrical: board.cylindrical };
+            const selC = centerOf(selected, columns, size, offX, offY, totalH);
+            // 与 reducer 进攻结算一致：连兵先扣 1，power >= 守方强度才成功
+            const power = sel.isLinked ? sel.strength - 1 : sel.strength;
+            const teamOf = (seat: number) => board.forces.find((f) => f.seat === seat)?.team;
+            const isAlly = (a: number, b: number) =>
+              !isNeutralOwner(a) && !isNeutralOwner(b) && teamOf(a) !== undefined && teamOf(a) === teamOf(b);
+            const wrapW = SQRT3 * size * columns;
             for (const n of neighborsOf(selected, geo)) {
+              if (fogEnabled && fogLevels && fogLevels[n] !== 'visible') continue;
               const t = board.tiles[n];
-              const c = tx(centerOf(n, columns, size, offX, offY, totalH));
-              hexPath(ctx, c.cx, c.cy, ts * v.scale);
+              // 1. 同队兵：不显示任何效果
+              if (t.soldier && isAlly(sel.owner, t.soldier.owner)) continue;
+              // 滚筒地图：把对侧邻格挪到最近一侧，边界/墙才落在选中格边上
+              const raw = centerOf(n, columns, size, offX, offY, totalH);
+              let nx = raw.cx;
+              if (nx - selC.cx > wrapW / 2) nx -= wrapW;
+              else if (nx - selC.cx < -wrapW / 2) nx += wrapW;
+              const c = tx({ cx: nx, cy: raw.cy });
+              // 2. 全断地形：记录边界墙（统一在兵之上绘制）
+              if (isFullBreak(t.terrain)) {
+                walls.push({ from: tx(selC), to: c });
+                continue;
+              }
+              // 5. 非全断且无兵：按当前模式渲染
               if (!t.soldier) {
+                hexPath(ctx, c.cx, c.cy, ts * v.scale);
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
                 ctx.fill();
-              } else if (t.soldier.owner === mySeat) {
-                ctx.fillStyle = 'rgba(120, 120, 130, 0.25)';
-                ctx.fill();
-              } else {
-                // 非同队：反击>0 红 / =0 白
-                ctx.fillStyle = t.soldier.counter > 0 ? 'rgba(230, 57, 70, 0.35)' : 'rgba(255, 255, 255, 0.3)';
-                ctx.fill();
+                continue;
               }
+              // 3/4/6. 敌兵：收集威胁环与“进攻会失败”判定
+              threatRings.push({ c, soldier: t.soldier, wouldFail: power < t.soldier.strength });
             }
           }
         }
@@ -487,8 +637,8 @@ export default function BoardCanvas({
           if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
           const soldier = showTiles[i];
           if (!soldier) continue;
-          // 据点特殊化：据点的连兵也按断兵（镂空）渲染，露出据点地形
-          const hollow = !soldier.isLinked || board.tiles[i].terrain === TERRAIN.CITY;
+          // 据点驻军按连兵渲染（据点美术单独表现），只有真正断开的兵才整旗缩小
+          const broken = !soldier.isLinked;
           const c = tx(centerOf(i, columns, size, offX, offY, totalH));
           // MOVE：起点兵沿 from→to 插值滑动
           if (ev?.kind === 'MOVE' && ev.from === i) {
@@ -502,13 +652,14 @@ export default function BoardCanvas({
               flagOf(soldier.owner),
               1,
               null,
-              hollow,
+              broken,
+              dimTiles.has(i),
             );
             continue;
           }
           // DESPAWN：淡出
           if (ev?.kind === 'DESPAWN' && ev.tile === i) {
-            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null, hollow);
+            drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1 - progress, null, broken, dimTiles.has(i));
             continue;
           }
           // 闪光判定
@@ -517,7 +668,7 @@ export default function BoardCanvas({
           else if (af && af.breakTiles.includes(i)) flash = 'break';
           else if (ev?.kind === 'REJOIN' && ev.tile === i) flash = 'rejoin';
           else if (victorySeats.includes(soldier.owner)) flash = 'victory';
-          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash, hollow);
+          drawSoldier(ctx, c.cx, c.cy, size * v.scale, soldier, flagOf(soldier.owner), 1, flash, broken, dimTiles.has(i));
         }
         // SPAWN：目标地块淡入（起点 30% 保证移动连续性）
         if (ev?.kind === 'SPAWN') {
@@ -532,7 +683,8 @@ export default function BoardCanvas({
               flagOf(ev.soldier.owner),
               0.3 + 0.7 * progress,
               null,
-              !ev.soldier.isLinked || board.tiles[ev.tile].terrain === TERRAIN.CITY,
+              !ev.soldier.isLinked,
+              dimTiles.has(ev.tile),
             );
           }
         }
@@ -542,6 +694,39 @@ export default function BoardCanvas({
           hexPath(ctx, c.cx, c.cy, ts * v.scale);
           ctx.fillStyle = `rgba(230, 57, 70, ${0.25 * Math.sin(progress * Math.PI)})`;
           ctx.fill();
+        }
+
+        // 据点：沿地块轮廓在旗面上描一圈金色纯色（空据点同样标出；线宽为初版的 2 倍）
+        for (let i = 0; i < board.tiles.length; i++) {
+          if (board.tiles[i].terrain !== TERRAIN.CITY) continue;
+          if (fogEnabled && fogLevels && fogLevels[i] !== 'visible') continue;
+          const c = tx(centerOf(i, columns, size, offX, offY, totalH));
+          // 描边以路径为中心向两侧展开：半径内缩半个线宽，外沿正好贴地块边界，不出框
+          const w = Math.max(3, size * v.scale * 0.09);
+          hexPath(ctx, c.cx, c.cy, size * v.scale - w / 2);
+          ctx.strokeStyle = CITY_RING;
+          ctx.lineWidth = w;
+          ctx.stroke();
+        }
+
+        // 全断地形边界墙（画在兵与据点金环之上，朝全断地块一侧偏移，不遮挡选中兵的旗帜）
+        for (const w of walls) {
+          drawWall(ctx, w.from, w.to, size * v.scale, size * v.scale * 0.16);
+        }
+
+        // 敌兵威胁环（画在兵与据点金环之上）：红=有反击、白=无反击；进攻会失败时红环叠荆棘
+        for (const r of threatRings) {
+          const w = Math.max(1.5, size * v.scale * 0.045);
+          const rr = size * v.scale - w / 2; // 环内缩半个线宽，外沿贴地块边界
+          if (r.soldier.counter > 0 && r.wouldFail) {
+            // 进攻必败：荆棘环与威胁环同位，直接替代威胁环（不再画环）
+            drawThorns(ctx, thornRef.current, r.c.cx, r.c.cy, rr);
+            continue;
+          }
+          hexPath(ctx, r.c.cx, r.c.cy, rr);
+          ctx.strokeStyle = r.soldier.counter > 0 ? '#e63946' : '#ffffff';
+          ctx.lineWidth = w;
+          ctx.stroke();
         }
 
         // 加点阶段连兵白字高亮
@@ -579,7 +764,7 @@ export default function BoardCanvas({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier, canvasSize]);
+  }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier, dimTiles, canvasSize]);
 
   return (
     <div ref={containerRef} className={className} style={{ position: 'relative', overflow: 'hidden' }}>

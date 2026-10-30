@@ -79,8 +79,6 @@ const CX = W / 2;
 const CY = H / 2;
 const R = 100; // 尖顶六边形外接圆半径：高 2R=200 ≤ 216，宽 √3R≈173 ≤ 192
 const SQRT3 = Math.sqrt(3);
-// 断兵镂空环宽（图像像素）：保持棋盘上"露出宽度"与之前一致（TILE_GAP 0.04 时 16/100 ≈ 0.16×size）
-const HOLLOW_RING = 16;
 
 function hexToRgb(hex) {
   return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
@@ -102,17 +100,4 @@ COLORS.forEach((hex, i) => {
   const file = path.join(outDir, `flag_${i + 1}.png`);
   writeFileSync(file, png);
   console.log(`written ${file} (${png.length} bytes)`);
-  // 镂空版（断兵视觉）：外缘 HOLLOW_RING px 透明（露出下方地形，宽度 ≈ 2×地块间隔），其余实心
-  const hollow = encodePng(W, H, (x, y) => {
-    const dx = Math.abs(x - CX);
-    const dy = Math.abs(y - CY);
-    const inside = dx <= (SQRT3 / 2) * R && dy <= R - dx / SQRT3;
-    if (!inside) return [0, 0, 0, 0];
-    const dEdge = Math.min((SQRT3 / 2) * R - dx, (R - dy - dx / SQRT3) * 0.866);
-    if (dEdge < HOLLOW_RING) return [0, 0, 0, 0]; // 外圈镂空
-    return [r, g, b, 255];
-  });
-  const hollowFile = path.join(outDir, `flag_${i + 1}_hollow.png`);
-  writeFileSync(hollowFile, hollow);
-  console.log(`written ${hollowFile} (${hollow.length} bytes)`);
 });

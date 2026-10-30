@@ -14,13 +14,28 @@ const MapConst = (() => {
     [TERRAIN.MOUNTAIN]: '山地',
     [TERRAIN.VOID]: '虚空',
   };
+  // 与 static/terrain 贴图主色一致（虚空完全透明，仅作调色板色块）
   const TERRAIN_COLORS = {
-    [TERRAIN.PLAIN]: '#7cb342',
+    [TERRAIN.PLAIN]: '#53637c',
     [TERRAIN.CITY]: '#d4a017',
     [TERRAIN.OCEAN]: '#4fa3e3',
-    [TERRAIN.MOUNTAIN]: '#a1887f',
-    [TERRAIN.VOID]: '#263238',
+    [TERRAIN.MOUNTAIN]: '#434f63',
+    [TERRAIN.VOID]: 'transparent',
   };
+  /** 地形贴图文件名（static/terrain/terrain_{name}.png；虚空无贴图） */
+  const TERRAIN_IMAGE_FILES = {
+    [TERRAIN.PLAIN]: 'plain',
+    [TERRAIN.CITY]: 'city',
+    [TERRAIN.OCEAN]: 'ocean',
+    [TERRAIN.MOUNTAIN]: 'mountain',
+  };
+  const TERRAIN_IMAGE_KEYS = Object.keys(TERRAIN_IMAGE_FILES).map(Number);
+  function terrainImage(terrain) {
+    const name = TERRAIN_IMAGE_FILES[terrain];
+    return name ? `/static/terrain/terrain_${name}.png` : null;
+  }
+  /** 据点金环（旗面上沿地块轮廓的纯色金） */
+  const CITY_RING = '#f2c14a';
   // 工具调色板顺序（当前项目合法地形码，绝不含 2）
   const TERRAIN_ORDER = [TERRAIN.PLAIN, TERRAIN.CITY, TERRAIN.OCEAN, TERRAIN.MOUNTAIN, TERRAIN.VOID];
 
@@ -48,7 +63,7 @@ const MapConst = (() => {
   const DEFAULT_STRENGTH = 5;
   const DEFAULT_SERVER = 'http://127.0.0.1:3000';
 
-  /** 有图片的旗帜编号（static/flags/flag_N.png 实心 + flag_N_hollow.png 镂空；1..30 为标准纯色旗） */
+  /** 有图片的旗帜编号（static/flags/flag_N.png；1..30 为标准旗。断兵不单独出图，绘制时等比缩小） */
   const FLAG_IMAGE_NUMS = Array.from({ length: 30 }, (_, i) => i + 1);
 
   /** 旗帜实心文件 URL；无对应文件的旗号返回 ''（回退纯色） */
@@ -56,9 +71,13 @@ const MapConst = (() => {
     return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}.png` : '';
   }
 
-  /** 旗帜镂空文件 URL（断兵视觉，露出下方地形）；无对应文件的旗号返回 '' */
-  function flagImageHollow(flag) {
-    return FLAG_IMAGE_NUMS.includes(flag) ? `/static/flags/flag_${flag}_hollow.png` : '';
+  /** 中立势力专属旗文件（owner 0/255 → flag_wild / flag_blocker，与玩家旗 1..30 分命名） */
+  const NEUTRAL_FLAG_FILES = { [TILE_OWNER.WILD]: 'wild', [TILE_OWNER.BLOCKER]: 'blocker' };
+
+  /** 战场按 owner 取旗：中立势力走专属文件，其余同 flagImage */
+  function flagImageOwner(flag) {
+    const name = NEUTRAL_FLAG_FILES[flag];
+    return name ? `/static/flags/flag_${name}.png` : flagImage(flag);
   }
 
   /** 旗帜编号 → 颜色（黄金角 HSL，确定性；同参考编辑器 flag-colors.js） */
@@ -82,8 +101,10 @@ const MapConst = (() => {
 
   return {
     TERRAIN, TERRAIN_LABELS, TERRAIN_COLORS, TERRAIN_ORDER,
+    TERRAIN_IMAGE_FILES, TERRAIN_IMAGE_KEYS, terrainImage, CITY_RING,
     TILE_OWNER, OWNER_LABELS, OWNER_COLORS, OWNER_ORDER,
     AI_LEVELS, AI_LABELS, SEAT_COLORS, NO_SOLDIER_TERRAIN,
-    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage, flagImageHollow, seatColor,
+    DEFAULT_STRENGTH, DEFAULT_SERVER, FLAG_IMAGE_NUMS, flagColor, flagImage,
+    NEUTRAL_FLAG_FILES, flagImageOwner, seatColor,
   };
 })();

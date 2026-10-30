@@ -1,6 +1,6 @@
 // 个性皮肤工坊（移植自「V5 数字领主地块皮肤生成器.html」）：
-// 上传图片 → 六边形框选（缩放/平移/滚轮/双指）→ 确认裁剪 → 生成两张与本地旗帜同规格的
-// 192×216 PNG（solid + hollow，尖顶六边形 R=100 居中，hollow 挖外圈 16px 环）→ 确认上传到服务器。
+// 上传图片 → 六边形框选（缩放/平移/滚轮/双指）→ 确认裁剪 → 生成一张与本地旗帜同规格的
+// 192×216 PNG（尖顶六边形 R=100 居中）→ 确认上传到服务器。断兵由绘制端等比缩小，不再生成镂空版。
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type WheelEvent, type PointerEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { uploadSkin } from '../api/users';
@@ -11,8 +11,6 @@ import { useAuth } from '../stores/auth';
 const OUTPUT_W = 192;
 const OUTPUT_H = 216;
 const OUT_HEX_R = 100;
-/** hollow 挖空环宽（与 backend/scripts/gen-flags.mjs 的 HOLLOW_RING=16 一致） */
-const HOLLOW_RING = 16;
 
 /** 尖顶正六边形路径（不调用 beginPath，调用方管理路径生命周期） */
 function hexPath(c: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
@@ -44,37 +42,6 @@ function formatSize(bytes: number): string {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-/**
- * 断兵镂空版：对 solid 画布做像素级环形镂空（六边形外圈 HOLLOW_RING px 变透明），
- * 与 backend/scripts/gen-flags.mjs 的 hollow 判定一致。逐像素处理可避免
- * destination-out 在部分浏览器中与 drawImage 叠加时的合成异常。
- */
-function punchHollowRing(source: HTMLCanvasElement): HTMLCanvasElement {
-  const SQRT3 = Math.sqrt(3);
-  const out = document.createElement('canvas');
-  out.width = OUTPUT_W;
-  out.height = OUTPUT_H;
-  const ctx = out.getContext('2d');
-  if (!ctx) return out;
-  ctx.drawImage(source, 0, 0);
-  const imageData = ctx.getImageData(0, 0, OUTPUT_W, OUTPUT_H);
-  const d = imageData.data;
-  const CX = OUTPUT_W / 2;
-  const CY = OUTPUT_H / 2;
-  const W2 = (SQRT3 / 2) * OUT_HEX_R;
-  for (let y = 0; y < OUTPUT_H; y++) {
-    for (let x = 0; x < OUTPUT_W; x++) {
-      const dx = Math.abs(x - CX);
-      const dy = Math.abs(y - CY);
-      if (dx > W2 || dy > OUT_HEX_R - dx / SQRT3) continue; // 六边形外（本来透明）
-      const dEdge = Math.min(W2 - dx, (OUT_HEX_R - dy - dx / SQRT3) * 0.866);
-      if (dEdge < HOLLOW_RING) d[(y * OUTPUT_W + x) * 4 + 3] = 0;
-    }
-  }
-  ctx.putImageData(imageData, 0, 0);
-  return out;
-}
-
 export default function SkinStudio() {
   const me = useAuth((s) => s.user);
   const updateUser = useAuth((s) => s.updateUser);
@@ -96,7 +63,6 @@ export default function SkinStudio() {
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [resultReady, setResultReady] = useState(false);
   const [resultDataUrl, setResultDataUrl] = useState<string | null>(null);
-  const [hollowDataUrl, setHollowDataUrl] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   // 指针（拖拽平移 + 双指缩放）
@@ -277,20 +243,19 @@ export default function SkinStudio() {
     canvas.height = OUTPUT_H;
     renderResult(canvas.getContext('2d')!);
     setResultDataUrl(canvas.toDataURL('image/png'));
-    setHollowDataUrl(punchHollowRing(canvas).toDataURL('image/png'));
     setResultReady(true);
     setSuccess(null);
     setError(null);
   };
 
-  // 确认：上传 solid + hollow 两张皮肤
+  // 确认：上传单张皮肤（断兵由绘制端等比缩小）
   const doConfirm = async () => {
-    if (!me || !resultDataUrl || !hollowDataUrl) return;
+    if (!me || !resultDataUrl) return;
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
-      await uploadSkin(resultDataUrl, hollowDataUrl);
+      await uploadSkin(resultDataUrl);
       updateUser({ ...me, hasSkin: true });
       setSuccess('皮肤已上传，在大厅 / 房间 / 对局中展示');
     } catch (err) {
@@ -462,7 +427,7 @@ export default function SkinStudio() {
                   style={{ width: 288, height: 324, imageRendering: 'pixelated' }}
                 />
                 <p className="mt-2 text-center text-xs text-slate-500">
-                  生成 192×216 的 solid 与 hollow（断兵）两张皮肤
+                  生成 192×216 的皮肤图（断兵在棋盘上按比例缩小显示）
                 </p>
                 <button
                   onClick={() => void doConfirm()}
