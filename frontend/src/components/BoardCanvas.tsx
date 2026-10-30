@@ -278,7 +278,7 @@ export default function BoardCanvas({
    *  1 加点阶段的断兵
    *  2 行动阶段、我方无行动力的兵
    *  3 行动阶段、敌方（非我方阵营）反击次数为 0 的兵
-   *  4 行动阶段、周围六格全为全断地形或同队兵（无路可走）
+   *  4 行动阶段、我方兵周围六格全为全断地形或同队兵（无路可走；仅限我方）
    *  5 我方 1 兵力连兵（连兵强度 1 无法进攻；仅限我方）
    * board 每次变化（覆盖发起进攻/移动/生成/失去行动力/切阶段/结束回合/兵消失/回合开始）
    * 都整体重算一次集合，绘制时只查表；复杂度 O(地块数×6)，不影响帧率。
@@ -316,7 +316,8 @@ export default function BoardCanvas({
         set.add(i); // 3
         continue;
       }
-      // 4：周围六格全为全断地形/同队兵
+      // 4：周围六格全为全断地形/同队兵（仅我方；敌方被围仍按白色渲染）
+      if (mySeat === null || !mySide(s.owner)) continue;
       let trapped = true;
       for (const n of neighborsOf(i, geo)) {
         const t = tiles[n];
