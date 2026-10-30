@@ -53,6 +53,8 @@ const FLAG_IMG_HEX_R = 100;
 const FLAG_COVER = 1.02;
 /** 断兵：整旗等比缩小到该比例（与旧 16% 镂空环的有效轮廓一致），露出四周地形 */
 const BROKEN_FLAG_SCALE = 0.84;
+/** 墙壁平移方向：统一朝左上（自正上方逆时针 80°；屏幕坐标 y 向下） */
+const WALL_DIR = { x: -Math.sin((80 * Math.PI) / 180), y: -Math.cos((80 * Math.PI) / 180) };
 
 interface BoardCanvasProps {
   board: GameState;
@@ -125,7 +127,7 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: nu
 }
 
 /**
- * 全断地形边界墙：取两格共享边，按“向上偏 10°（与边界边成 80°）”的方向平移该边，
+ * 全断地形边界墙：取两格共享边，统一朝左上方向平移该边，
  * 得到纯灰色、无边框的平行四边形（模拟立起的一堵墙）。
  */
 function drawWall(
@@ -147,15 +149,9 @@ function drawWall(
   const ay = my + (ey * r) / 2;
   const bx = mx - (ex * r) / 2;
   const by = my - (ey * r) / 2;
-  // 平移方向：连心线（指向全断地块）绕 ±10° 旋转，取更朝上的那个 —— 即“向上偏左/右”立起
-  const tilt = (10 * Math.PI) / 180;
-  const ux = dx / len;
-  const uy = dy / len;
-  const c1 = { x: ux * Math.cos(tilt) - uy * Math.sin(tilt), y: ux * Math.sin(tilt) + uy * Math.cos(tilt) };
-  const c2 = { x: ux * Math.cos(tilt) + uy * Math.sin(tilt), y: -ux * Math.sin(tilt) + uy * Math.cos(tilt) };
-  const v = c1.y <= c2.y ? c1 : c2;
-  const tx = v.x * thickness;
-  const ty = v.y * thickness;
+  // 平移方向固定：所有墙统一朝左上（自正上方逆时针 80°，屏幕坐标 y 向下）
+  const tx = WALL_DIR.x * thickness;
+  const ty = WALL_DIR.y * thickness;
   ctx.beginPath();
   ctx.moveTo(ax, ay);
   ctx.lineTo(bx, by);
