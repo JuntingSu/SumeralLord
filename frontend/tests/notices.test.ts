@@ -1,7 +1,7 @@
 // collectSystemNotices 单测（POV）：回合开始 / 被击败（击杀者归属与投降/超时）/ 大杀四方（击杀数 ≥3 每次击杀都发）
 import { describe, it, expect } from 'vitest';
 import type { GameEvent } from '@dl/shared';
-import { collectSystemNotices } from '../src/stores/game';
+import { collectSystemNotices, collectTriggerTexts } from '../src/stores/game';
 
 const FORCE_CLEAR = (seat: number, reason: 'no_stronghold' | 'surrender' | 'timeout'): GameEvent => ({
   level: 4,
@@ -15,6 +15,35 @@ const END_TURN = (fromSeat: number, toSeat: number): GameEvent => ({
   fromSeat,
   toSeat,
   turn: 2,
+});
+
+describe('collectTriggerTexts 战役文本收集', () => {
+  it('extracts show and hide events', () => {
+    const chain: GameEvent[] = [
+      {
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: 'a',
+        text: 'A',
+        placement: { kind: 'screen', position: 'top' },
+      },
+      {
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: 'b',
+        text: 'B',
+        placement: { kind: 'tile', tile: 3 },
+      },
+      { level: 5, kind: 'TRIGGER_TEXT_HIDE', textId: 'a' },
+    ];
+    expect(collectTriggerTexts(chain)).toEqual({
+      show: [
+        { textId: 'a', text: 'A', placement: { kind: 'screen', position: 'top' } },
+        { textId: 'b', text: 'B', placement: { kind: 'tile', tile: 3 } },
+      ],
+      hide: ['a'],
+    });
+  });
 });
 
 describe('collectSystemNotices 系统通知收集', () => {

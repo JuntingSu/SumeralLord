@@ -43,7 +43,7 @@ function makeBody(humanUserId: number, gameId = 'pve-1', mapTitle = 'PVE 测试�
   }).state;
   const currentForceName = state.forces.find((f) => f.seat === state.currentSeat)?.name ?? '';
   const payload: PveSavePayload = {
-    version: 2,
+    version: 3,
     gameId,
     reducerVersion: 'test',
     savedAt: Date.now(),
@@ -109,7 +109,7 @@ describe('PVE 存档', () => {
     const get = await app.inject({ method: 'GET', url: '/api/pve/save', headers: auth(alice) });
     expect(get.statusCode).toBe(200);
     const save = get.json().data.save as PveSavePayload;
-    expect(save.version).toBe(2);
+    expect(save.version).toBe(3);
     expect(save.gameId).toBe('pve-1');
     expect(save.state.tiles).toHaveLength(body.payload.state.tiles.length);
     expect(save.config.map.title).toBe('第一局');

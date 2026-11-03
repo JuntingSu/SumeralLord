@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GAME } from '@dl/shared';
+import { GAME, REDUCER_VERSION } from '@dl/shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,7 +19,7 @@ export const config = {
   isProd: process.env.NODE_ENV === 'production',
   dbPath: process.env.DL_DB_PATH ?? path.join(__dirname, '../data/digital_lord.db'),
   /** 对局流锁定版本：与前端 reducer 构建版本对齐（BM6 做握手强校验） */
-  reducerVersion: process.env.REDUCER_VERSION ?? 'dev-0.1.0',
+  reducerVersion: process.env.REDUCER_VERSION ?? REDUCER_VERSION,
   /** 断线治理时间线（BM6：全部可配置，测试用加速值） */
   disconnectDetectMs: num(process.env.DL_DISCONNECT_DETECT_MS, GAME.DISCONNECT_DETECT_MS),
   disconnectGraceMs: num(process.env.DL_DISCONNECT_GRACE_MS, GAME.DISCONNECT_GRACE_MS),

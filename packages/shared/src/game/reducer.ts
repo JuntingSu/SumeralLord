@@ -2,6 +2,7 @@
 // 纯函数、全整数运算、迭代顺序确定（线性 index 升序 / 固定邻居表序），跨端确定性（P5/P7）。
 // 级联语义（§1.4）：子事件同步处理完毕后父事件才继续——实现为同步递归，chain 按执行序记录。
 import type {
+  Actor,
   ApplyResult,
   ConsensusReport,
   ForceState,
@@ -26,6 +27,12 @@ import {
 import type { BoardGeometry } from './coord.js';
 import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
+import type { TriggerDef, TriggerEffect } from './trigger/types.js';
+import type { StepDirty } from './trigger/delta.js';
+import { createStepDirty, resetStepDirty, takeDelta, trackForce, trackTile } from './trigger/delta.js';
+import { runTriggerTransaction } from './trigger/engine.js';
+import type { TriggerExecutor } from './trigger/engine.js';
+import { resolveForceRef, resolveSpawnForceRef } from './trigger/resolve.js';
 
 // ---------- 内部上下文 ----------
 
@@ -34,6 +41,10 @@ interface Ctx {
   geo: BoardGeometry;
   chain: GameEvent[];
   consensus: ConsensusReport[];
+  /** 当前步骤变化追踪（triggerMode 关闭时 enabled=false，调用为 no-op） */
+  stepDirty: StepDirty;
+  /** 地图触发器定义（来自 GameState，普通对局为空） */
+  triggers: TriggerDef[];
 }
 
 function cloneState(s: GameState): GameState {
@@ -42,6 +53,18 @@ function cloneState(s: GameState): GameState {
     forces: s.forces.map((f) => ({ ...f })),
     tiles: s.tiles.map((t) => ({ terrain: t.terrain, soldier: t.soldier ? { ...t.soldier } : null })),
     timeSettings: { ...s.timeSettings },
+    turnOrder: [...s.turnOrder],
+    fogOverrides: s.fogOverrides
+      ? { ...s.fogOverrides, revealed: [...s.fogOverrides.revealed], hidden: [...s.fogOverrides.hidden] }
+      : null,
+    triggerRuntime: s.triggerRuntime
+      ? {
+          ...s.triggerRuntime,
+          firedCounts: { ...s.triggerRuntime.firedCounts },
+          pending: s.triggerRuntime.pending.map((p) => ({ ...p })),
+        }
+      : null,
+    triggers: [...s.triggers],
   };
 }
 
@@ -94,6 +117,7 @@ function spawnEvent(ctx: Ctx, tile: number, soldier: SoldierState): void {
   const conn = TERRAIN_PROPS[terrain]?.connectivity;
   if (conn === 'HALF') s.isLinked = false;
   else if (conn === 'FULL_LINK') s.isLinked = true;
+  trackTile(ctx.stepDirty, ctx.state, tile);
   ctx.state.tiles[tile].soldier = s;
   ctx.chain.push({ level: 2, kind: 'SPAWN', tile, soldier: { ...s } });
   rejoinEvent(ctx, tile);
@@ -118,6 +142,7 @@ function updateEvent(ctx: Ctx, tile: number, patch: Partial<SoldierState>): void
     after.hasMovement === cur.hasMovement &&
     after.counter === cur.counter;
   if (unchanged) return;
+  trackTile(ctx.stepDirty, ctx.state, tile);
   ctx.state.tiles[tile].soldier = after;
   ctx.chain.push({ level: 2, kind: 'UPDATE', tile, before: { ...cur }, after: { ...after } });
   if (cur.isLinked !== after.isLinked) {
@@ -130,6 +155,7 @@ function updateEvent(ctx: Ctx, tile: number, patch: Partial<SoldierState>): void
 function despawnEvent(ctx: Ctx, tile: number): void {
   const cur = ctx.state.tiles[tile].soldier;
   if (!cur) return;
+  trackTile(ctx.stepDirty, ctx.state, tile);
   ctx.state.tiles[tile].soldier = null;
   ctx.chain.push({ level: 2, kind: 'DESPAWN', tile, soldier: { ...cur } });
   if (isStrongholdTerrain(ctx.state.tiles[tile].terrain) && !isNeutralOwner(cur.owner)) {
@@ -251,6 +277,7 @@ function breakJudgeEvent(ctx: Ctx, tile: number): void {
   for (const t of [...region].sort((a, b) => a - b)) {
     const s = ctx.state.tiles[t].soldier;
     if (!s || !sameConnectivityOwner(s.owner, owner) || !s.isLinked) continue;
+    trackTile(ctx.stepDirty, ctx.state, t);
     s.isLinked = false;
     s.strength -= 1;
     if (s.strength <= 0) {
@@ -268,11 +295,12 @@ function breakJudgeEvent(ctx: Ctx, tile: number): void {
 function forceClearEvent(
   ctx: Ctx,
   seat: number,
-  opts: { checkStronghold: boolean; reason: 'no_stronghold' | 'surrender' | 'timeout' },
+  opts: { checkStronghold: boolean; reason: 'no_stronghold' | 'surrender' | 'timeout' | 'trigger' },
 ): void {
   const f = forceOf(ctx.state, seat);
   if (!f || !f.exists || !f.alive) return;
   if (opts.checkStronghold && strongholdCountOf(ctx.state, seat) > 0) return;
+  trackForce(ctx.stepDirty, ctx.state, seat);
   f.alive = false;
   f.points = 0;
   ctx.chain.push({ level: 4, kind: 'FORCE_CLEAR', seat, reason: opts.reason });
@@ -283,7 +311,8 @@ function forceClearEvent(
     if (s && s.owner === seat) despawnEvent(ctx, i);
   }
   if (ctx.state.currentSeat === seat) endTurnEvent(ctx);
-  victoryJudgeEvent(ctx);
+  // 战役模式延迟到触发器事务末尾统一判定，给控制转移留出机会
+  if (!ctx.state.triggerMode) victoryJudgeEvent(ctx);
 }
 
 function victoryJudgeEvent(ctx: Ctx): void {
@@ -438,17 +467,30 @@ function switchPhaseEventCore(ctx: Ctx): void {
   ctx.chain.push({ level: 1, kind: 'SWITCH_PHASE', seat, from, to });
 }
 
-/** 结束回合事件（§6.2）：找次大存活 seat，末位回绕全局轮次 +1，进入其准备阶段 */
+/** 结束回合事件（§6.2）：按 turnOrder 找下一个存活势力，末位回绕全局轮次 +1，进入其准备阶段 */
 function endTurnEvent(ctx: Ctx): void {
   const fromSeat = ctx.state.currentSeat;
-  const aliveSeats = ctx.state.forces.filter((f) => f.exists && f.alive).map((f) => f.seat);
+  const alive = new Set(
+    ctx.state.forces.filter((f) => f.exists && f.alive).map((f) => f.seat),
+  );
+  const order = ctx.state.turnOrder.filter((s) => alive.has(s));
   let next: number | null = null;
-  const greater = aliveSeats.filter((s) => s > fromSeat).sort((a, b) => a - b);
-  if (greater.length > 0) next = greater[0];
-  else {
-    ctx.state.turn += 1;
-    const wrap = aliveSeats.filter((s) => s !== fromSeat).sort((a, b) => a - b);
-    if (wrap.length > 0) next = wrap[0];
+  if (order.length > 0) {
+    const idx = order.indexOf(fromSeat);
+    if (idx < 0) {
+      // 当前 seat 不在行动顺序（异常/重排边界）：退回数值顺序兜底
+      const greater = order.filter((s) => s > fromSeat);
+      if (greater.length > 0) next = greater[0];
+      else {
+        ctx.state.turn += 1;
+        next = order[0];
+      }
+    } else if (idx === order.length - 1) {
+      ctx.state.turn += 1;
+      next = order.length > 1 ? order[0] : null;
+    } else {
+      next = order[idx + 1];
+    }
   }
   if (next === null) {
     // 无存活势力：记录后由随后的胜利判定收尾（平局）
@@ -459,7 +501,7 @@ function endTurnEvent(ctx: Ctx): void {
   ctx.state.currentSeat = next;
   ctx.state.phase = 'PREPARE';
   ctx.chain.push({ level: 1, kind: 'END_TURN', fromSeat, toSeat: next, turn: ctx.state.turn });
-  if (!hasAliveHumanForce(ctx.state)) {
+  if (!hasAliveHumanForce(ctx.state) && !ctx.state.triggerMode) {
     // 仅剩 AI/无存活人类：轮转无法推进（AI 即时完成回合会死循环），留给胜利判定结束对局
     ctx.state.phase = 'END';
     return;
@@ -473,6 +515,7 @@ function runPreparePhaseContent(ctx: Ctx): void {
   const force = forceOf(ctx.state, seat);
   if (!force || !force.exists || !force.alive) return;
   // a. 连兵数量等量点数
+  trackForce(ctx.stepDirty, ctx.state, seat);
   force.points += linkedCountOf(ctx.state, seat);
   // b. 所有不属于该势力的兵刷新反击为地块值（阻挡兵除外，含野生）
   for (let i = 0; i < ctx.state.tiles.length; i++) {
@@ -494,6 +537,212 @@ function runPreparePhaseContent(ctx: Ctx): void {
   // 由提交方客户端（planAiTurn）以显式意图提交推进（AI 意图入流，回放直接应用记录意图）。
 }
 
+// ---------- 战役触发器效果 ----------
+
+function mergeTileList(a: number[], b: number[]): number[] {
+  return [...new Set([...a, ...b])].sort((x, y) => x - y);
+}
+
+function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
+  switch (effect.op) {
+    case 'spawn_soldier': {
+      const tile = ctx.state.tiles[effect.tile];
+      if (!tile) return;
+      const owner = resolveSpawnForceRef(ctx.state, effect.force);
+      if (owner === null) return;
+      const soldier: SoldierState = {
+        owner,
+        strength: effect.strength,
+        isLinked: effect.linked ?? false,
+        hasMovement: effect.movement ?? false,
+        counter: effect.counter ?? (TERRAIN_PROPS[tile.terrain]?.counter ?? 0),
+      };
+      if (tile.soldier) despawnEvent(ctx, effect.tile);
+      spawnEvent(ctx, effect.tile, soldier);
+      return;
+    }
+    case 'update_soldier': {
+      const tile = ctx.state.tiles[effect.tile];
+      const before = tile?.soldier;
+      if (!tile || !before) return;
+      const p = effect.patch;
+      const patch: Partial<SoldierState> = {};
+      if (p.strength !== undefined) patch.strength = p.strength;
+      if (p.owner !== undefined) patch.owner = p.owner;
+      if (p.linked !== undefined) patch.isLinked = p.linked;
+      if (p.movement !== undefined) patch.hasMovement = p.movement;
+      if (p.counter !== undefined) patch.counter = p.counter;
+      updateEvent(ctx, effect.tile, patch);
+      if (
+        p.owner !== undefined &&
+        p.owner !== before.owner &&
+        isStrongholdTerrain(tile.terrain) &&
+        !isNeutralOwner(before.owner)
+      ) {
+        forceClearEvent(ctx, before.owner, { checkStronghold: true, reason: 'no_stronghold' });
+      }
+      return;
+    }
+    case 'remove_soldier':
+      despawnEvent(ctx, effect.tile);
+      return;
+    case 'set_terrain': {
+      const tile = ctx.state.tiles[effect.tile];
+      if (!tile || tile.terrain === effect.terrain) return;
+      trackTile(ctx.stepDirty, ctx.state, effect.tile);
+      const from = tile.terrain;
+      const to = effect.terrain;
+      const wasStronghold = isStrongholdTerrain(from);
+      if (isFullBreak(to) && tile.soldier) despawnEvent(ctx, effect.tile);
+      ctx.state.tiles[effect.tile].terrain = to;
+      ctx.chain.push({ level: 5, kind: 'TERRAIN_CHANGE', tile: effect.tile, from, to });
+      const soldier = ctx.state.tiles[effect.tile].soldier;
+      if (soldier) {
+        const conn = TERRAIN_PROPS[to]?.connectivity;
+        if (conn === 'FULL_LINK') {
+          if (!soldier.isLinked) updateEvent(ctx, effect.tile, { isLinked: true });
+          else rejoinEvent(ctx, effect.tile);
+        } else if (conn === 'HALF') {
+          if (soldier.isLinked) updateEvent(ctx, effect.tile, { isLinked: false });
+        } else if (conn === 'NORMAL' && soldier.isLinked) {
+          rejoinEvent(ctx, effect.tile);
+        }
+      }
+      if (wasStronghold && !isStrongholdTerrain(to) && soldier && !isNeutralOwner(soldier.owner)) {
+        forceClearEvent(ctx, soldier.owner, { checkStronghold: true, reason: 'no_stronghold' });
+      }
+      return;
+    }
+    case 'update_force': {
+      const seat = resolveForceRef(ctx.state, effect.force);
+      if (seat === null) return;
+      const f = forceOf(ctx.state, seat);
+      if (!f) return;
+      trackForce(ctx.stepDirty, ctx.state, seat);
+      const p = effect.patch;
+      if (p.name !== undefined) f.name = p.name;
+      if (p.flag !== undefined) f.flag = p.flag;
+      if (p.team !== undefined) f.team = p.team;
+      if (p.points !== undefined) f.points = p.points;
+      if (p.computer !== undefined) f.computer = p.computer;
+      ctx.chain.push({ level: 5, kind: 'FORCE_UPDATE', seat, patch: { ...p } });
+      return;
+    }
+    case 'clear_force': {
+      const seat = resolveForceRef(ctx.state, effect.force);
+      if (seat === null) return;
+      forceClearEvent(ctx, seat, { checkStronghold: false, reason: 'trigger' });
+      return;
+    }
+    case 'transfer_control': {
+      const toSeat = resolveForceRef(ctx.state, effect.to_force);
+      if (toSeat === null) return;
+      const next = forceOf(ctx.state, toSeat);
+      if (!next || !next.exists || !next.alive || ctx.state.humanPlayerId === null) return;
+      const fromSeat = ctx.state.controlledSeat;
+      const prev = fromSeat !== null ? forceOf(ctx.state, fromSeat) : undefined;
+      if (prev && prev.seat !== next.seat) {
+        trackForce(ctx.stepDirty, ctx.state, prev.seat);
+        prev.isAI = true;
+        prev.playerId = null;
+        prev.computer = effect.ai_level;
+      }
+      trackForce(ctx.stepDirty, ctx.state, next.seat);
+      next.isAI = false;
+      next.playerId = ctx.state.humanPlayerId;
+      ctx.state.controlledSeat = next.seat;
+      ctx.chain.push({
+        level: 5,
+        kind: 'CONTROL_CHANGE',
+        fromSeat,
+        toSeat: next.seat,
+        aiLevel: effect.ai_level,
+      });
+      return;
+    }
+    case 'set_turn_order':
+      ctx.state.turnOrder = [...effect.order];
+      ctx.chain.push({ level: 5, kind: 'TURN_ORDER_CHANGE', order: [...effect.order] });
+      return;
+    case 'set_fog': {
+      const cur = ctx.state.fogOverrides ?? { revealed: [], hidden: [] };
+      const next = {
+        enabled: effect.enabled ?? cur.enabled,
+        revealed: mergeTileList(cur.revealed, effect.reveal ?? []),
+        hidden: mergeTileList(cur.hidden, effect.hide ?? []),
+      };
+      ctx.state.fogOverrides = next;
+      ctx.chain.push({
+        level: 5,
+        kind: 'FOG_CHANGE',
+        overrides: { ...next, revealed: [...next.revealed], hidden: [...next.hidden] },
+      });
+      return;
+    }
+    case 'show_text':
+      ctx.chain.push({
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: effect.text_id,
+        text: effect.text,
+        placement: effect.placement ?? { kind: 'screen', position: 'top-right' },
+      });
+      return;
+    case 'hide_text':
+      ctx.chain.push({ level: 5, kind: 'TRIGGER_TEXT_HIDE', textId: effect.text_id });
+      return;
+    case 'end_game': {
+      if (ctx.state.finished) return;
+      const winners: string[] = [];
+      const losers: string[] = [];
+      for (const f of ctx.state.forces) {
+        if (!f.exists || f.playerId === null) continue;
+        if (f.team === effect.winning_team) winners.push(String(f.playerId));
+        else losers.push(String(f.playerId));
+      }
+      ctx.state.finished = true;
+      ctx.state.winners = winners;
+      ctx.state.winningTeam = effect.winning_team;
+      ctx.chain.push({ level: 4, kind: 'VICTORY', winningTeam: effect.winning_team, winners, losers });
+      ctx.consensus.push({
+        payload: { kind: 'VICTORY', winningTeam: effect.winning_team, winners, losers },
+        nodeSeat: 0,
+      });
+      return;
+    }
+  }
+}
+
+function makeTriggerExecutor(ctx: Ctx): TriggerExecutor {
+  return {
+    execute(trigger) {
+      const before = ctx.state;
+      resetStepDirty(ctx.stepDirty);
+      for (const effect of trigger.effects) applyTriggerEffect(ctx, effect);
+      return takeDelta(ctx.stepDirty, ctx.state, before);
+    },
+  };
+}
+
+/** 成功意图的收尾：triggerMode 下跑触发器事务，再返回 ok */
+function finishIntent(ctx: Ctx, beforeState: GameState, actor: Actor): ApplyResult {
+  const s = ctx.state;
+  if (s.triggerMode && s.triggerRuntime) {
+    const intentDelta = takeDelta(ctx.stepDirty, s, beforeState);
+    runTriggerTransaction({
+      state: s,
+      chain: ctx.chain,
+      intentDelta,
+      human: actor.kind === 'PLAYER',
+      transitionCursor: { turn: beforeState.turn, seat: beforeState.currentSeat, phase: beforeState.phase },
+      executor: makeTriggerExecutor(ctx),
+    });
+    // 触发器可能已完成控制转移或改写队伍：事务末尾统一判定胜负
+    victoryJudgeEvent(ctx);
+  }
+  return ok(ctx);
+}
+
 // ---------- 意图入口（P5 契约 §11.2） ----------
 
 export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyResult {
@@ -503,11 +752,14 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
     geo: { rows: state.rows, columns: state.columns, cylindrical: state.cylindrical },
     chain: [],
     consensus: [],
+    stepDirty: createStepDirty(state.triggerMode),
+    triggers: state.triggers,
   };
   const { actor, intent } = envelope;
   const s = ctx.state;
   const inBounds = (i: number) => i >= 0 && i < s.tiles.length;
-  const actorIsCurrent = actor.kind === 'PLAYER' && actor.seat === s.currentSeat;
+  const actorIsCurrent =
+    (actor.kind === 'PLAYER' || actor.kind === 'AI') && actor.seat === s.currentSeat;
 
   switch (intent.intentType) {
     case 'MOVE':
@@ -526,13 +778,13 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       if (!isAttack && target && !sameTeam(s, origin.owner, target.owner)) {
         // §8.1.1 第 5 条：目标有非同队兵 → 转进攻
         const executed = attackEventCore(ctx, intent.from, intent.to);
-        return executed ? ok(ctx) : reject(state, 'ILLEGAL_ATTACK');
+        return executed ? finishIntent(ctx, state, actor) : reject(state, 'ILLEGAL_ATTACK');
       }
       if (target && sameTeam(s, origin.owner, target.owner)) return reject(state, illegal);
       if (!target && isAttack) return reject(state, illegal);
       if (hexDistance(intent.from, intent.to, ctx.geo) > maxDist) return reject(state, illegal);
       const executed = isAttack ? attackEventCore(ctx, intent.from, intent.to) : moveEventCore(ctx, intent.from, intent.to);
-      return executed ? ok(ctx) : reject(state, illegal);
+      return executed ? finishIntent(ctx, state, actor) : reject(state, illegal);
     }
     case 'ADD_POINT': {
       if (!actorIsCurrent) return reject(state, 'NOT_YOUR_TURN');
@@ -546,21 +798,23 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       if (force.points < intent.amount) return reject(state, 'NO_POINTS');
       ctx.chain.push({ level: 1, kind: 'ADD_POINT', seat: s.currentSeat, coordinate: intent.coordinate, amount: intent.amount });
       updateEvent(ctx, intent.coordinate, { strength: target.strength + intent.amount });
+      trackForce(ctx.stepDirty, ctx.state, s.currentSeat);
       force.points -= intent.amount;
       // 点数耗尽后是否结束回合由前端/AI 驱动以显式 SWITCH_PHASE 发起（reducer 不自动切阶段）
-      return ok(ctx);
+      return finishIntent(ctx, state, actor);
     }
     case 'SWITCH_PHASE': {
       if (!actorIsCurrent) return reject(state, 'NOT_YOUR_TURN');
       if (s.phase !== 'ACTION' && s.phase !== 'ADD_POINT') return reject(state, 'WRONG_PHASE');
       switchPhaseEventCore(ctx);
-      return ok(ctx);
+      return finishIntent(ctx, state, actor);
     }
     case 'SURRENDER': {
       const force = forceOf(s, intent.seat);
       if (!force || !force.exists) return reject(state, 'SEAT_CLEARED');
       if (!force.alive) return reject(state, 'SEAT_CLEARED');
       const reason = intent.reason ?? 'voluntary';
+      if (actor.kind === 'AI') return reject(state, 'NOT_YOUR_TURN'); // AI 不主动投降
       if (actor.kind === 'PLAYER') {
         if (intent.seat !== actor.seat) return reject(state, 'NOT_YOUR_TURN'); // 玩家只能投降自己
       } else if (reason !== 'timeout') {
@@ -571,7 +825,7 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
         checkStronghold: false,
         reason: reason === 'timeout' ? 'timeout' : 'surrender',
       });
-      return ok(ctx);
+      return finishIntent(ctx, state, actor);
     }
   }
 }
@@ -619,6 +873,11 @@ export function initState(input: InitStateInput): InitStateResult {
         : null;
     return { terrain, soldier };
   });
+  const hasTriggers = (map.triggers?.length ?? 0) > 0;
+  const triggerMode = input.triggerMode === true && hasTriggers;
+  const initialHuman = seatAssignments.find((a) => a.playerId !== null) ?? null;
+  const controlledSeat = triggerMode ? (input.controlledSeat ?? initialHuman?.seat ?? null) : null;
+  const humanPlayerId = triggerMode ? (input.humanPlayerId ?? initialHuman?.playerId ?? null) : null;
   const state: GameState = {
     rows: map.row,
     columns: map.column,
@@ -633,12 +892,31 @@ export function initState(input: InitStateInput): InitStateResult {
     finished: false,
     winners: null,
     winningTeam: null,
+    triggerMode,
+    triggerRuntime: triggerMode
+      ? {
+          schemaVersion: 1,
+          firedCounts: {},
+          pending: [],
+          intentSeq: 0,
+          turnSeq: 0,
+          nextSerial: 1,
+          transactionSeq: 0,
+        }
+      : null,
+    controlledSeat,
+    humanPlayerId,
+    turnOrder: [],
+    fogOverrides: null,
+    triggers: map.triggers ? [...map.triggers] : [],
   };
   const ctx: Ctx = {
     state,
     geo: { rows: map.row, columns: map.column, cylindrical: map.cylindrical_map },
     chain: [],
     consensus: [],
+    stepDirty: createStepDirty(triggerMode),
+    triggers: state.triggers,
   };
   ctx.chain.push({ level: 1, kind: 'INIT' });
 
@@ -663,8 +941,11 @@ export function initState(input: InitStateInput): InitStateResult {
     }
   }
 
-  // 回合起点：座次最小的存在势力；无任何存在势力 → 直接终局（空局）
-  const startSeat = forces.filter((f) => f.exists).map((f) => f.seat).sort((a, b) => a - b)[0];
+  // 行动顺序：默认按 seat 升序（战役触发器可重排）；普通对局与既有行为一致
+  state.turnOrder = forces.filter((f) => f.exists).map((f) => f.seat).sort((a, b) => a - b);
+
+  // 回合起点：行动顺序首个存在势力；无任何存在势力 → 直接终局（空局）
+  const startSeat = state.turnOrder[0];
   if (startSeat === undefined) {
     state.finished = true;
     state.winners = [];
@@ -673,5 +954,17 @@ export function initState(input: InitStateInput): InitStateResult {
   }
   state.currentSeat = startSeat;
   runPreparePhaseContent(ctx);
+  if (state.triggerMode && state.triggerRuntime && state.triggers.length > 0 && !state.finished) {
+    runTriggerTransaction({
+      state,
+      chain: ctx.chain,
+      intentDelta: { before: state, after: state, tiles: [], forces: [] },
+      human: false,
+      init: true,
+      transitionCursor: { turn: 1, seat: startSeat, phase: 'PREPARE' },
+      executor: makeTriggerExecutor(ctx),
+    });
+    victoryJudgeEvent(ctx);
+  }
   return { state, chain: ctx.chain };
 }

@@ -81,6 +81,49 @@ const MapValidate = (() => {
     if (soldierOnBroken > 0) issues.push({ level: 'warn', text: `${soldierOnBroken} 个山地/虚空格存在兵力（应无兵）` });
     if (soldierOnEmpty > 0) issues.push({ level: 'warn', text: `${soldierOnEmpty} 个无主格存在兵力（应 0）` });
 
+    // 战役触发器：完整坐标/势力/引用校验由 shared validateMapData 负责；这里拦截明显结构错误
+    if (m.triggers !== undefined) {
+      if (!Array.isArray(m.triggers)) {
+        issues.push({ level: 'error', text: 'triggers 必须为数组' });
+      } else if (m.triggers.length > 0) {
+        const ids = new Set();
+        m.triggers.forEach((t, i) => {
+          if (!t || typeof t !== 'object') {
+            issues.push({ level: 'error', text: `触发器 ${i + 1}：必须为对象` });
+            return;
+          }
+          if (typeof t.id !== 'string' || t.id.length === 0) {
+            issues.push({ level: 'error', text: `触发器 ${i + 1}：id 必须为非空字符串` });
+          } else if (ids.has(t.id)) {
+            issues.push({ level: 'error', text: `触发器 ${i + 1}：id=${t.id} 重复` });
+          } else {
+            ids.add(t.id);
+          }
+          if (t.class !== 'action' && t.class !== 'world') {
+            issues.push({ level: 'error', text: `触发器 ${i + 1}：class 须为 action/world` });
+          }
+          if (!t.when || typeof t.when !== 'object') {
+            issues.push({ level: 'error', text: `触发器 ${i + 1}：缺少 when` });
+          }
+          if (!Array.isArray(t.effects) || t.effects.length === 0) {
+            issues.push({ level: 'error', text: `触发器 ${i + 1}：effects 须为非空数组` });
+          }
+          if (t.delay !== undefined) {
+            const d = t.delay;
+            if (
+              !d ||
+              !Number.isInteger(d.amount) ||
+              d.amount <= 0 ||
+              (d.unit !== 'intent' && d.unit !== 'turn' && d.unit !== 'round')
+            ) {
+              issues.push({ level: 'error', text: `触发器 ${i + 1}：delay 非法` });
+            }
+          }
+        });
+        issues.push({ level: 'warn', text: `该地图包含 ${m.triggers.length} 个触发器；仅战役模式会执行` });
+      }
+    }
+
     return issues;
   }
 

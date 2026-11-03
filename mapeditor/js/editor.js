@@ -28,6 +28,14 @@ const Editor = (() => {
   function onUI(fn) { _ui.add(fn); return () => _ui.delete(fn); }
   function refreshCanvas() { _canvas.forEach((fn) => fn(state)); }
   function refreshUI() { _ui.forEach((fn) => fn(state)); }
+
+  /** 含触发器的地图做结构性编辑前提醒：tile/seat 引用可能失效 */
+  function confirmStructuralEdit(map, action) {
+    if (!map || !Array.isArray(map.triggers) || map.triggers.length === 0) return true;
+    return window.confirm(
+      `该地图包含 ${map.triggers.length} 个触发器。${action}会改变地块坐标或势力编号，可能使触发器引用失效。仍要继续吗？`,
+    );
+  }
   function getState() { return state; }
 
   function setMap(map, id) {
@@ -121,6 +129,7 @@ const Editor = (() => {
   // ---------- 批量操作 ----------
   function resize(delta) {
     if (!state.map) return;
+    if (!confirmStructuralEdit(state.map, '调整行列')) return;
     pushUndo();
     MapData.resizeMap(state.map, delta);
     refreshCanvas();
@@ -135,6 +144,7 @@ const Editor = (() => {
 
   function addPlayer() {
     if (!state.map) return;
+    if (!confirmStructuralEdit(state.map, '新增势力')) return;
     pushUndo();
     MapData.addPlayer(state.map);
     refreshCanvas();
@@ -143,6 +153,7 @@ const Editor = (() => {
 
   function removePlayer(seat) {
     if (!state.map) return;
+    if (!confirmStructuralEdit(state.map, '删除势力')) return;
     pushUndo();
     MapData.removePlayer(state.map, seat);
     refreshCanvas();
@@ -152,6 +163,7 @@ const Editor = (() => {
   /** 调整势力座次（供拖动手柄使用；调用方负责先 pushUndo 一次） */
   function moveSeat(seat, target) {
     if (!state.map) return;
+    if (!confirmStructuralEdit(state.map, '调整势力座次')) return;
     MapData.movePlayerSeat(state.map, seat, target);
     refreshCanvas();
     refreshUI();

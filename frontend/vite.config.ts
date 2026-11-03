@@ -12,7 +12,8 @@ export default defineConfig({
     },
   },
   define: {
-    __DL_REDUCER_VERSION__: JSON.stringify(process.env.DL_REDUCER_VERSION ?? 'dev-0.1.0'),
+    // 与 shared 的 REDUCER_VERSION 默认值对齐；环境变量为空时让 shared 回退默认值
+    'globalThis.__DL_REDUCER_VERSION__': JSON.stringify(process.env.DL_REDUCER_VERSION ?? ''),
   },
   server: {
     host: '0.0.0.0',      // 允许公网访问（浏览器要能连进来）

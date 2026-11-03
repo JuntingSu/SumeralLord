@@ -160,7 +160,7 @@ export class AiBot {
       this.replayFromLog();
       return;
     }
-    const r = applyIntent(this.board, { actor: { kind: 'PLAYER', seat: fromSeat }, intent });
+    const r = applyIntent(this.board, { actor: { kind: 'AI', seat: fromSeat }, intent });
     this.appliedEventId = eventId;
     if (r.ok) this.board = r.state;
     else this.log(`意图被拒绝（${r.reason}）：${JSON.stringify(intent)}`);

@@ -82,7 +82,7 @@ function isAttackableTarget(state: GameState, seat: number, targetOwner: number)
 
 function applyOne(ctx: Ctx, state: GameState, intent: PlayerIntent): GameState | null {
   ctx.applies++;
-  const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: ctx.seat }, intent });
+  const r = applyIntent(state, { actor: { kind: 'AI', seat: ctx.seat }, intent });
   return r.ok ? r.state : null;
 }
 

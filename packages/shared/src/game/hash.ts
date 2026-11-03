@@ -33,6 +33,30 @@ export function hashGameState(state: GameState): string {
     winningTeam: state.winningTeam,
     forces: state.forces.map((f) => [f.seat, f.team, f.playerId, f.isAI, f.exists, f.alive, f.points]),
     tiles: state.tiles.map((t) => (t.soldier ? [t.terrain, t.soldier.owner, t.soldier.strength, t.soldier.isLinked ? 1 : 0, t.soldier.hasMovement ? 1 : 0, t.soldier.counter] : [t.terrain, -1])),
+    triggerMode: state.triggerMode,
+    triggers: state.triggers,
+    turnOrder: [...state.turnOrder],
+    controlledSeat: state.controlledSeat,
+    humanPlayerId: state.humanPlayerId,
+    triggerRuntime: state.triggerRuntime
+      ? {
+          intentSeq: state.triggerRuntime.intentSeq,
+          turnSeq: state.triggerRuntime.turnSeq,
+          nextSerial: state.triggerRuntime.nextSerial,
+          transactionSeq: state.triggerRuntime.transactionSeq,
+          firedCounts: state.triggerRuntime.firedCounts,
+          pending: [...state.triggerRuntime.pending]
+            .sort((a, b) => a.serial - b.serial)
+            .map((p) => [p.triggerId, p.serial, p.dueIntentSeq ?? -1, p.dueTurnSeq ?? -1, p.dueRound ?? -1]),
+        }
+      : null,
+    fogOverrides: state.fogOverrides
+      ? {
+          enabled: state.fogOverrides.enabled ?? null,
+          revealed: [...state.fogOverrides.revealed].sort((a, b) => a - b),
+          hidden: [...state.fogOverrides.hidden].sort((a, b) => a - b),
+        }
+      : null,
   };
   return fnv1a(stableStringify(core));
 }

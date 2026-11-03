@@ -61,16 +61,15 @@ export default function ModeSelect() {
             </span>
           </Link>
 
-          <div className={`${CARD} cursor-not-allowed opacity-50`} aria-disabled="true" title="开发中">
+          <Link to="/campaign" className={`${CARD} hover:border-amber-500 hover:bg-slate-700`}>
             <span className="text-3xl" aria-hidden="true">🗺️</span>
             <span>
-              <span className="flex items-center gap-2 text-lg font-semibold">
-                战役模式
-                <span className="rounded bg-slate-700 px-2 py-0.5 text-xs font-normal text-slate-400">开发中</span>
+              <span className="block text-lg font-semibold">战役模式</span>
+              <span className="mt-1 block text-sm text-slate-400">
+                带触发器的剧本战役，按地图事件推进
               </span>
-              <span className="mt-1 block text-sm text-slate-400">后续开发内容，敬请期待</span>
             </span>
-          </div>
+          </Link>
 
           <a href="/mapeditor/?embed=1" className={`${CARD} hover:border-emerald-500 hover:bg-slate-700`}>
             <span className="text-3xl" aria-hidden="true">🧱</span>

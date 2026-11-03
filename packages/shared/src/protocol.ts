@@ -280,7 +280,7 @@ export const ConsensusPayloadSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('FORCE_CLEAR'),
     seat: z.number().int().positive(),
-    reason: z.enum(['no_stronghold', 'surrender', 'timeout']),
+    reason: z.enum(['no_stronghold', 'surrender', 'timeout', 'trigger']),
   }),
   z.object({
     kind: z.literal('VICTORY'),

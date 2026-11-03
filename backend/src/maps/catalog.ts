@@ -109,6 +109,7 @@ export class MapCatalog {
           row: m.row,
           column: m.column,
           tags: m.tags,
+          hasTriggers: Array.isArray(m.triggers) && m.triggers.length > 0,
         };
         next.set(id, meta);
         nextCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, meta });

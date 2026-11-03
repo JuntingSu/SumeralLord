@@ -46,7 +46,7 @@ describe('planAiTurn：难度分派', () => {
     // 逐步应用计划（模拟与真实应用共用同一 reducer）：全部可执行
     let cur = state;
     for (const intent of plan.intents) {
-      const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat: 1 }, intent });
+      const r = applyIntent(cur, { actor: { kind: 'AI', seat: 1 }, intent });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       cur = r.state;
@@ -55,7 +55,7 @@ describe('planAiTurn：难度分派', () => {
     expect(cur.currentSeat).toBe(1);
     expect(cur.phase).toBe('ADD_POINT');
     expect(cur.forces.find((f) => f.seat === 1)!.points).toBe(0);
-    const end = applyIntent(cur, { actor: { kind: 'PLAYER', seat: 1 }, intent: { intentType: 'SWITCH_PHASE' } });
+    const end = applyIntent(cur, { actor: { kind: 'AI', seat: 1 }, intent: { intentType: 'SWITCH_PHASE' } });
     expect(end.ok).toBe(true);
     if (!end.ok) return;
     expect(end.state.currentSeat).toBe(2);

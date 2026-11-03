@@ -1,6 +1,7 @@
 // 对局核心类型：GameState / 事件（四级）/ reducer 契约（规则 v2 §11）
 import type { PlayerIntent, ConsensusPayload } from '../protocol.js';
 import type { MapFullData, RoomTimeSettings } from '../types.js';
+import type { TextPlacement, TriggerDef, TriggerRuntime } from './trigger/types.js';
 
 /** 回合四阶段（§6.1）。PREPARE/END 为自动阶段，静止态只会是 ACTION / ADD_POINT */
 export type Phase = 'PREPARE' | 'ACTION' | 'ADD_POINT' | 'END';
@@ -59,6 +60,20 @@ export interface GameState {
   /** 获胜玩家 playerId 字符串（对局结束后有效） */
   winners: string[] | null;
   winningTeam: number | null;
+  /** 战役模式开关；普通对局 false，行为与既有规则完全一致 */
+  triggerMode: boolean;
+  /** 触发器运行态；普通对局 null */
+  triggerRuntime: TriggerRuntime | null;
+  /** 玩家当前扮演的势力；普通对局 null */
+  controlledSeat: number | null;
+  /** 玩家 userId，用于控制转移写入 playerId；普通对局 null */
+  humanPlayerId: number | null;
+  /** 势力行动顺序；普通对局为存在势力 seat 升序 */
+  turnOrder: number[];
+  /** 迷雾覆盖（战役触发器可改）；普通对局 null */
+  fogOverrides: { enabled?: boolean; revealed: number[]; hidden: number[] } | null;
+  /** 地图触发器定义（普通对局空数组）；执行受 triggerMode 控制 */
+  triggers: TriggerDef[];
 }
 
 // ---------- 事件（§7 四级全集） ----------
@@ -82,13 +97,30 @@ export type GameEvent =
   | { level: 3; kind: 'BREAK'; tile: number; branches: number[] }
   // 四级
   | { level: 4; kind: 'BREAK_JUDGE'; tile: number; connected: boolean; region: number[] }
-  | { level: 4; kind: 'FORCE_CLEAR'; seat: number; reason: 'no_stronghold' | 'surrender' | 'timeout' }
-  | { level: 4; kind: 'VICTORY'; winningTeam: number; winners: string[]; losers: string[] };
+  | { level: 4; kind: 'FORCE_CLEAR'; seat: number; reason: 'no_stronghold' | 'surrender' | 'timeout' | 'trigger' }
+  | { level: 4; kind: 'VICTORY'; winningTeam: number; winners: string[]; losers: string[] }
+  // 五级：触发器系统（棋盘变化仍走二级/四级事件，以下用于 UI/日志/控制流）
+  | { level: 5; kind: 'TRIGGER_FIRE'; triggerId: string }
+  | { level: 5; kind: 'TRIGGER_TEXT_SHOW'; textId: string; text: string; placement?: TextPlacement }
+  | { level: 5; kind: 'TRIGGER_TEXT_HIDE'; textId: string }
+  | { level: 5; kind: 'TERRAIN_CHANGE'; tile: number; from: number; to: number }
+  | { level: 5; kind: 'FORCE_UPDATE'; seat: number; patch: Record<string, unknown> }
+  | { level: 5; kind: 'CONTROL_CHANGE'; fromSeat: number | null; toSeat: number; aiLevel: number }
+  | { level: 5; kind: 'TURN_ORDER_CHANGE'; order: number[] }
+  | {
+      level: 5;
+      kind: 'FOG_CHANGE';
+      overrides: { enabled?: boolean; revealed: number[]; hidden: number[] } | null;
+    }
+  | { level: 5; kind: 'TRIGGER_OVERFLOW'; transactionSeq: number };
 
 // ---------- reducer 契约（P5，§11.2） ----------
 
-/** 意图来源：玩家（校验归属）或服务器（断线超时代发投降专用） */
-export type Actor = { kind: 'PLAYER'; seat: number } | { kind: 'SERVER' };
+/** 意图来源：玩家、AI 规划/托管或服务器（断线超时代发投降专用） */
+export type Actor =
+  | { kind: 'PLAYER'; seat: number }
+  | { kind: 'AI'; seat: number }
+  | { kind: 'SERVER' };
 
 export interface IntentEnvelope {
   actor: Actor;
@@ -139,6 +171,12 @@ export interface InitStateInput {
   /** 恒等映射（randomSpawn 洗玩家分配而非出生点，2026-08-16 拍板）；reducer 仅透传签名，不参与演算 */
   spawnAssignments?: SpawnAssignment[];
   timeSettings: RoomTimeSettings;
+  /** 战役触发器模式；缺省 false（普通对局） */
+  triggerMode?: boolean;
+  /** 战役玩家当前扮演势力；缺省取 seatAssignments 中的真人势力 */
+  controlledSeat?: number;
+  /** 战役玩家 userId；控制转移写入 playerId 用 */
+  humanPlayerId?: number;
 }
 
 export interface InitStateResult {

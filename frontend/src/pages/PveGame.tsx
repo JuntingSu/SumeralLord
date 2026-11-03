@@ -24,6 +24,7 @@ import { flagImgUrl } from '../lib/flags';
 import { useNarrowScreen } from '../lib/useNarrowScreen';
 import { shouldAutoSkipPhase } from '../game/dim';
 import BoardCanvas, { INITIAL_TILE_WIDTH_PX, type BoardCanvasHandle } from '../components/BoardCanvas';
+import { TriggerScreenTexts, TriggerTileBubbles } from '../components/TriggerTextOverlay';
 import PveResultModal from '../components/PveResultModal';
 
 const PHASE_LABEL: Record<string, string> = {
@@ -73,6 +74,16 @@ export default function PveGame() {
   const submitting = useGame((s) => s.submitting);
   const systemNotices = useGame((s) => s.systemNotices);
   const phaseAnnouncements = useGame((s) => s.phaseAnnouncements);
+  const triggerTexts = useGame((s) => s.triggerTexts);
+  const dismissTriggerText = useGame((s) => s.dismissTriggerText);
+  const screenTexts = useMemo(
+    () => triggerTexts.filter((t) => t.placement?.kind !== 'tile'),
+    [triggerTexts],
+  );
+  const tileTexts = useMemo(
+    () => triggerTexts.filter((t) => t.placement?.kind === 'tile'),
+    [triggerTexts],
+  );
 
   const [runId, setRunId] = useState(0);
   const [starting, setStarting] = useState(true);
@@ -85,6 +96,11 @@ export default function PveGame() {
   const configRef = useRef<PveGameConfig | null>(null);
   const transportRef = useRef<PveTransport | null>(null);
   const plannerRef = useRef<PveAiPlanner | null>(null);
+  const plannerPromiseRef = useRef<Promise<PveAiPlanner | null> | null>(null);
+  const isCampaignRoute =
+    configRef.current?.campaign === true ||
+    new URLSearchParams(window.location.search).get('campaign') === '1';
+  const roomPath = isCampaignRoute ? '/campaign' : '/pve';
 
   const [selected, setSelected] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -118,7 +134,7 @@ export default function PveGame() {
 
       if (loadRequested) {
         if (!save) {
-          navigate('/pve', { replace: true });
+          navigate(roomPath, { replace: true });
           return;
         }
         config = {
@@ -130,15 +146,16 @@ export default function PveGame() {
           timeSettings: save.state.timeSettings,
           fogMode: save.config.fogMode,
           usePersonalSkin: save.config.usePersonalSkin,
-          playerSeat: save.config.playerSeat,
+          playerSeat: save.state.controlledSeat ?? save.config.playerSeat,
           humanUserId: save.config.humanUserId,
           reducerVersion: save.reducerVersion,
+          campaign: save.config.campaign === true,
         };
         state = structuredClone(save.state);
         if (state.finished) {
           await deletePveSave().catch(() => undefined);
           usePve.getState().clearLoadSave();
-          navigate('/pve', { replace: true });
+          navigate(roomPath, { replace: true });
           return;
         }
         if (save.reducerVersion !== reducerVersion()) {
@@ -148,7 +165,7 @@ export default function PveGame() {
         }
       } else {
         if (!lastGame) {
-          navigate('/pve', { replace: true });
+          navigate(roomPath, { replace: true });
           return;
         }
         config = lastGame;
@@ -157,6 +174,9 @@ export default function PveGame() {
           seatAssignments: config.seatAssignments,
           seed: config.seed,
           timeSettings: config.timeSettings,
+          triggerMode: config.campaign === true,
+          controlledSeat: config.playerSeat,
+          humanPlayerId: config.humanUserId,
         });
         state = structuredClone(init.state);
         chain = init.chain;
@@ -199,10 +219,36 @@ export default function PveGame() {
       plannerRef.current = planner;
       usePve.getState().setLastGame(activeConfig);
 
+      const ensurePlanner = async (): Promise<
+        ((s: GameState, seat: number) => Promise<PlayerIntent[]>) | null
+      > => {
+        if (plannerRef.current) return plannerRef.current.plan;
+        if (!plannerPromiseRef.current) {
+          plannerPromiseRef.current = (async () => {
+            const weights = await getPveWeights();
+            const created = await createMctsPlanner(weights.weights);
+            if (disposed) {
+              created.dispose();
+              return null;
+            }
+            plannerRef.current = created;
+            return created;
+          })().catch((err: unknown) => {
+            plannerPromiseRef.current = null;
+            throw err;
+          });
+        }
+        const created = await plannerPromiseRef.current;
+        return created?.plan ?? null;
+      };
+
       const transport = new PveTransport({
         config: activeConfig,
         initialState: state,
         onPlanMcts: planner?.plan,
+        ensurePlanner,
+        onAiFallback: (_seat, reason) =>
+          setAiWarning(`普通 AI 不可用，已降级为简单 AI（${reason}）`),
         onThinking: setAiThinking,
       });
       transportRef.current = transport;
@@ -254,6 +300,7 @@ export default function PveGame() {
       transportRef.current = null;
       plannerRef.current?.dispose();
       plannerRef.current = null;
+      plannerPromiseRef.current = null;
       useGame.getState().reset();
       setAiThinking(false);
     };
@@ -352,13 +399,39 @@ export default function PveGame() {
   }, [board, mySeat]);
   const fogLevels: FogLevel[] | null = useMemo(() => {
     if (!board) return null;
-    return computeFog(board.rows, board.columns, board.cylindrical, mySoldierTiles, fogEnabled, exploredMemo).levels;
+    return computeFog(
+      board.rows,
+      board.columns,
+      board.cylindrical,
+      mySoldierTiles,
+      fogEnabled,
+      exploredMemo,
+      board.fogOverrides,
+    ).levels;
   }, [board, mySoldierTiles, fogEnabled, exploredMemo]);
   useEffect(() => {
     if (!board) return;
-    const { explored } = computeFog(board.rows, board.columns, board.cylindrical, mySoldierTiles, fogEnabled, exploredMemo);
+    const { explored } = computeFog(
+      board.rows,
+      board.columns,
+      board.cylindrical,
+      mySoldierTiles,
+      fogEnabled,
+      exploredMemo,
+      board.fogOverrides,
+    );
     setExploredMemo(explored);
   }, [board, mySoldierTiles, fogEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 控制转移后重置迷雾记忆与选中态（旧势力的探索记忆不属于新势力）
+  const prevMySeatRef = useRef<number | null>(mySeat);
+  useEffect(() => {
+    if (prevMySeatRef.current === mySeat) return;
+    prevMySeatRef.current = mySeat;
+    setExploredMemo(new Set());
+    setSelected(null);
+    setHovered(null);
+  }, [mySeat]);
 
   // ---------- 意图交互 ----------
   const handleTileClick = useCallback(
@@ -506,7 +579,7 @@ export default function PveGame() {
     try {
       const snap = transport.snapshot();
       const payload: PveSavePayload = {
-        version: 2,
+        version: 3,
         gameId: config.gameId,
         reducerVersion: config.reducerVersion,
         savedAt: Date.now(),
@@ -517,8 +590,9 @@ export default function PveGame() {
           seatAssignments: config.seatAssignments,
           fogMode: config.fogMode,
           usePersonalSkin: config.usePersonalSkin,
-          playerSeat: config.playerSeat,
+          playerSeat: snap.state.controlledSeat ?? config.playerSeat,
           humanUserId: config.humanUserId,
+          campaign: config.campaign === true,
         },
         meta: snap.meta,
       };
@@ -547,7 +621,7 @@ export default function PveGame() {
 
   const handleExit = () => {
     if (!window.confirm('退出对局？未存档的进度将丢失。')) return;
-    clearLoadAndNavigate('/pve');
+    clearLoadAndNavigate(roomPath);
   };
 
   const handleNewGame = () => {
@@ -566,7 +640,7 @@ export default function PveGame() {
     const next: PveGameConfig = { ...base, gameId: `pve-${randomToken(8)}`, seed: randomToken(16) };
     usePve.getState().setLoadSave(null);
     usePve.getState().setLastGame(next);
-    navigate('/pve/game', { replace: true });
+    navigate(next.campaign ? '/pve/game?campaign=1' : '/pve/game', { replace: true });
     setRunId((n) => n + 1);
   };
 
@@ -582,8 +656,8 @@ export default function PveGame() {
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-900 text-slate-400">
         <p>{startError ?? (starting ? '对局加载中…' : '对局加载中…')}</p>
         {startError && (
-          <button onClick={() => navigate('/pve')} className="rounded bg-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
-            返回 PVE 房间
+          <button onClick={() => navigate(roomPath)} className="rounded bg-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
+            返回房间
           </button>
         )}
       </div>
@@ -629,6 +703,8 @@ export default function PveGame() {
           </button>
         </div>
       </header>
+
+      <TriggerScreenTexts texts={screenTexts} onDismiss={dismissTriggerText} />
 
       {aiWarning && (
         <div className="mx-3 mt-2 rounded bg-amber-900/40 px-3 py-2 text-sm text-amber-200 sm:mx-6">{aiWarning}</div>
@@ -838,6 +914,14 @@ export default function PveGame() {
             onTilePointerUp={stopAddPoint}
             animatorRef={animatorRef}
             className="h-full w-full"
+            overlay={({ tileScreenPosition, viewport }) => (
+              <TriggerTileBubbles
+                texts={tileTexts}
+                positionOf={tileScreenPosition}
+                viewport={viewport}
+                onDismiss={dismissTriggerText}
+              />
+            )}
           />
 
           {/* 桌面：悔棋（灰）+ 结束行动/加点（靛蓝）同一行 */}
@@ -943,7 +1027,7 @@ export default function PveGame() {
           board={board}
           humanUserId={configRef.current?.humanUserId ?? user?.id ?? 0}
           onNewGame={handleNewGame}
-          onBackRoom={() => clearLoadAndNavigate('/pve')}
+          onBackRoom={() => clearLoadAndNavigate(roomPath)}
           onBackModes={() => clearLoadAndNavigate('/modes')}
         />
       )}
@@ -954,10 +1038,10 @@ export default function PveGame() {
             <h2 className="text-xl font-bold text-red-400">对局异常</h2>
             <p className="mt-3 text-sm text-slate-300">{fatal.message}</p>
             <button
-              onClick={() => clearLoadAndNavigate('/pve')}
+              onClick={() => clearLoadAndNavigate(roomPath)}
               className="mt-5 rounded bg-slate-600 px-5 py-2 text-sm font-medium text-white hover:bg-slate-500"
             >
-              返回 PVE 房间
+              返回房间
             </button>
           </div>
         </div>
