@@ -104,8 +104,8 @@ function parseLegacy(bytes: Uint8Array): LegacyMap {
   const author = r.readstr();
   const timestamp = timestickToDate(r.readint(8));
   const player_num = num(r.readint(4));
-  const row = num(r.readint(4));
   const column = num(r.readint(4));
+  const row = num(r.readint(4));
   if (player_num > 127 || row > 1000 || column > 1000) throw new Error('地图码数据损坏：规模参数异常');
   r.skip(4);
   const cylindrical_map = r.readint(1) === 1;

@@ -2,7 +2,7 @@
  * mapcode.js — 从地图码（旧版地图编辑器 base64 格式）导入地图
  *
  * 地图码 = base64(zlib(二进制))，二进制结构与 mapeditor-release/mapeditor/b64coder.py 一致：
- *   version(4) title(串) desc(串) author(串) timestamp(8) player_num(4) row(4) column(4)
+ *   version(4) title(串) desc(串) author(串) timestamp(8) player_num(4) column(4) row(4)
  *   skip(4) cylindrical(1) random_spawn(1) skip(1) star_3(1) star_2(1) star(1) skip(4)
  *   area(4) 每格 [terrain(1) owner(1) strength(1) skip(1)] skip(24)
  *   fog(1) round_time(4) total_time(4) skip(4) 每玩家 [seat(1) team(4) name(串) computer(4) flag(4)]
@@ -85,8 +85,8 @@ const MapCode = (() => {
     const author = r.readstr();
     const timestamp = timestickToDate(r.readint(8));
     const player_num = r.readint(4);
-    const row = r.readint(4);
     const column = r.readint(4);
+    const row = r.readint(4);
     if (player_num > 127 || row > 1000 || column > 1000) {
       throw new Error('地图码数据损坏：规模参数异常');
     }
