@@ -95,6 +95,7 @@ let valid = 0;
 let playable = 0;
 let solo = 0;
 let oversized = 0;
+let campaign = 0;
 const invalid = [];
 
 for (const file of files) {
@@ -110,6 +111,7 @@ for (const file of files) {
     continue;
   }
   valid += 1;
+  if (Array.isArray(raw.triggers) && raw.triggers.length > 0) campaign += 1;
   if (raw.row > MAX || raw.column > MAX) {
     oversized += 1;
     continue;
@@ -125,6 +127,7 @@ console.log(`目录: ${dir}`);
 console.log(`文件总数: ${files.length}`);
 console.log(`结构有效: ${valid}`);
 console.log(`PVE 可玩（≥2 势力且 ≤${MAX}×${MAX}）: ${playable}`);
+console.log(`其中含触发器（战役）: ${campaign}`);
 console.log(`仅 1 势力（过滤）: ${solo}`);
 console.log(`超过 ${MAX}×${MAX}（过滤）: ${oversized}`);
 console.log(`结构非法/解析失败（跳过）: ${invalid.length}`);

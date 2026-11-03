@@ -8,7 +8,6 @@ import type {
   PveGameConfig,
   PlayerIntent,
   RoomServerMsg,
-  SeatAssignment,
 } from '@dl/shared';
 import type { GameTransport } from '../stores/game';
 import type { WsStatus } from '../ws/client';
@@ -16,8 +15,12 @@ import type { WsStatus } from '../ws/client';
 export interface PveTransportOptions {
   config: PveGameConfig;
   initialState: GameState;
-  /** 普通 AI 的 MCTS 规划（由页面注入 Worker 客户端）；缺失时该难度退化为跳过 */
+  /** 普通 AI 的 MCTS 规划（由页面注入 Worker 客户端）；缺失时尝试懒加载 */
   onPlanMcts?: (state: GameState, seat: number) => Promise<PlayerIntent[]>;
+  /** 懒加载普通 AI（触发器可能中途把某势力改为难度 2） */
+  ensurePlanner?: () => Promise<((state: GameState, seat: number) => Promise<PlayerIntent[]>) | null>;
+  /** 普通 AI 不可用，已降级为简单 AI */
+  onAiFallback?: (seat: number, reason: string) => void;
   onThinking?: (thinking: boolean) => void;
   /** AI 出招间隔（给动画留时间） */
   stepDelayMs?: number;
@@ -33,7 +36,6 @@ function skipIntents(board: GameState, seat: number): PlayerIntent[] {
 
 export class PveTransport implements GameTransport {
   private readonly config: PveGameConfig;
-  private readonly seatAssignments: SeatAssignment[];
   private readonly messageHandlers = new Set<(msg: RoomServerMsg) => void>();
   private readonly statusHandlers = new Set<(status: WsStatus) => void>();
   private readonly stepDelayMs: number;
@@ -48,10 +50,11 @@ export class PveTransport implements GameTransport {
   private planGeneration = 0;
   private gameOverEmitted = false;
   private skipOnce = false;
+  private planner: ((state: GameState, seat: number) => Promise<PlayerIntent[]>) | null = null;
+  private plannerUnavailable = false;
 
   constructor(private readonly opts: PveTransportOptions) {
     this.config = opts.config;
-    this.seatAssignments = opts.config.seatAssignments;
     this.board = structuredClone(opts.initialState);
     this.stepDelayMs = opts.stepDelayMs ?? 120;
   }
@@ -89,11 +92,16 @@ export class PveTransport implements GameTransport {
   submitIntent(clientTempId: string, intent: PlayerIntent): void {
     if (this.closed) return;
     const eventId = ++this.eventId;
+    const seat = this.board.controlledSeat ?? this.config.playerSeat;
+    const beforeControlled = this.board.controlledSeat;
     const result = applyIntent(this.board, {
-      actor: { kind: 'PLAYER', seat: this.config.playerSeat },
+      actor: { kind: 'PLAYER', seat },
       intent,
     });
-    if (result.ok) this.board = result.state;
+    if (result.ok) {
+      this.board = result.state;
+      this.syncControl(beforeControlled);
+    }
     this.emit({ type: 'INTENT_ACK', clientTempId, eventId });
     this.scheduleDrive();
   }
@@ -176,8 +184,9 @@ export class PveTransport implements GameTransport {
       return;
     }
     const seat = this.board.currentSeat;
-    const assignment = this.seatAssignments.find((a) => a.seat === seat);
-    if (!assignment?.isAI) return;
+    const force = this.board.forces.find((f) => f.seat === seat);
+    if (!force || !force.exists || !force.alive || !force.isAI) return;
+    if (this.board.controlledSeat === seat) return;
     if (this.board.phase !== 'ACTION' && this.board.phase !== 'ADD_POINT') return;
 
     // 上一条 AI 意图被 reducer 拒绝：本回合降级为跳过，避免同一非法计划循环
@@ -189,13 +198,15 @@ export class PveTransport implements GameTransport {
       return;
     }
 
-    const level = normalizeAiLevel(assignment.computer ?? 1);
-    if (level === 2 && this.opts.onPlanMcts) {
+    const level = normalizeAiLevel(force.computer ?? 1);
+    if (level === 2 && !this.plannerUnavailable) {
       const generation = ++this.planGeneration;
       this.thinking = true;
       this.opts.onThinking?.(true);
-      this.opts
-        .onPlanMcts(this.board, seat)
+      const pending = this.opts.onPlanMcts
+        ? this.opts.onPlanMcts(this.board, seat)
+        : this.ensurePlannerAndPlan(seat);
+      pending
         .then((intents) => {
           if (this.closed || generation !== this.planGeneration) return;
           this.thinking = false;
@@ -204,18 +215,22 @@ export class PveTransport implements GameTransport {
           this.planQueue = intents.length > 0 ? intents : skipIntents(this.board, seat);
           this.pump();
         })
-        .catch(() => {
+        .catch((err: unknown) => {
           if (this.closed || generation !== this.planGeneration) return;
           this.thinking = false;
           this.opts.onThinking?.(false);
+          this.plannerUnavailable = true;
+          this.opts.onAiFallback?.(seat, err instanceof Error ? err.message : '普通 AI 不可用');
+          const plan = planAiTurn(this.board, seat, true);
+          const intents = plan.kind === 'intents' ? plan.intents : skipIntents(this.board, seat);
           this.planSeat = seat;
-          this.planQueue = skipIntents(this.board, seat);
+          this.planQueue = intents;
           this.pump();
         });
       return;
     }
 
-    const plan = planAiTurn(this.board, seat);
+    const plan = planAiTurn(this.board, seat, this.plannerUnavailable && level === 2);
     const intents = plan.kind === 'intents' ? plan.intents : skipIntents(this.board, seat);
     if (intents.length === 0) {
       // 加点阶段点数耗尽：AI 驱动代其发起一次 SWITCH_PHASE 结束回合；行动阶段由 AI 计划自行切换
@@ -230,6 +245,26 @@ export class PveTransport implements GameTransport {
     this.planSeat = seat;
     this.planQueue = intents;
     this.pump();
+  }
+
+  private async ensurePlannerAndPlan(seat: number): Promise<PlayerIntent[]> {
+    if (!this.planner) {
+      const planner = await this.opts.ensurePlanner?.();
+      if (!planner) throw new Error('普通 AI 权重不可用');
+      this.planner = planner;
+    }
+    return this.planner(this.board, seat);
+  }
+
+  /** 控制权转移：清掉在途 AI 计划，避免继续替旧势力行动 */
+  private syncControl(before: number | null): void {
+    if (this.board.controlledSeat === before) return;
+    this.clearAiTimer();
+    this.planQueue = [];
+    this.planSeat = -1;
+    this.thinking = false;
+    this.planGeneration += 1;
+    this.opts.onThinking?.(false);
   }
 
   private pump(): void {
@@ -258,9 +293,12 @@ export class PveTransport implements GameTransport {
 
   private emitAiIntent(seat: number, intent: PlayerIntent): void {
     const eventId = ++this.eventId;
-    const result = applyIntent(this.board, { actor: { kind: 'PLAYER', seat }, intent });
-    if (result.ok) this.board = result.state;
-    else {
+    const beforeControlled = this.board.controlledSeat;
+    const result = applyIntent(this.board, { actor: { kind: 'AI', seat }, intent });
+    if (result.ok) {
+      this.board = result.state;
+      this.syncControl(beforeControlled);
+    } else {
       // 状态分歧：本次意图仍入流（保证 eventId 连续），计划作废后降级跳过
       this.planQueue = [];
       this.skipOnce = true;
@@ -283,12 +321,14 @@ export class PveTransport implements GameTransport {
       gameId: this.config.gameId,
       winners: payload.winners,
       winningTeam: payload.winningTeam,
-      forces: this.seatAssignments.map((a) => ({
-        seat: a.seat,
-        playerId: a.playerId === null ? null : String(a.playerId),
-        isAI: a.isAI,
-        cleared: !(this.board.forces.find((f) => f.seat === a.seat)?.alive ?? false),
-      })),
+      forces: this.board.forces
+        .filter((f) => f.exists)
+        .map((f) => ({
+          seat: f.seat,
+          playerId: f.playerId === null ? null : String(f.playerId),
+          isAI: f.isAI,
+          cleared: !f.alive,
+        })),
       refId: 'end',
     };
     this.emit(over);

@@ -47,6 +47,16 @@ export const EVENT_DURATION: Record<string, number> = {
   ADD_POINT: 100,
   INIT: 0,
   VICTORY: 500,
+  // 战役触发器：标记/UI 事件不占演出时间；地形与势力变化在链末由权威 board 回显
+  TRIGGER_FIRE: 0,
+  TRIGGER_TEXT_SHOW: 0,
+  TRIGGER_TEXT_HIDE: 0,
+  TERRAIN_CHANGE: 120,
+  FORCE_UPDATE: 0,
+  CONTROL_CHANGE: 0,
+  TURN_ORDER_CHANGE: 0,
+  FOG_CHANGE: 0,
+  TRIGGER_OVERFLOW: 0,
 };
 
 export class EventAnimator {

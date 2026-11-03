@@ -1,5 +1,6 @@
 // 共享类型：REST 响应包裹与用户公开信息
 import type { ErrorCode } from './constants.js';
+import type { TriggerDef } from './game/trigger/types.js';
 
 export interface ApiEnvelope<T = unknown> {
   success: boolean;
@@ -148,6 +149,10 @@ export interface MapFullData {
    * 归属取值见 TILE_OWNER，其余为 seat；兵力为该地块驻军数。
    */
   battlefield: BattlefieldTile[];
+  /** 战役触发器 DSL 版本；缺省视为 0/无触发器 */
+  trigger_schema_version?: number;
+  /** 战役触发器定义；缺省/空数组 = 普通地图 */
+  triggers?: TriggerDef[];
 }
 
 export interface MapMeta {
@@ -159,6 +164,8 @@ export interface MapMeta {
   row: number;
   column: number;
   tags: string[];
+  /** 是否携带战役触发器（列表筛选用，不参与地图内容） */
+  hasTriggers?: boolean;
 }
 
 export interface MapPreview {

@@ -54,7 +54,7 @@ function finishTurnPlan(
   }
   // 相位推进：ACTION → ADD_POINT（行动阶段被 reducer 自动跳过时已在 ADD_POINT）
   if (cur.phase === 'ACTION') {
-    const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat }, intent: { intentType: 'SWITCH_PHASE' } });
+    const r = applyIntent(cur, { actor: { kind: 'AI', seat }, intent: { intentType: 'SWITCH_PHASE' } });
     if (r.ok) {
       cur = r.state;
       addPointIntents.push({ intentType: 'SWITCH_PHASE' });
@@ -70,14 +70,14 @@ function finishTurnPlan(
   );
   for (const intent of planned) {
     if (cur.phase !== 'ADD_POINT') break; // 点数用尽已自动切阶段
-    const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat }, intent });
+    const r = applyIntent(cur, { actor: { kind: 'AI', seat }, intent });
     if (!r.ok) break; // 意外拒绝：停止加点（保守交还）
     cur = r.state;
     addPointIntents.push(intent);
   }
   // 点数未用尽（如无连兵交还）：显式 SWITCH_PHASE 结束回合
   if (cur.phase === 'ADD_POINT') {
-    const r = applyIntent(cur, { actor: { kind: 'PLAYER', seat }, intent: { intentType: 'SWITCH_PHASE' } });
+    const r = applyIntent(cur, { actor: { kind: 'AI', seat }, intent: { intentType: 'SWITCH_PHASE' } });
     if (r.ok) {
       cur = r.state;
       addPointIntents.push({ intentType: 'SWITCH_PHASE' });

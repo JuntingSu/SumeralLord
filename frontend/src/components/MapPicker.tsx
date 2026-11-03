@@ -90,7 +90,7 @@ export default function MapPicker({ id, maps, value, onChange, disabled, placeho
                   m.id === value ? 'bg-slate-600 text-emerald-300' : 'text-white'
                 }`}
               >
-                {m.title}（{m.playerNum}人）
+                {m.title}（{m.playerNum}人{m.hasTriggers ? ' · 战役' : ''}）
               </button>
             </li>
           ))}

@@ -9,6 +9,7 @@ import {
   getPveSaveMeta,
   listPveMaps,
   randomPveMap,
+  type PveMapMode,
 } from '../api/pve';
 import { ApiError } from '../api/client';
 import { useAuth } from '../stores/auth';
@@ -39,8 +40,9 @@ function withPersonalSkin(map: MapFullData, playerSeat: number, userId: number):
   };
 }
 
-export default function PveRoom() {
+export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
   const navigate = useNavigate();
+  const mode: PveMapMode = campaign ? 'campaign' : 'normal';
   const user = useAuth((s) => s.user);
   const room = usePve((s) => s.room);
   const setMap = usePve((s) => s.setMap);
@@ -73,7 +75,7 @@ export default function PveRoom() {
   useEffect(() => {
     let cancelled = false;
     setMapsLoading(true);
-    listPveMaps()
+    listPveMaps(undefined, mode)
       .then((list) => {
         if (!cancelled) setMaps(list);
       })
@@ -104,7 +106,7 @@ export default function PveRoom() {
     return () => {
       cancelled = true;
     };
-  }, [loadSaveMeta, setMap]);
+  }, [loadSaveMeta, setMap, mode]);
 
   const forces = room.map ? [...room.map.player_list].sort((a, b) => a.seat - b.seat) : [];
 
@@ -128,7 +130,7 @@ export default function PveRoom() {
     setError(null);
     setNotice(null);
     try {
-      const map = await randomPveMap(room.mapId ?? undefined);
+      const map = await randomPveMap(room.mapId ?? undefined, mode);
       setMap(map, map.id);
       setNotice(`随机到「${map.title}」`);
     } catch (err) {
@@ -196,6 +198,10 @@ export default function PveRoom() {
       setError('地图至少需要 2 个势力');
       return;
     }
+    if (campaign && (room.map.triggers?.length ?? 0) === 0) {
+      setError('战役模式需要包含触发器的地图；请导入战役地图 JSON');
+      return;
+    }
     const sourceMap = room.map;
     const playerSeat = room.playerSeat;
     const map = room.usePersonalSkin && user.hasSkin
@@ -222,10 +228,11 @@ export default function PveRoom() {
       playerSeat,
       humanUserId: user.id,
       reducerVersion: reducerVersion(),
+      campaign,
     };
     usePve.getState().setLastGame(config);
     usePve.getState().clearLoadSave();
-    navigate('/pve/game');
+    navigate(campaign ? '/pve/game?campaign=1' : '/pve/game');
   };
 
   const handleContinue = async () => {
@@ -244,9 +251,16 @@ export default function PveRoom() {
         setError('该存档已结束，已自动清除');
         return;
       }
+      const saveCampaign = save.config.campaign === true;
+      if (saveCampaign !== campaign) {
+        setError(
+          campaign ? '该存档属于单人 PVE，请回到单人 PVE 继续' : '该存档属于战役模式，请回到战役模式继续',
+        );
+        return;
+      }
       usePve.getState().restoreRoomFromConfig(save.config);
       usePve.getState().setLoadSave(save);
-      navigate('/pve/game?load=1');
+      navigate(saveCampaign ? '/pve/game?load=1&campaign=1' : '/pve/game?load=1');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '读取存档失败');
     } finally {
@@ -277,8 +291,10 @@ export default function PveRoom() {
           <Link to="/modes" className="text-sm text-emerald-400 hover:underline">
             ← 模式选择
           </Link>
-          <h1 className="text-lg font-bold">单人 PVE</h1>
-          <span className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">本地对局</span>
+          <h1 className="text-lg font-bold">{campaign ? '战役模式' : '单人 PVE'}</h1>
+          <span className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
+            {campaign ? '触发器战役' : '本地对局'}
+          </span>
         </div>
       </header>
 
@@ -307,7 +323,7 @@ export default function PveRoom() {
 
           {!room.map ? (
             <div className="flex flex-1 items-center justify-center rounded bg-slate-700/30 py-16 text-sm text-slate-500">
-              请先在右侧选择、随机或导入一张地图
+              请先在右侧选择、随机或导入一张{campaign ? '战役' : ''}地图
             </div>
           ) : (
             <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
@@ -441,16 +457,23 @@ export default function PveRoom() {
               >
                 🎲 随机地图
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCodeOpen(true);
-                  setCodeError(null);
-                }}
-                className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
-              >
-                🎴 地图码导入
-              </button>
+              {!campaign && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCodeOpen(true);
+                    setCodeError(null);
+                  }}
+                  className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
+                >
+                  🎴 地图码导入
+                </button>
+              )}
+              {campaign && (
+                <span className="self-center text-xs text-slate-500">
+                  战役地图暂不支持地图码，请用 JSON 导入
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
@@ -478,12 +501,20 @@ export default function PveRoom() {
                 onChange={handleSelectMap}
                 maxResults={100}
                 disabled={busy || mapsLoading}
-                placeholder={mapsLoading ? '加载地图库…' : '搜索地图库（标题/作者/标签）'}
+                placeholder={
+                  mapsLoading
+                    ? '加载地图库…'
+                    : campaign
+                      ? '搜索战役地图（标题/作者/标签）'
+                      : '搜索地图库（标题/作者/标签）'
+                }
               />
               {mapsError && <p className="mt-1 text-xs text-red-400">{mapsError}</p>}
               {!mapsLoading && maps.length === 0 && (
                 <p className="mt-1 text-xs text-slate-500">
-                  地图库为空或没有可玩地图，可用随机/地图码/JSON/地图编辑器导入。
+                  {campaign
+                    ? '战役地图库为空；可用 JSON 导入带 triggers 的地图。'
+                    : '地图库为空或没有可玩地图，可用随机/地图码/JSON/地图编辑器导入。'}
                 </p>
               )}
             </div>

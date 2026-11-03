@@ -3,7 +3,17 @@
 // 兵全部画在 overlay：动画播放时画"动画态+中间帧"（EventAnimator 驱动），空闲时画权威 board。
 // M5.2：拖拽平移 + 滚轮锚点缩放（0.3x~12x）+ 进入对局按最小地块宽度自动放大（view 变换统一应用于两层与拾取；双击不改变视图）；
 // 断兵视觉：整旗等比缩小（不再单独出镂空图），据点驻军按连兵渲染。
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useCallback,
+  useState,
+  type ReactNode,
+} from 'react';
 import { TERRAIN, TILE_OWNER, isFullBreak, isNeutralOwner } from '@dl/shared';
 import type { GameState, Phase, SoldierState } from '@dl/shared';
 import { neighborsOf } from '@dl/shared';
@@ -81,6 +91,11 @@ interface BoardCanvasProps {  board: GameState;
   className?: string;
   /** 首次布局的最小地块宽度（CSS px）；>0 时初始视图自动放大到该宽度（宽窄屏一致）。缺省 0 = 不自动缩放（回放） */
   minInitialTileWidth?: number;
+  /** 棋盘内叠加层（战役文本气泡等）；坐标相对画布 CSS 像素 */
+  overlay?: (api: {
+    tileScreenPosition: (tile: number) => { x: number; y: number; r: number } | null;
+    viewport: { w: number; h: number };
+  }) => ReactNode;
 }
 
 /** 命令式缩放接口（窄屏 +/− 按钮使用） */
@@ -209,6 +224,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
   animatorRef,
   className,
   minInitialTileWidth = 0,
+  overlay,
 }: BoardCanvasProps, ref) {
   const staticRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -755,6 +771,24 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
     return () => cancelAnimationFrame(raf);
   }, [board, boardSoldiers, selected, phase, mySeat, isSpectator, fogEnabled, fogLevels, flagOf, victorySeats, animatorRef, drawSoldier, dimTiles, canvasSize]);
 
+  const overlayApi = useMemo(
+    () => ({
+      viewport: { w: canvasSize.w, h: canvasSize.h },
+      tileScreenPosition: (tile: number) => {
+        if (canvasSize.w <= 0 || canvasSize.h <= 0) return null;
+        if (!Number.isInteger(tile) || tile < 0 || tile >= board.rows * board.columns) return null;
+        const L = computeLayout(canvasSize.w, canvasSize.h, board.rows, board.columns);
+        const c = centerOf(tile, board.columns, L.size, L.offX, L.offY, L.totalH);
+        return {
+          x: view.offX + c.cx * view.scale,
+          y: view.offY + c.cy * view.scale,
+          r: L.size * view.scale,
+        };
+      },
+    }),
+    [canvasSize.w, canvasSize.h, board.rows, board.columns, view.offX, view.offY, view.scale],
+  );
+
   return (
     <div ref={containerRef} className={className} style={{ position: 'relative', overflow: 'hidden' }}>
       <canvas
@@ -808,6 +842,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
         }}
       />
       <canvas ref={overlayRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
+      {overlay?.(overlayApi)}
     </div>
   );
 });

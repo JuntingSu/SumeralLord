@@ -15,6 +15,7 @@ import type {
   RoomTimeSettings,
   SeatAssignment,
   SoldierState,
+  TextPlacement,
 } from '@dl/shared';
 import { applyIntent, applyInverseDiff, diffGameState, initState } from '@dl/shared';
 import type { GameState, GameStateDiff } from '@dl/shared';
@@ -105,6 +106,8 @@ interface GameStore {
   systemNotices: SystemNotice[];
   /** 本局击杀计数（seat → 击杀数；驱动「大杀四方」通知） */
   killCounts: Record<number, number>;
+  /** 战役触发器非阻塞文本（textId 去重；placement 缺省 = 右上角） */
+  triggerTexts: Array<{ textId: string; text: string; placement?: TextPlacement }>;
 
   /** PVE 悔棋：只记录玩家意图的逆 diff；AI 行动/回合切换时清空 */
   undoMode: boolean;
@@ -154,12 +157,33 @@ interface GameStore {
   drainPhaseAnnouncements(): string[];
   /** 原子取出并清空系统通知队列（消费与追加不竞态） */
   drainSystemNotices(): SystemNotice[];
+  /** 关闭一条战役触发器文本 */
+  dismissTriggerText(textId: string): void;
   /** 追加一条本地系统聊天（kind:'system'，橙色渲染） */
   pushSystemChat(text: string): void;
   reset(): void;
 }
 
 type ApplyOutcome = 'applied' | 'duplicate' | 'gap' | 'ignored';
+
+/** 从事件链提取战役触发器文本（show/hide；非阻塞） */
+export function collectTriggerTexts(chain: GameEvent[]): {
+  show: Array<{ textId: string; text: string; placement?: TextPlacement }>;
+  hide: string[];
+} {
+  const show: Array<{ textId: string; text: string; placement?: TextPlacement }> = [];
+  const hide: string[] = [];
+  for (const e of chain) {
+    if (e.kind === 'TRIGGER_TEXT_SHOW') {
+      show.push({
+        textId: e.textId,
+        text: e.text,
+        ...(e.placement ? { placement: e.placement } : {}),
+      });
+    } else if (e.kind === 'TRIGGER_TEXT_HIDE') hide.push(e.textId);
+  }
+  return { show, hide };
+}
 
 /** 从事件链提取我方回合/阶段开始提示（END_TURN 转到己座；SWITCH_PHASE 切入 ACTION/ADD_POINT） */
 function collectPhaseAnnouncements(chain: GameEvent[], mySeat: number | null): string[] {
@@ -180,7 +204,7 @@ export type SystemNotice =
       kind: 'forceCleared';
       seat: number;
       killerSeat: number | null;
-      reason: 'no_stronghold' | 'surrender' | 'timeout';
+      reason: 'no_stronghold' | 'surrender' | 'timeout' | 'trigger';
     }
   | { kind: 'killStreak'; seat: number; kills: number };
 
@@ -217,6 +241,7 @@ function applyStreamMessage(
   eventId: number,
   intent: PlayerIntent,
   fromSeat: number,
+  source: 'PLAYER' | 'AI' | 'SERVER',
   transport: GameTransport | null,
   replay = false,
 ): ApplyOutcome {
@@ -226,10 +251,14 @@ function applyStreamMessage(
   if (eventId !== s.appliedEventId + 1) return 'gap';
   const board = s.board;
   if (!board) return 'ignored';
-  const r = applyIntent(board, { actor: { kind: 'PLAYER', seat: fromSeat }, intent });
+  const actor =
+    source === 'SERVER'
+      ? ({ kind: 'SERVER' } as const)
+      : ({ kind: source, seat: fromSeat } as const);
+  const r = applyIntent(board, { actor, intent });
   if (!r.ok) {
     // 非法意图：确定性拒绝，游标照常前进（各端一致）
-    if (s.undoMode && fromSeat !== s.mySeat) {
+    if (s.undoMode && (source !== 'PLAYER' || fromSeat !== s.mySeat)) {
       // AI 已行动：玩家不能跨 AI 回合悔棋
       set({ appliedEventId: eventId, undoStack: [], undoBaseEventId: eventId, undoAvailable: false });
     } else {
@@ -256,11 +285,22 @@ function applyStreamMessage(
   const announcements = replay ? [] : collectPhaseAnnouncements(r.chain, s.mySeat);
   // 实时路径（非重放）收集局内系统通知（回合开始/被击败/大杀四方）并更新击杀计数
   const sys = replay ? null : collectSystemNotices(r.chain, fromSeat, s.killCounts);
+  // 实时路径收集战役触发器文本（非阻塞）
+  let triggerTexts = s.triggerTexts;
+  if (!replay) {
+    const texts = collectTriggerTexts(r.chain);
+    if (texts.show.length > 0 || texts.hide.length > 0) {
+      const byId = new Map(triggerTexts.map((t) => [t.textId, t]));
+      for (const id of texts.hide) byId.delete(id);
+      for (const item of texts.show) byId.set(item.textId, item);
+      triggerTexts = [...byId.values()];
+    }
+  }
   // PVE 悔棋：只记录玩家意图的逆 diff；AI 意图/换回合时清空
   let undoStack = s.undoStack;
   let undoBaseEventId = s.undoBaseEventId;
   if (s.undoMode) {
-    if (fromSeat !== s.mySeat) {
+    if (source !== 'PLAYER' || fromSeat !== s.mySeat) {
       undoStack = [];
       undoBaseEventId = eventId;
     } else if (!replay) {
@@ -276,8 +316,16 @@ function applyStreamMessage(
       }
     }
   }
+  // 战役控制转移：切换玩家势力时清空悔棋栈并更新 mySeat
+  const controlChanged =
+    r.state.controlledSeat !== null && r.state.controlledSeat !== board.controlledSeat;
+  if (controlChanged) {
+    undoStack = [];
+    undoBaseEventId = eventId;
+  }
   set({
     board: r.state,
+    mySeat: controlChanged ? r.state.controlledSeat : s.mySeat,
     appliedEventId: eventId,
     eventQueue: [...s.eventQueue, { chain: r.chain, beforeTiles }],
     lastChain: r.chain,
@@ -288,6 +336,7 @@ function applyStreamMessage(
     killCounts: sys ? sys.killCounts : s.killCounts,
     systemNotices:
       sys && sys.notices.length > 0 ? [...s.systemNotices, ...sys.notices] : s.systemNotices,
+    triggerTexts,
     undoStack,
     undoBaseEventId,
     undoAvailable: undoStack.length > 0,
@@ -306,9 +355,10 @@ export const useGame = create<GameStore>((set, get) => {
     try {
       const { events, nextCursor } = await transport.fetchEvents(s.gameId, s.appliedEventId);
       for (const raw of events) {
-        const msg = raw as { eventId?: number; intent?: PlayerIntent; fromSeat?: number };
+        const msg = raw as { eventId?: number; intent?: PlayerIntent; fromSeat?: number; from?: string };
         if (typeof msg.eventId !== 'number' || !msg.intent) continue;
-        applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat ?? 0, transport, true);
+        const source = msg.from === 'AI' ? 'AI' : msg.from === 'SERVER' ? 'SERVER' : 'PLAYER';
+        applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat ?? 0, source, transport, true);
       }
       // 追平全部结束（无后续分页）
       if (nextCursor > 0) void catchUp();
@@ -349,6 +399,7 @@ export const useGame = create<GameStore>((set, get) => {
     phaseAnnouncements: [],
     systemNotices: [],
     killCounts: {},
+    triggerTexts: [],
 
     undoMode: false,
     undoStack: [],
@@ -410,11 +461,15 @@ export const useGame = create<GameStore>((set, get) => {
 
     startPveGame: ({ roomId, gameId, state, chain, seatAssignments, myUserId, fogMode, map }) => {
       const board = structuredClone(state);
-      const mySeat = seatAssignments.find((a) => a.playerId !== null && a.playerId === myUserId)?.seat ?? null;
+      const mySeat =
+        state.controlledSeat ??
+        seatAssignments.find((a) => a.playerId !== null && a.playerId === myUserId)?.seat ??
+        null;
       const announcements = collectPhaseAnnouncements(chain, mySeat);
       if (mySeat !== null && mySeat === board.currentSeat) announcements.unshift('你的回合');
       const notices: SystemNotice[] = [];
       if (board.currentSeat > 0) notices.push({ kind: 'turnStart', seat: board.currentSeat });
+      const initialTexts = collectTriggerTexts(chain).show;
       set({
         gameId,
         roomId,
@@ -441,6 +496,7 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: announcements,
         systemNotices: notices,
         killCounts: {},
+        triggerTexts: initialTexts,
         undoMode: true,
         undoStack: [],
         undoBaseEventId: 0,
@@ -453,7 +509,10 @@ export const useGame = create<GameStore>((set, get) => {
 
     restorePveGame: ({ roomId, gameId, state, seatAssignments, myUserId, fogMode, map }) => {
       const board = structuredClone(state);
-      const mySeat = board.forces.find((f) => f.playerId !== null && f.playerId === myUserId)?.seat ?? null;
+      const mySeat =
+        board.controlledSeat ??
+        board.forces.find((f) => f.playerId !== null && f.playerId === myUserId)?.seat ??
+        null;
       set({
         gameId,
         roomId,
@@ -480,6 +539,7 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: [],
         systemNotices: [],
         killCounts: {},
+        triggerTexts: [],
         undoMode: true,
         undoStack: [],
         undoBaseEventId: 0,
@@ -530,13 +590,14 @@ export const useGame = create<GameStore>((set, get) => {
           set({ ackMap, localIntents, submitting: false });
           // 自己的意图：ACK 后按 eventId 序应用（服务器不回环广播）
           if (local && s.mySeat !== null) {
-            const outcome = applyStreamMessage(get, set, msg.eventId, local.intent, local.seat, s.transport);
+            const outcome = applyStreamMessage(get, set, msg.eventId, local.intent, local.seat, 'PLAYER', s.transport);
             if (outcome === 'gap') void catchUp();
           }
           return;
         }
         case 'INTENT_BROADCAST': {
-          const outcome = applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat, s.transport);
+          const source = msg.from === 'AI' ? 'AI' : msg.from === 'SERVER' ? 'SERVER' : 'PLAYER';
+          const outcome = applyStreamMessage(get, set, msg.eventId, msg.intent, msg.fromSeat, source, s.transport);
           if (outcome === 'gap') void catchUp();
           return;
         }
@@ -589,12 +650,14 @@ export const useGame = create<GameStore>((set, get) => {
               eventId?: number;
               intent?: PlayerIntent;
               fromSeat?: number;
+              from?: string;
               consensusId?: string;
               confirmed?: ConsensusPayload;
               type_: 'GAME_OVER' | string;
             };
             if (m.type === 'INTENT_BROADCAST' && typeof m.eventId === 'number' && m.intent) {
-              applyStreamMessage(get, set, m.eventId, m.intent, m.fromSeat ?? 0, s.transport, true);
+              const source = m.from === 'AI' ? 'AI' : m.from === 'SERVER' ? 'SERVER' : 'PLAYER';
+              applyStreamMessage(get, set, m.eventId, m.intent, m.fromSeat ?? 0, source, s.transport, true);
             } else if (m.type === 'CONSENSUS_CONFIRMED' && m.consensusId) {
               const pendingConsensus = { ...get().pendingConsensus };
               delete pendingConsensus[m.consensusId];
@@ -709,6 +772,11 @@ export const useGame = create<GameStore>((set, get) => {
       return drained;
     },
 
+    dismissTriggerText: (textId) => {
+      const s = get();
+      set({ triggerTexts: s.triggerTexts.filter((t) => t.textId !== textId) });
+    },
+
     pushSystemChat: (text) => {
       const s = get();
       set({
@@ -744,6 +812,7 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: [],
         systemNotices: [],
         killCounts: {},
+        triggerTexts: [],
         undoMode: false,
         undoStack: [],
         undoBaseEventId: 0,

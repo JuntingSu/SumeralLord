@@ -1,6 +1,7 @@
 // 对局状态逆 diff（PVE 悔棋用）：只记录一次意图造成的实际变化项，
 // 悔棋时把 before 值写回当前状态，不需要重放意图或保存完整快照。
 import type { ForceState, GameState, Phase, SoldierState, TileState } from './types.js';
+import type { TriggerRuntime } from './trigger/types.js';
 
 export interface GameStateDiff {
   /** 只包含发生变化的 tile；before 为深拷贝 */
@@ -14,10 +15,33 @@ export interface GameStateDiff {
   finished: boolean;
   winners: string[] | null;
   winningTeam: number | null;
+  /** 战役触发器运行态 before（普通对局 null） */
+  triggerRuntime: TriggerRuntime | null;
+  controlledSeat: number | null;
+  humanPlayerId: number | null;
+  turnOrder: number[];
+  fogOverrides: { enabled?: boolean; revealed: number[]; hidden: number[] } | null;
+  triggerMode: boolean;
 }
 
 function cloneSoldier(s: SoldierState | null): SoldierState | null {
   return s ? { ...s } : null;
+}
+
+function cloneRuntime(r: TriggerRuntime | null): TriggerRuntime | null {
+  return r
+    ? {
+        ...r,
+        firedCounts: { ...r.firedCounts },
+        pending: r.pending.map((p) => ({ ...p })),
+      }
+    : null;
+}
+
+function cloneFog(
+  f: { enabled?: boolean; revealed: number[]; hidden: number[] } | null,
+): { enabled?: boolean; revealed: number[]; hidden: number[] } | null {
+  return f ? { ...f, revealed: [...f.revealed], hidden: [...f.hidden] } : null;
 }
 
 function cloneTile(t: TileState): TileState {
@@ -77,6 +101,12 @@ export function diffGameState(before: GameState, after: GameState): GameStateDif
     finished: before.finished,
     winners: before.winners ? [...before.winners] : null,
     winningTeam: before.winningTeam,
+    triggerRuntime: cloneRuntime(before.triggerRuntime),
+    controlledSeat: before.controlledSeat,
+    humanPlayerId: before.humanPlayerId,
+    turnOrder: [...before.turnOrder],
+    fogOverrides: cloneFog(before.fogOverrides),
+    triggerMode: before.triggerMode,
   };
 }
 
@@ -99,5 +129,11 @@ export function applyInverseDiff(current: GameState, diff: GameStateDiff): GameS
     finished: diff.finished,
     winners: diff.winners ? [...diff.winners] : null,
     winningTeam: diff.winningTeam,
+    triggerRuntime: cloneRuntime(diff.triggerRuntime),
+    controlledSeat: diff.controlledSeat,
+    humanPlayerId: diff.humanPlayerId,
+    turnOrder: [...diff.turnOrder],
+    fogOverrides: cloneFog(diff.fogOverrides),
+    triggerMode: diff.triggerMode,
   };
 }

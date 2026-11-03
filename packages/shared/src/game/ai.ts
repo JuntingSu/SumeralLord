@@ -656,7 +656,7 @@ function planDifficultyOne(state: GameState, seat: number, rng: () => number): P
   const intents: PlayerIntent[] = [];
   let sim = state;
   const push = (intent: PlayerIntent): boolean => {
-    const r = applyIntent(sim, { actor: { kind: 'PLAYER', seat }, intent });
+    const r = applyIntent(sim, { actor: { kind: 'AI', seat }, intent });
     if (!r.ok) return false;
     sim = r.state;
     intents.push(intent);
@@ -688,10 +688,10 @@ function planDifficultyOne(state: GameState, seat: number, rng: () => number): P
  * AI 回合决策入口（提交方客户端调用；reducer 不内建调用）。
  * 难度1（普通难度）返回 intents（意图入流）；难度 2/3/255 返回 skip（保持休闲语义）。
  */
-export function planAiTurn(state: GameState, seat: number): AiTurnPlan {
+export function planAiTurn(state: GameState, seat: number, forceSimple = false): AiTurnPlan {
   const force = state.forces.find((f) => f.seat === seat);
   if (!force || !force.exists || !force.alive) return { kind: 'skip' };
-  if (force.computer !== 1) return { kind: 'skip' };
+  if (!forceSimple && force.computer !== 1) return { kind: 'skip' };
   const rng = createRng(state.seed);
   return { kind: 'intents', intents: planDifficultyOne(state, seat, rng) };
 }

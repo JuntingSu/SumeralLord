@@ -11,6 +11,7 @@ import { matchHistory } from '../src/db/schema.js';
 import { buildApp } from '../src/app.js';
 import { skinFilePath } from '../src/skin.js';
 import { shuffleAssignments } from '../src/game/manager.js';
+import { REDUCER_VERSION } from '@dl/shared';
 
 // 断线/共识时间线加速（须在 config 求值前设置）
 vi.hoisted(() => {
@@ -193,7 +194,7 @@ describe('BM4：开局与意图中继', () => {
     const [a, b] = await Promise.all([aliceC.waitFor('GAME_START'), bobC.waitFor('GAME_START')]);
     expect(a.gameId).toBe(gameId);
     expect(a.seed).toBeTruthy();
-    expect(a.reducerVersion).toBe('dev-0.1.0');
+    expect(a.reducerVersion).toBe(REDUCER_VERSION);
     expect(a.map).toMatchObject({ id: 'map_duo_plain' });
     expect(a.seatAssignments).toEqual([
       { seat: 1, playerId: users.get('alice')!.id, isAI: false },
@@ -381,7 +382,7 @@ describe('BM6：断线治理与重连（加速 50ms/150ms）', () => {
     expect(code).toBe(4003);
 
     // 版本一致 → RECONNECT_ACK 重放已发生意图
-    const good = await wsConnect(roomId, 'henry', 'dev-0.1.0');
+    const good = await wsConnect(roomId, 'henry', REDUCER_VERSION);
     good.send({ type: 'RECONNECT', lastEventId: 0, gameId });
     const ack = await good.waitFor('RECONNECT_ACK');
     expect(ack.gameId).toBe(gameId);

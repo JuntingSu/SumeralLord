@@ -7,6 +7,12 @@ import { neighborsOf } from '@dl/shared';
 export type FogLevel = 'visible' | 'explored' | 'hidden';
 
 /** 计算指定视角（观战/无迷雾时全 visible）下各地块的迷雾档位 */
+export interface FogOverrides {
+  enabled?: boolean;
+  revealed: number[];
+  hidden: number[];
+}
+
 export function computeFog(
   rows: number,
   columns: number,
@@ -16,10 +22,13 @@ export function computeFog(
   fogEnabled: boolean,
   /** 上一回合的 explored 集合（跨回合保留已探索记忆） */
   prevExplored: ReadonlySet<number>,
+  /** 战役触发器覆盖：enabled 强制开关；revealed 永久揭示；hidden 强制隐藏；revealed 优先 */
+  overrides?: FogOverrides | null,
 ): { levels: FogLevel[]; explored: Set<number> } {
   const total = rows * columns;
   const levels: FogLevel[] = new Array(total).fill('hidden');
-  if (!fogEnabled) {
+  const enabled = overrides?.enabled ?? fogEnabled;
+  if (!enabled) {
     return { levels: levels.fill('visible'), explored: new Set<number>() };
   }
   const geo: BoardGeometry = { rows, columns, cylindrical };
@@ -33,6 +42,18 @@ export function computeFog(
   for (let i = 0; i < total; i++) {
     if (visible.has(i)) levels[i] = 'visible';
     else if (explored.has(i)) levels[i] = 'explored';
+  }
+  if (overrides) {
+    for (const t of overrides.hidden) {
+      if (t < 0 || t >= total) continue;
+      levels[t] = 'hidden';
+      explored.delete(t);
+    }
+    for (const t of overrides.revealed) {
+      if (t < 0 || t >= total) continue;
+      levels[t] = 'visible';
+      explored.add(t);
+    }
   }
   return { levels, explored };
 }

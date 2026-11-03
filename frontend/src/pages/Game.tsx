@@ -915,11 +915,12 @@ function formatSystemCleared(
   room: RoomData | null,
   seat: number,
   killerSeat: number | null,
-  reason: 'no_stronghold' | 'surrender' | 'timeout',
+  reason: 'no_stronghold' | 'surrender' | 'timeout' | 'trigger',
 ): string {
   const killed = forceLabel(board, room, seat);
   if (killerSeat !== null) return `刚刚[${killed}]被[${forceLabel(board, room, killerSeat)}]击杀了。`;
   if (reason === 'surrender') return `刚刚[${killed}]已投降。`;
+  if (reason === 'trigger') return `刚刚[${killed}]已退场。`;
   return `刚刚[${killed}]已超时。`;
 }
 

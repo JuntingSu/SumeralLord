@@ -8,3 +8,4 @@ export * from './ai.js';
 export * from './diff.js';
 export * from './hash.js';
 export * from './version.js';
+export * from './trigger/index.js';
