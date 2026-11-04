@@ -12,6 +12,8 @@ export const MAX_TRIGGER_FIRINGS = 512;
 export interface TriggerExecutor {
   /** 执行单个触发器的全部效果，返回该触发器造成的增量 diff */
   execute(trigger: TriggerDef): TriggerDelta;
+  /** 取出该触发器效果内“插入意图”各自造成的增量（已并入 execute 的返回值） */
+  takeIntentDeltas(): TriggerDelta[];
 }
 
 export interface TriggerTransactionInput {
@@ -77,7 +79,12 @@ function scheduleDelay(def: TriggerDef, state: GameState): void {
 
 // ---------- 动作 pass ----------
 
-function runActionPass(input: TriggerTransactionInput, firedThisTx: Set<string>, counter: { value: number }): void {
+function runActionPass(
+  input: TriggerTransactionInput,
+  firedThisTx: Set<string>,
+  counter: { value: number },
+  initialDeltas?: TriggerDelta[],
+): void {
   const { state, chain, executor } = input;
   const runtime = state.triggerRuntime;
   if (!runtime) return;
@@ -116,7 +123,7 @@ function runActionPass(input: TriggerTransactionInput, firedThisTx: Set<string>,
     sortQueue();
   };
 
-  enqueueMatching(input.intentDelta);
+  for (const delta of initialDeltas ?? [input.intentDelta]) enqueueMatching(delta);
 
   while (queue.length > 0) {
     if (counter.value >= MAX_TRIGGER_FIRINGS) {
@@ -243,6 +250,13 @@ function runWorldPass(
 
     executor.execute(work.def);
 
+    // 回合类触发器内插入的意图也应正常驱动动作类触发器（增量已并入全量 delta，需单独入队）
+    const intentDeltas = executor.takeIntentDeltas();
+    if (intentDeltas.length > 0) {
+      runActionPass(input, firedThisTx, counter, intentDeltas);
+      if (state.finished) break;
+    }
+
     const next = collectTransitions(chain, world.lastIndex, world.cursor);
     world.lastIndex = next.nextIndex;
     world.cursor = next.cursor;
@@ -302,9 +316,12 @@ function runDueDelays(
     chain.push({ level: 5, kind: 'TRIGGER_FIRE', triggerId: def.id });
 
     const delta = executor.execute(def);
-    // 玩家事务内，延时效果可继续触发动作类；AI 事务内不触发动作类
+    const intentDeltas = executor.takeIntentDeltas();
+    // 玩家事务内，延时效果可继续触发动作类；AI 事务内只有“插入意图”会驱动动作类
     if (input.human) {
       runActionPass({ ...input, intentDelta: delta }, firedThisTx, counter);
+    } else if (intentDeltas.length > 0) {
+      runActionPass({ ...input, intentDelta: delta }, firedThisTx, counter, intentDeltas);
     }
   }
   return executed;

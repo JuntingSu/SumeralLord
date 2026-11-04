@@ -206,6 +206,11 @@ function validateEffect(e: unknown, seats: ReadonlySet<number>, total: number): 
       return typeof e.text_id === 'string' && e.text_id.length > 0 && e.text_id.length <= 64;
     case 'end_game':
       return isInt(e.winning_team);
+    case 'insert_move_intent':
+    case 'insert_attack_intent':
+      return isForceRef(e.force, seats) && isTile(e.from, total) && isTile(e.to, total);
+    case 'insert_add_point_intent':
+      return isForceRef(e.force, seats) && isTile(e.coordinate, total) && isInt(e.amount) && e.amount > 0;
     default:
       return false;
   }

@@ -191,6 +191,21 @@ const ScriptEditor = (() => {
         params: [P('text_id', 'text', '文本 id')],
       },
       {
+        op: 'insert_move_intent', label: '插入移动意图',
+        text: '让 {force} 把地块 {from} 的兵移动到 {to}',
+        params: [P('force', 'force', '势力'), P('from', 'tile', '起点'), P('to', 'tile', '终点')],
+      },
+      {
+        op: 'insert_attack_intent', label: '插入进攻意图',
+        text: '让 {force} 从地块 {from} 进攻 {to}',
+        params: [P('force', 'force', '势力'), P('from', 'tile', '起点'), P('to', 'tile', '终点')],
+      },
+      {
+        op: 'insert_add_point_intent', label: '插入加点意图',
+        text: '让 {force} 在地块 {coordinate} 加点 {amount}',
+        params: [P('force', 'force', '势力'), P('coordinate', 'tile', '地块'), P('amount', 'int', '点数', { min: 1 })],
+      },
+      {
         op: 'end_game', label: '结束游戏',
         text: '游戏结束，获胜队伍 {winning_team}',
         params: [P('winning_team', 'int', '获胜队伍')],
@@ -1046,7 +1061,10 @@ const ScriptEditor = (() => {
     const entry = findEntry(dragNode.uid);
     if (!entry) return;
     const kind = target.dataset.drop;
-    const vertical = target.id === 'trg-cond-row' || target.classList.contains('trg-children');
+    const vertical =
+      target.id === 'trg-cond-row' ||
+      target.id === 'trg-eff-row' ||
+      target.classList.contains('trg-children');
     const idx = dropIndex(target, e.clientX, e.clientY, dragNode.uid, vertical);
     entry.list.splice(entry.index, 1);
 

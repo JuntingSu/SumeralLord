@@ -109,7 +109,12 @@ export type TriggerEffect =
   | { op: 'set_fog'; enabled?: boolean; reveal?: number[]; hide?: number[] }
   | { op: 'show_text'; text_id: string; text: string; placement?: TextPlacement }
   | { op: 'hide_text'; text_id: string }
-  | { op: 'end_game'; winning_team: number };
+  | { op: 'end_game'; winning_team: number }
+  // 以指定势力执行一次玩家意图（战役脚本用）：可指定任意势力、任意时刻执行；
+  // MOVE/ATTACK 忽略移动力与连断兵移动限制，ADD_POINT 忽略回合/阶段，其余规则照常检查。
+  | { op: 'insert_move_intent'; force: TriggerForceRef; from: number; to: number }
+  | { op: 'insert_attack_intent'; force: TriggerForceRef; from: number; to: number }
+  | { op: 'insert_add_point_intent'; force: TriggerForceRef; coordinate: number; amount: number };
 
 /** 延时触发器排期项（随 GameState 存档/悔棋） */
 export interface PendingTrigger {
