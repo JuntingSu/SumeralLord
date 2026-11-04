@@ -129,7 +129,7 @@
     document.querySelectorAll('#mobile-toolbar [data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === s.tool);
     });
-    mobileBrush.classList.toggle('active', s.tool === 'paint');
+    mobileBrush.classList.toggle('active', s.tool === 'paint' || s.tool === 'pan');
     mModeAll.checked = s.brush.mode === 'all';
     mModeTerrain.checked = s.brush.mode === 'terrain';
     mModeStrength.checked = s.brush.mode === 'strength';

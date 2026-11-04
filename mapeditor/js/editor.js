@@ -114,6 +114,15 @@ const Editor = (() => {
     refreshUI();
   }
 
+  /** 单击落笔：一次点击记一次撤销（拖动模式下单击地块也可套用当前画笔） */
+  function paintTap(index) {
+    if (!state.map || index < 0) return;
+    pushUndo();
+    applyBrush(index);
+    refreshCanvas();
+    refreshUI();
+  }
+
   // ---------- 视图 ----------
   function setHover(index) {
     if (state.hover === index) return;
@@ -191,7 +200,7 @@ const Editor = (() => {
 
   return {
     state, getState, onCanvas, onUI, setMap, undo, redo,
-    pushUndo, paintStart, paintDrag, paintEnd,
+    pushUndo, paintStart, paintDrag, paintEnd, paintTap,
     setHover, setView, resize, generateMap, addPlayer, removePlayer, moveSeat,
     commit, setTool, setBrush,
   };

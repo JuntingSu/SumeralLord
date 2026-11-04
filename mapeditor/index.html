@@ -39,7 +39,7 @@
       <h3>工具</h3>
       <div class="tools">
         <button data-tool="paint">✏️ 涂刷</button>
-        <button data-tool="pan">✋ 拖动</button>
+        <button data-tool="pan" title="拖动地图；单击地块按当前画笔落笔">✋ 拖动</button>
         <button data-tool="script" id="btn-script" title="脚本（功能开发中）">📜 脚本</button>
         <button data-tool="random" title="随机生成地图">🎲 随机</button>
       </div>
@@ -62,6 +62,7 @@
         </div>
       </div>
       <p class="hint">山地/虚空不可驻兵；无主格兵力强制为 0；野生/阻挡可驻兵（中立兵）。</p>
+      <p class="hint">拖动模式下单击地块，也会按当前画笔落笔。</p>
     </section>
 
     <section class="panel" id="script-panel">
@@ -186,7 +187,7 @@
     <!-- ==================== 移动端：悬浮工具按钮（悬浮于地图之上） ==================== -->
     <div id="mobile-toolbar" class="m-only" hidden>
       <button data-tool="paint" title="涂刷">✏️</button>
-      <button data-tool="pan" title="拖动">✋</button>
+      <button data-tool="pan" title="拖动地图；单击地块按当前画笔落笔">✋</button>
       <button id="btn-undo-m" title="撤销">↩</button>
       <button id="btn-redo-m" title="前进">↪</button>
     </div>

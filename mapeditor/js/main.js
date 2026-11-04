@@ -90,8 +90,13 @@
   // ==================== 鼠标 / 触摸交互 ====================
   let mouseDown = false;
   let panning = false;
+  let panMoved = false;      // 拖动模式：本次按下后是否真的拖动过（没拖动就按单击落笔处理）
+  let panStartX = 0;
+  let panStartY = 0;
+  let panTapIndex = -1;
   let lastX = 0;
   let lastY = 0;
+  const PAN_CLICK_SLOP = 4; // 位移阈值（px）：小于它视为单击
 
   function indexAt(clientX, clientY) {
     const s = Editor.getState();
@@ -111,10 +116,14 @@
       ScriptEditor.handleBoardClick(indexAt(clientX, clientY));
       return;
     }
-    // 只有涂刷模式会在棋盘上落笔；拖动模式平移，随机模式不响应左键
+    // 涂刷模式在棋盘上落笔；拖动模式平移，平移后原地松开（单击）则按画笔落一格；随机模式不响应左键
     if (s.tool !== 'paint') {
       if (s.tool === 'pan') {
         panning = true;
+        panMoved = false;
+        panStartX = clientX;
+        panStartY = clientY;
+        panTapIndex = indexAt(clientX, clientY);
         lastX = clientX;
         lastY = clientY;
       }
@@ -130,6 +139,9 @@
     const s = Editor.getState();
     if (!s.map) return;
     if (panning) {
+      if (!panMoved && Math.hypot(clientX - panStartX, clientY - panStartY) > PAN_CLICK_SLOP) {
+        panMoved = true;
+      }
       const dx = clientX - lastX;
       const dy = clientY - lastY;
       lastX = clientX;
@@ -151,7 +163,11 @@
       mouseDown = false;
       Editor.paintEnd();
     }
+    // 拖动模式下单击（没有实际拖动）：把当前画笔预设直接填入该地块
+    if (panning && !panMoved && panTapIndex >= 0) Editor.paintTap(panTapIndex);
     panning = false;
+    panMoved = false;
+    panTapIndex = -1;
   }
 
   canvas.addEventListener('mousedown', (e) => {
@@ -159,6 +175,8 @@
     e.preventDefault();
     if (e.button === 1 || e.button === 2) {
       panning = true;
+      panMoved = true; // 中键/右键拖动只平移，不落笔
+      panTapIndex = -1;
       lastX = e.clientX;
       lastY = e.clientY;
       return;
@@ -170,6 +188,8 @@
   canvas.addEventListener('mouseleave', () => {
     mouseDown = false;
     panning = false;
+    panMoved = false;
+    panTapIndex = -1;
     const s = Editor.getState();
     if (s.hover !== -1) { s.hover = -1; render(); }
   });
@@ -208,6 +228,7 @@
       pinch = null;
       downAt(e.touches[0].clientX, e.touches[0].clientY);
     } else if (e.touches.length === 2) {
+      panTapIndex = -1; // 双指手势（平移/捏合缩放）不算单击落笔
       upNow();
       const s = Editor.getState();
       pinch = {
@@ -266,9 +287,9 @@
     document.querySelectorAll('#brush-mode [data-mode]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.mode === s.brush.mode);
     });
-    // 左栏内容随模式切换：涂刷→画笔，脚本→脚本占位，随机→随机生成；拖动不展示内容
+    // 左栏内容随模式切换：涂刷/拖动都展示画笔（拖动下单击地块可落笔），脚本→脚本，随机→随机生成
     const left = $('left');
-    left.classList.toggle('mode-paint', s.tool === 'paint');
+    left.classList.toggle('mode-paint', s.tool === 'paint' || s.tool === 'pan');
     left.classList.toggle('mode-script', s.tool === 'script');
     left.classList.toggle('mode-random', s.tool === 'random');
   }
