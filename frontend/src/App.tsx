@@ -85,11 +85,7 @@ export default function App() {
       />
       <Route
         path="/campaign"
-        element={
-          <RequireAuth>
-            <PveRoom campaign />
-          </RequireAuth>
-        }
+        element={<Navigate to="/pve" replace />}
       />
       <Route
         path="/pve/game"

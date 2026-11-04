@@ -9,7 +9,6 @@ import {
   getPveSaveMeta,
   listPveMaps,
   randomPveMap,
-  type PveMapMode,
 } from '../api/pve';
 import { ApiError } from '../api/client';
 import { useAuth } from '../stores/auth';
@@ -40,9 +39,8 @@ function withPersonalSkin(map: MapFullData, playerSeat: number, userId: number):
   };
 }
 
-export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
+export default function PveRoom() {
   const navigate = useNavigate();
-  const mode: PveMapMode = campaign ? 'campaign' : 'normal';
   const user = useAuth((s) => s.user);
   const room = usePve((s) => s.room);
   const setMap = usePve((s) => s.setMap);
@@ -75,7 +73,7 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
   useEffect(() => {
     let cancelled = false;
     setMapsLoading(true);
-    listPveMaps(undefined, mode)
+    listPveMaps(undefined)
       .then((list) => {
         if (!cancelled) setMaps(list);
       })
@@ -106,9 +104,10 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [loadSaveMeta, setMap, mode]);
+  }, [loadSaveMeta, setMap]);
 
   const forces = room.map ? [...room.map.player_list].sort((a, b) => a.seat - b.seat) : [];
+  const hasTriggers = (room.map?.triggers?.length ?? 0) > 0;
 
   const handleSelectMap = async (id: string) => {
     if (!id) return;
@@ -130,7 +129,7 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
     setError(null);
     setNotice(null);
     try {
-      const map = await randomPveMap(room.mapId ?? undefined, mode);
+      const map = await randomPveMap(room.mapId ?? undefined);
       setMap(map, map.id);
       setNotice(`随机到「${map.title}」`);
     } catch (err) {
@@ -198,10 +197,6 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
       setError('地图至少需要 2 个势力');
       return;
     }
-    if (campaign && (room.map.triggers?.length ?? 0) === 0) {
-      setError('战役模式需要包含触发器的地图；请导入战役地图 JSON');
-      return;
-    }
     const sourceMap = room.map;
     const playerSeat = room.playerSeat;
     const map = room.usePersonalSkin && user.hasSkin
@@ -228,11 +223,10 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
       playerSeat,
       humanUserId: user.id,
       reducerVersion: reducerVersion(),
-      campaign,
     };
     usePve.getState().setLastGame(config);
     usePve.getState().clearLoadSave();
-    navigate(campaign ? '/pve/game?campaign=1' : '/pve/game');
+    navigate('/pve/game');
   };
 
   const handleContinue = async () => {
@@ -251,16 +245,9 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
         setError('该存档已结束，已自动清除');
         return;
       }
-      const saveCampaign = save.config.campaign === true;
-      if (saveCampaign !== campaign) {
-        setError(
-          campaign ? '该存档属于单人 PVE，请回到单人 PVE 继续' : '该存档属于战役模式，请回到战役模式继续',
-        );
-        return;
-      }
       usePve.getState().restoreRoomFromConfig(save.config);
       usePve.getState().setLoadSave(save);
-      navigate(saveCampaign ? '/pve/game?load=1&campaign=1' : '/pve/game?load=1');
+      navigate('/pve/game?load=1');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '读取存档失败');
     } finally {
@@ -291,9 +278,9 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
           <Link to="/modes" className="text-sm text-emerald-400 hover:underline">
             ← 模式选择
           </Link>
-          <h1 className="text-lg font-bold">{campaign ? '战役模式' : '单人 PVE'}</h1>
+          <h1 className="text-lg font-bold">单人 PVE</h1>
           <span className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
-            {campaign ? '触发器战役' : '本地对局'}
+            {hasTriggers ? '触发器地图' : '本地对局'}
           </span>
         </div>
       </header>
@@ -323,7 +310,7 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
 
           {!room.map ? (
             <div className="flex flex-1 items-center justify-center rounded bg-slate-700/30 py-16 text-sm text-slate-500">
-              请先在右侧选择、随机或导入一张{campaign ? '战役' : ''}地图
+              请先在右侧选择、随机或导入一张地图
             </div>
           ) : (
             <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
@@ -435,7 +422,14 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
             {room.map ? (
               <>
                 <HexMapPreview battlefield={room.map.battlefield} column={room.map.column} row={room.map.row} height={200} />
-                <p className="mt-2 truncate text-sm font-medium">{room.map.title}</p>
+                <p className="mt-2 flex items-center gap-2 truncate text-sm font-medium">
+                  <span className="truncate">{room.map.title}</span>
+                  {hasTriggers && (
+                    <span className="shrink-0 rounded bg-amber-700/40 px-1.5 py-0.5 text-[10px] text-amber-200">
+                      含触发器
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-slate-400">
                   {room.map.row}×{room.map.column} · {room.map.player_num} 势力 · 作者：
                   {room.map.author?.trim() || '未知作者'}
@@ -457,23 +451,16 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
               >
                 🎲 随机地图
               </button>
-              {!campaign && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCodeOpen(true);
-                    setCodeError(null);
-                  }}
-                  className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
-                >
-                  🎴 地图码导入
-                </button>
-              )}
-              {campaign && (
-                <span className="self-center text-xs text-slate-500">
-                  战役地图暂不支持地图码，请用 JSON 导入
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setCodeOpen(true);
+                  setCodeError(null);
+                }}
+                className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
+              >
+                🎴 地图码导入
+              </button>
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
@@ -502,19 +489,13 @@ export default function PveRoom({ campaign = false }: { campaign?: boolean }) {
                 maxResults={100}
                 disabled={busy || mapsLoading}
                 placeholder={
-                  mapsLoading
-                    ? '加载地图库…'
-                    : campaign
-                      ? '搜索战役地图（标题/作者/标签）'
-                      : '搜索地图库（标题/作者/标签）'
+                  mapsLoading ? '加载地图库…' : '搜索地图库（标题/作者/标签）'
                 }
               />
               {mapsError && <p className="mt-1 text-xs text-red-400">{mapsError}</p>}
               {!mapsLoading && maps.length === 0 && (
                 <p className="mt-1 text-xs text-slate-500">
-                  {campaign
-                    ? '战役地图库为空；可用 JSON 导入带 triggers 的地图。'
-                    : '地图库为空或没有可玩地图，可用随机/地图码/JSON/地图编辑器导入。'}
+                  地图库为空或没有可玩地图，可用随机/地图码/JSON/地图编辑器导入。
                 </p>
               )}
             </div>

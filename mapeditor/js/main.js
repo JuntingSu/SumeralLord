@@ -453,8 +453,7 @@
       statusMsg('浏览器本地存储不可用，无法带入 PVE', 'error');
       return;
     }
-    const hasTriggers = Array.isArray(s.map.triggers) && s.map.triggers.length > 0;
-    window.location.href = hasTriggers ? '/campaign?from=mapeditor' : '/pve?from=mapeditor';
+    window.location.href = '/pve?from=mapeditor';
   }
   $('btn-pve-play').addEventListener('click', playPve);
 

@@ -66,38 +66,26 @@ export const pveRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/pve/maps', async (request, reply) => {
     refreshPveMaps(app);
-    const { search, mode } = request.query as { search?: string; mode?: string };
-    const campaignOnly = mode === 'campaign';
-    const mapList = app.pveMaps
-      .list(search)
-      .filter(isPvePlayableMap)
-      .filter((m) => (campaignOnly ? m.hasTriggers === true : m.hasTriggers !== true));
+    const { search } = request.query as { search?: string };
+    const mapList = app.pveMaps.list(search).filter(isPvePlayableMap);
     return ok(reply, { mapList } satisfies MapListResult);
   });
 
   // 注意：静态段路由需在 /:id 之前注册
   app.get('/api/pve/maps/random', async (request, reply) => {
     refreshPveMaps(app);
-    const { exclude, minPlayers, mode } = request.query as {
+    const { exclude, minPlayers } = request.query as {
       exclude?: string;
       minPlayers?: string;
-      mode?: string;
     };
-    const campaignOnly = mode === 'campaign';
     const min = Math.max(2, Number(minPlayers) || 2);
     let candidates = app.pveMaps
       .list()
       .filter(isPvePlayableMap)
-      .filter((m) => m.playerNum >= min)
-      .filter((m) => (campaignOnly ? m.hasTriggers === true : m.hasTriggers !== true));
+      .filter((m) => m.playerNum >= min);
     if (exclude && candidates.length > 1) candidates = candidates.filter((m) => m.id !== exclude);
     if (candidates.length === 0) {
-      return fail(
-        reply,
-        404,
-        ERROR_CODES.MAP_NOT_FOUND,
-        campaignOnly ? '战役地图库为空' : 'PVE 地图库为空或没有可玩地图',
-      );
+      return fail(reply, 404, ERROR_CODES.MAP_NOT_FOUND, 'PVE 地图库为空或没有可玩地图');
     }
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     const map = app.pveMaps.get(pick.id);

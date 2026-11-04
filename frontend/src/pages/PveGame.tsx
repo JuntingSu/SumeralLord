@@ -97,10 +97,6 @@ export default function PveGame() {
   const transportRef = useRef<PveTransport | null>(null);
   const plannerRef = useRef<PveAiPlanner | null>(null);
   const plannerPromiseRef = useRef<Promise<PveAiPlanner | null> | null>(null);
-  const isCampaignRoute =
-    configRef.current?.campaign === true ||
-    new URLSearchParams(window.location.search).get('campaign') === '1';
-  const roomPath = isCampaignRoute ? '/campaign' : '/pve';
 
   const [selected, setSelected] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -134,7 +130,7 @@ export default function PveGame() {
 
       if (loadRequested) {
         if (!save) {
-          navigate(roomPath, { replace: true });
+          navigate('/pve', { replace: true });
           return;
         }
         config = {
@@ -149,13 +145,12 @@ export default function PveGame() {
           playerSeat: save.state.controlledSeat ?? save.config.playerSeat,
           humanUserId: save.config.humanUserId,
           reducerVersion: save.reducerVersion,
-          campaign: save.config.campaign === true,
         };
         state = structuredClone(save.state);
         if (state.finished) {
           await deletePveSave().catch(() => undefined);
           usePve.getState().clearLoadSave();
-          navigate(roomPath, { replace: true });
+          navigate('/pve', { replace: true });
           return;
         }
         if (save.reducerVersion !== reducerVersion()) {
@@ -165,7 +160,7 @@ export default function PveGame() {
         }
       } else {
         if (!lastGame) {
-          navigate(roomPath, { replace: true });
+          navigate('/pve', { replace: true });
           return;
         }
         config = lastGame;
@@ -174,7 +169,7 @@ export default function PveGame() {
           seatAssignments: config.seatAssignments,
           seed: config.seed,
           timeSettings: config.timeSettings,
-          triggerMode: config.campaign === true,
+          triggerMode: (config.map.triggers?.length ?? 0) > 0,
           controlledSeat: config.playerSeat,
           humanPlayerId: config.humanUserId,
         });
@@ -592,7 +587,6 @@ export default function PveGame() {
           usePersonalSkin: config.usePersonalSkin,
           playerSeat: snap.state.controlledSeat ?? config.playerSeat,
           humanUserId: config.humanUserId,
-          campaign: config.campaign === true,
         },
         meta: snap.meta,
       };
@@ -621,7 +615,7 @@ export default function PveGame() {
 
   const handleExit = () => {
     if (!window.confirm('退出对局？未存档的进度将丢失。')) return;
-    clearLoadAndNavigate(roomPath);
+    clearLoadAndNavigate('/pve');
   };
 
   const handleNewGame = () => {
@@ -640,7 +634,7 @@ export default function PveGame() {
     const next: PveGameConfig = { ...base, gameId: `pve-${randomToken(8)}`, seed: randomToken(16) };
     usePve.getState().setLoadSave(null);
     usePve.getState().setLastGame(next);
-    navigate(next.campaign ? '/pve/game?campaign=1' : '/pve/game', { replace: true });
+    navigate('/pve/game', { replace: true });
     setRunId((n) => n + 1);
   };
 
@@ -656,7 +650,7 @@ export default function PveGame() {
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-900 text-slate-400">
         <p>{startError ?? (starting ? '对局加载中…' : '对局加载中…')}</p>
         {startError && (
-          <button onClick={() => navigate(roomPath)} className="rounded bg-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
+          <button onClick={() => navigate('/pve')} className="rounded bg-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
             返回房间
           </button>
         )}
@@ -1027,7 +1021,7 @@ export default function PveGame() {
           board={board}
           humanUserId={configRef.current?.humanUserId ?? user?.id ?? 0}
           onNewGame={handleNewGame}
-          onBackRoom={() => clearLoadAndNavigate(roomPath)}
+          onBackRoom={() => clearLoadAndNavigate('/pve')}
           onBackModes={() => clearLoadAndNavigate('/modes')}
         />
       )}
@@ -1038,7 +1032,7 @@ export default function PveGame() {
             <h2 className="text-xl font-bold text-red-400">对局异常</h2>
             <p className="mt-3 text-sm text-slate-300">{fatal.message}</p>
             <button
-              onClick={() => clearLoadAndNavigate(roomPath)}
+              onClick={() => clearLoadAndNavigate('/pve')}
               className="mt-5 rounded bg-slate-600 px-5 py-2 text-sm font-medium text-white hover:bg-slate-500"
             >
               返回房间

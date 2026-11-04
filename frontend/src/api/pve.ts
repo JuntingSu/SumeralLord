@@ -12,12 +12,9 @@ import type {
 } from '@dl/shared';
 import { api } from './client';
 
-export type PveMapMode = 'normal' | 'campaign';
-
-export async function listPveMaps(search?: string, mode: PveMapMode = 'normal'): Promise<MapMeta[]> {
+export async function listPveMaps(search?: string): Promise<MapMeta[]> {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
-  if (mode === 'campaign') params.set('mode', 'campaign');
   const qs = params.toString() ? `?${params.toString()}` : '';
   const result = await api<MapListResult>(`/api/pve/maps${qs}`);
   return result.mapList;
@@ -32,13 +29,9 @@ export function getPveMapPreview(id: string): Promise<MapPreview> {
 }
 
 /** 点击随机地图时调用：服务端直接从可玩库随机并返回完整地图，不依赖前端列表 */
-export async function randomPveMap(
-  exclude?: string,
-  mode: PveMapMode = 'normal',
-): Promise<MapFullData> {
+export async function randomPveMap(exclude?: string): Promise<MapFullData> {
   const params = new URLSearchParams();
   if (exclude) params.set('exclude', exclude);
-  if (mode === 'campaign') params.set('mode', 'campaign');
   const qs = params.toString() ? `?${params.toString()}` : '';
   const result = await api<PveRandomMapResult>(`/api/pve/maps/random${qs}`);
   return result.map;

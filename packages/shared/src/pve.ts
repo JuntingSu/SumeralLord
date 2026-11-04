@@ -16,8 +16,6 @@ export interface PveGameConfig {
   playerSeat: number;
   humanUserId: number;
   reducerVersion: string;
-  /** 战役模式：为 true 时启用地图触发器（缺省 false = 普通 PVE） */
-  campaign?: boolean;
 }
 
 /** 存档展示用元信息（冗余自 GameState，避免房间卡片拉完整存档） */
@@ -46,8 +44,6 @@ export interface PveSavePayload {
     usePersonalSkin: boolean;
     playerSeat: number;
     humanUserId: number;
-    /** 战役模式（旧存档缺省 false） */
-    campaign?: boolean;
   };
   meta: PveSaveMeta;
 }

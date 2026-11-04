@@ -105,4 +105,28 @@ describe('PVE 地图库（懒加载 + mtime 缓存 + 可玩过滤）', () => {
     expect(random.statusCode).toBe(404);
     expect(random.json().code).toBe('MAP_NOT_FOUND');
   });
+
+  it('触发器地图与普通地图统一出现在 PVE 列表', async () => {
+    const triggerMap = pveMapJson({ id: 'trig', title: '触发器图' });
+    triggerMap.trigger_schema_version = 1;
+    triggerMap.triggers = [
+      {
+        id: 't1',
+        class: 'action',
+        when: { op: 'tile_emptied', tile: 0 },
+        effects: [{ op: 'show_text', text_id: 'x', text: '触发' }],
+      },
+    ];
+    writeMap('trig.json', triggerMap);
+
+    const list = await app.inject({ method: 'GET', url: '/api/pve/maps' });
+    const ids = (list.json().data.mapList as Array<{ id: string }>).map((m) => m.id);
+    expect(ids).toEqual(['trig']);
+
+    const random = await app.inject({ method: 'GET', url: '/api/pve/maps/random' });
+    expect(random.statusCode).toBe(200);
+    expect(random.json().data.map.id).toBe('trig');
+
+    unlinkSync(path.join(mapsDir, 'trig.json'));
+  });
 });
