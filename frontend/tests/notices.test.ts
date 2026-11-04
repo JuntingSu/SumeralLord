@@ -1,6 +1,6 @@
 // collectSystemNotices 单测（POV）：回合开始 / 被击败（击杀者归属与投降/超时）/ 大杀四方（击杀数 ≥3 每次击杀都发）
 import { describe, it, expect } from 'vitest';
-import type { GameEvent } from '@dl/shared';
+import type { GameEvent, GameState } from '@dl/shared';
 import { collectSystemNotices, collectTriggerTexts } from '../src/stores/game';
 
 const FORCE_CLEAR = (seat: number, reason: 'no_stronghold' | 'surrender' | 'timeout'): GameEvent => ({
@@ -36,13 +36,27 @@ describe('collectTriggerTexts 战役文本收集', () => {
       },
       { level: 5, kind: 'TRIGGER_TEXT_HIDE', textId: 'a' },
     ];
-    expect(collectTriggerTexts(chain)).toEqual({
+    expect(collectTriggerTexts(chain, {} as GameState)).toEqual({
       show: [
         { textId: 'a', text: 'A', placement: { kind: 'screen', position: 'top' } },
         { textId: 'b', text: 'B', placement: { kind: 'tile', tile: 3 } },
       ],
       hide: ['a'],
     });
+  });
+
+  it('replaces gamestate placeholders with readable text', () => {
+    const chain: GameEvent[] = [
+      {
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: 'c',
+        text: '第 {gamestate.turn} 回合，阶段 {gamestate.phase}',
+        placement: { kind: 'screen', position: 'top' },
+      },
+    ];
+    const state = { turn: 3, phase: 'ACTION' } as unknown as GameState;
+    expect(collectTriggerTexts(chain, state).show[0].text).toBe('第 3 回合，阶段 行动阶段');
   });
 });
 

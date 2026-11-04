@@ -188,12 +188,12 @@ const HexRender = (() => {
       ctx.stroke();
     }
 
-    // 兵：旗帜精灵（据点驻军按连兵渲染）+ 兵力数字
+    // 兵：旗帜精灵（据点驻军按连兵渲染；半断地形海洋永为断兵）+ 兵力数字
     for (let i = 0; i < battlefield.length; i++) {
-      const [, o, s] = battlefield[i];
+      const [terrain, o, s] = battlefield[i];
       if (s <= 0) continue;
       const { cx, cy } = centerOf(i, column, layout);
-      drawSoldier(ctx, cx, cy, layout.size, flagNumOf(map, o), false, o);
+      drawSoldier(ctx, cx, cy, layout.size, flagNumOf(map, o), terrain === TERRAIN.OCEAN, o);
       drawStrength(ctx, cx, cy, layout.size, s);
     }
 
@@ -259,7 +259,9 @@ const HexRender = (() => {
     if (showSoldier) {
       const flagNum = map && Array.isArray(map.player_list) ? flagNumOf(map, owner) : 8;
       const soldierSize = size * PREVIEW_SOLDIER_SCALE;
-      drawSoldier(ctx, cx, cy, soldierSize, flagNum, false, owner);
+      // 半断地形（海洋）上的兵按断兵展示
+      const broken = showTerrain && terrain === TERRAIN.OCEAN;
+      drawSoldier(ctx, cx, cy, soldierSize, flagNum, broken, owner);
       drawStrength(ctx, cx, cy, soldierSize, strength);
     }
     // 据点金环（旗面上沿地块轮廓）

@@ -1,4 +1,4 @@
-// 战役控制转移：transport 与 store 同步切换 mySeat，切换后玩家可用新势力继续行动。
+// 战役控制转移：玩家势力被交给新建 AI 后，store 失去 mySeat。
 import { afterEach, describe, expect, it } from 'vitest';
 import { initState } from '@dl/shared';
 import type { BattlefieldTile, MapFullData, PveGameConfig, SeatAssignment, TriggerDef } from '@dl/shared';
@@ -20,16 +20,9 @@ function makeMap(): MapFullData {
   );
   const triggers: TriggerDef[] = [
     {
-      id: 'clear-player',
-      class: 'action',
-      when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
-      effects: [{ op: 'clear_force', force: 1 }],
-    },
-    {
       id: 'transfer',
-      class: 'action',
-      when: { op: 'force_gone', force: 1 },
-      effects: [{ op: 'transfer_control', to_force: 2, ai_level: 1 }],
+      when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+      effects: [{ op: 'transfer_control', ai_level: 1 }],
     },
   ];
   return {
@@ -53,7 +46,7 @@ function makeMap(): MapFullData {
       { name: '绿方', team: 3, computer: 255, seat: 3, flag: 3 },
     ],
     battlefield,
-    trigger_schema_version: 1,
+    trigger_schema_version: 2,
     triggers,
   };
 }
@@ -75,7 +68,7 @@ describe('战役控制转移（transport + store）', () => {
     useGame.getState().reset();
   });
 
-  it('switches mySeat to the new force and accepts its intent', async () => {
+  it('clears mySeat after the player force is handed to AI', async () => {
     const map = makeMap();
     const config: PveGameConfig = {
       gameId: 'pve-control-1',
@@ -118,15 +111,12 @@ describe('战役控制转移（transport + store）', () => {
     expect(useGame.getState().mySeat).toBe(1);
     useGame.getState().submitIntent({ intentType: 'MOVE', from: 0, to: 1 });
 
-    await waitFor(() => useGame.getState().board?.controlledSeat === 2);
+    await waitFor(() => useGame.getState().board?.controlledSeat === null);
     const b = useGame.getState().board!;
-    expect(b.finished).toBe(false);
-    expect(useGame.getState().mySeat).toBe(2);
+    expect(b.finished).toBe(true);
+    expect(useGame.getState().mySeat).toBeNull();
     expect(useGame.getState().undoAvailable).toBe(false);
-    expect(b.forces.find((f) => f.seat === 2)).toMatchObject({ isAI: false, playerId: 1 });
-
-    useGame.getState().submitIntent({ intentType: 'SWITCH_PHASE' });
-    await waitFor(() => useGame.getState().board?.phase === 'ADD_POINT');
-    expect(useGame.getState().board?.phase).toBe('ADD_POINT');
+    expect(b.forces.find((f) => f.seat === 1)).toMatchObject({ isAI: true, playerId: null, computer: 1 });
+    expect(b.finished).toBe(true);
   });
 });

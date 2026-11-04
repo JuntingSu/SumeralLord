@@ -7,7 +7,7 @@ import { DEFAULT_TIME, assignments, chainKinds, makeMap } from './helpers.js';
 function mapWith(players: Array<{ seat: number; team?: number }>, triggers: TriggerDef[]): MapFullData {
   return {
     ...makeMap({ rows: 2, columns: 2, players }),
-    trigger_schema_version: 1,
+    trigger_schema_version: 2,
     triggers,
   };
 }
@@ -31,15 +31,15 @@ function init(
   });
 }
 
-const text = (id: string): TriggerDef['effects'] => [{ op: 'show_text', text_id: id, text: id }];
-const phaseStart = (force: number, phase: 'ACTION' | 'ADD_POINT' | 'PREPARE' | 'END', turn?: number) =>
+const text = (id: string): TriggerDef['effects'] => [{ op: 'show_text', text_id: id, text: id, placement: { kind: 'screen', position: 'top-right' } }];
+const phaseStart = (force: number, phase: 'ACTION' | 'ADD_POINT' | 'PREPARE' | 'END', turn: number | 'any' = 'any') =>
   ({ op: 'phase_start' as const, force, phase, turn });
 
 describe('world triggers', () => {
   it('fires turn_start(1) at init', () => {
     const result = init(
       [{ seat: 1, team: 1 }, { seat: 2, team: 2 }],
-      [{ id: 'turn1', class: 'world', when: { op: 'turn_start', turn: 1 }, effects: text('turn1') }],
+      [{ id: 'turn1', when: { op: 'turn_start', turn: 1 }, effects: text('turn1') }],
     );
     expect(chainKinds(result)).toContain('TRIGGER_FIRE');
     expect(result.state.triggerRuntime?.firedCounts.turn1).toBe(1);
@@ -48,7 +48,7 @@ describe('world triggers', () => {
   it('fires next force ACTION start in the player transaction', () => {
     const result = init(
       [{ seat: 1, team: 1 }, { seat: 2, team: 2 }],
-      [{ id: 'seat2-action', class: 'world', when: phaseStart(2, 'ACTION'), effects: text('seat2') }],
+      [{ id: 'seat2-action', when: phaseStart(2, 'ACTION'), effects: text('seat2') }],
     );
     let cur = result.state;
     const a = applyIntent(cur, { actor: { kind: 'PLAYER', seat: 1 }, intent: { intentType: 'SWITCH_PHASE' } });
@@ -65,8 +65,8 @@ describe('world triggers', () => {
     const result = init(
       [{ seat: 1, team: 1 }, { seat: 2, team: 2 }],
       [
-        { id: 'seat1-turn2', class: 'world', when: phaseStart(1, 'ACTION', 2), effects: text('seat1t2') },
-        { id: 'round2', class: 'world', when: { op: 'turn_start', turn: 2 }, effects: text('r2') },
+        { id: 'seat1-turn2', when: phaseStart(1, 'ACTION', 2), effects: text('seat1t2') },
+        { id: 'round2', when: { op: 'turn_start', turn: 2 }, effects: text('r2') },
       ],
     );
     let cur = result.state;
@@ -95,11 +95,10 @@ describe('world triggers', () => {
       [
         {
           id: 'clear-seat2',
-          class: 'world',
           when: phaseStart(2, 'ACTION'),
           effects: [{ op: 'clear_force', force: 2 }],
         },
-        { id: 'seat3-action', class: 'world', when: phaseStart(3, 'ACTION'), effects: text('seat3') },
+        { id: 'seat3-action', when: phaseStart(3, 'ACTION'), effects: text('seat3') },
       ],
       assignments(
         { seat: 1, playerId: 1 },

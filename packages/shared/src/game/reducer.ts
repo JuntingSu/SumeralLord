@@ -63,6 +63,7 @@ function cloneState(s: GameState): GameState {
       ? {
           ...s.triggerRuntime,
           firedCounts: { ...s.triggerRuntime.firedCounts },
+          stateWatch: { ...(s.triggerRuntime.stateWatch ?? {}) },
           pending: s.triggerRuntime.pending.map((p) => ({ ...p })),
         }
       : null,
@@ -644,9 +645,9 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       const soldier: SoldierState = {
         owner,
         strength: effect.strength,
-        isLinked: effect.linked ?? false,
-        hasMovement: effect.movement ?? false,
-        counter: effect.counter ?? (TERRAIN_PROPS[tile.terrain]?.counter ?? 0),
+        isLinked: false,
+        hasMovement: effect.movement,
+        counter: TERRAIN_PROPS[tile.terrain]?.counter ?? 0,
       };
       if (tile.soldier) despawnEvent(ctx, effect.tile);
       spawnEvent(ctx, effect.tile, soldier);
@@ -658,14 +659,12 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       if (!tile || !before) return;
       const p = effect.patch;
       const patch: Partial<SoldierState> = {};
-      if (p.strength !== undefined) patch.strength = p.strength;
-      if (p.owner !== undefined) patch.owner = p.owner;
-      if (p.linked !== undefined) patch.isLinked = p.linked;
-      if (p.movement !== undefined) patch.hasMovement = p.movement;
-      if (p.counter !== undefined) patch.counter = p.counter;
+      if (p.strength !== 'unchanged') patch.strength = p.strength;
+      if (p.owner !== 'unchanged') patch.owner = p.owner;
+      if (p.movement !== 'unchanged') patch.hasMovement = p.movement;
       updateEvent(ctx, effect.tile, patch);
       if (
-        p.owner !== undefined &&
+        p.owner !== 'unchanged' &&
         p.owner !== before.owner &&
         isStrongholdTerrain(tile.terrain) &&
         !isNeutralOwner(before.owner)
@@ -711,11 +710,11 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       if (!f) return;
       trackForce(ctx.stepDirty, ctx.state, seat);
       const p = effect.patch;
-      if (p.name !== undefined) f.name = p.name;
-      if (p.flag !== undefined) f.flag = p.flag;
-      if (p.team !== undefined) f.team = p.team;
-      if (p.points !== undefined) f.points = p.points;
-      if (p.computer !== undefined) f.computer = p.computer;
+      if (p.name !== 'unchanged') f.name = p.name;
+      if (p.flag !== 'unchanged') f.flag = p.flag;
+      if (p.team !== 'unchanged') f.team = p.team;
+      if (p.points !== 'unchanged') f.points = p.points;
+      if (p.computer !== 'unchanged') f.computer = p.computer;
       ctx.chain.push({ level: 5, kind: 'FORCE_UPDATE', seat, patch: { ...p } });
       return;
     }
@@ -726,27 +725,21 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       return;
     }
     case 'transfer_control': {
-      const toSeat = resolveForceRef(ctx.state, effect.to_force);
-      if (toSeat === null) return;
-      const next = forceOf(ctx.state, toSeat);
-      if (!next || !next.exists || !next.alive || ctx.state.humanPlayerId === null) return;
+      // 把玩家当前势力的控制权交给新建的 AI 玩家：玩家势力转为 AI，玩家不再控制任何势力
       const fromSeat = ctx.state.controlledSeat;
-      const prev = fromSeat !== null ? forceOf(ctx.state, fromSeat) : undefined;
-      if (prev && prev.seat !== next.seat) {
-        trackForce(ctx.stepDirty, ctx.state, prev.seat);
-        prev.isAI = true;
-        prev.playerId = null;
-        prev.computer = effect.ai_level;
-      }
-      trackForce(ctx.stepDirty, ctx.state, next.seat);
-      next.isAI = false;
-      next.playerId = ctx.state.humanPlayerId;
-      ctx.state.controlledSeat = next.seat;
+      if (fromSeat === null) return;
+      const prev = forceOf(ctx.state, fromSeat);
+      if (!prev || !prev.exists) return;
+      trackForce(ctx.stepDirty, ctx.state, prev.seat);
+      prev.isAI = true;
+      prev.playerId = null;
+      prev.computer = effect.ai_level;
+      ctx.state.controlledSeat = null;
       ctx.chain.push({
         level: 5,
         kind: 'CONTROL_CHANGE',
         fromSeat,
-        toSeat: next.seat,
+        toSeat: null,
         aiLevel: effect.ai_level,
       });
       return;
@@ -757,10 +750,16 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       return;
     case 'set_fog': {
       const cur = ctx.state.fogOverrides ?? { revealed: [], hidden: [] };
+      const enabled =
+        effect.enabled === 'unchanged'
+          ? cur.enabled
+          : effect.enabled === 'flipped'
+            ? !(cur.enabled ?? false)
+            : effect.enabled;
       const next = {
-        enabled: effect.enabled ?? cur.enabled,
-        revealed: mergeTileList(cur.revealed, effect.reveal ?? []),
-        hidden: mergeTileList(cur.hidden, effect.hide ?? []),
+        enabled,
+        revealed: mergeTileList(cur.revealed, effect.reveal),
+        hidden: mergeTileList(cur.hidden, effect.hide),
       };
       ctx.state.fogOverrides = next;
       ctx.chain.push({
@@ -776,7 +775,7 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
         kind: 'TRIGGER_TEXT_SHOW',
         textId: effect.text_id,
         text: effect.text,
-        placement: effect.placement ?? { kind: 'screen', position: 'top-right' },
+        placement: effect.placement,
       });
       return;
     case 'hide_text':
@@ -1000,8 +999,9 @@ export function initState(input: InitStateInput): InitStateResult {
     triggerMode,
     triggerRuntime: triggerMode
       ? {
-          schemaVersion: 1,
+          schemaVersion: 2,
           firedCounts: {},
+          stateWatch: {},
           pending: [],
           intentSeq: 0,
           turnSeq: 0,

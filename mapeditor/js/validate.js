@@ -86,7 +86,15 @@ const MapValidate = (() => {
       if (!Array.isArray(m.triggers)) {
         issues.push({ level: 'error', text: 'triggers 必须为数组' });
       } else if (m.triggers.length > 0) {
+        if (m.trigger_schema_version !== 2) {
+          issues.push({ level: 'error', text: '含触发器的地图必须使用 trigger_schema_version = 2' });
+        }
         const ids = new Set();
+        const pathCtx = {
+          total: m.row * m.column,
+          seats: new Set((m.player_list || []).map((p) => p.seat)),
+          ids: new Set(m.triggers.map((t) => (t && t.id) || '')),
+        };
         m.triggers.forEach((t, i) => {
           if (!t || typeof t !== 'object') {
             issues.push({ level: 'error', text: `触发器 ${i + 1}：必须为对象` });
@@ -99,11 +107,19 @@ const MapValidate = (() => {
           } else {
             ids.add(t.id);
           }
-          if (t.class !== 'action' && t.class !== 'world') {
-            issues.push({ level: 'error', text: `触发器 ${i + 1}：class 须为 action/world` });
-          }
           if (!t.when || typeof t.when !== 'object') {
             issues.push({ level: 'error', text: `触发器 ${i + 1}：缺少 when` });
+          } else {
+            checkStateConditions(t.when, `触发器 ${i + 1}`, pathCtx, issues);
+          }
+          if (Array.isArray(t.effects)) {
+            t.effects.forEach((e) => {
+              if (e && e.op === 'show_text' && typeof e.text === 'string') {
+                if (!StatePaths.validateText(e.text, pathCtx)) {
+                  issues.push({ level: 'error', text: `触发器 ${i + 1}：文本包含未知的 gamestate 变量` });
+                }
+              }
+            });
           }
           if (!Array.isArray(t.effects) || t.effects.length === 0) {
             issues.push({ level: 'error', text: `触发器 ${i + 1}：effects 须为非空数组` });
@@ -125,6 +141,25 @@ const MapValidate = (() => {
     }
 
     return issues;
+  }
+
+  function checkStateConditions(c, label, ctx, issues) {
+    if (!c || typeof c !== 'object') return;
+    if ((c.op === 'and' || c.op === 'or') && Array.isArray(c.items)) {
+      c.items.forEach((x) => checkStateConditions(x, label, ctx, issues));
+      return;
+    }
+    if (c.op === 'not') {
+      checkStateConditions(c.item, label, ctx, issues);
+      return;
+    }
+    if (c.op === 'state_assert') {
+      if (typeof c.path !== 'string' || !StatePaths.validatePath(c.path, ctx)) {
+        issues.push({ level: 'error', text: `${label}：未知的 gamestate 变量 ${c.path}` });
+      } else if (!StatePaths.validateValue(c.path, c.value, ctx)) {
+        issues.push({ level: 'error', text: `${label}：预期值与 gamestate 变量类型不匹配` });
+      }
+    }
   }
 
   return { validate };

@@ -4,3 +4,4 @@ export * from './delta.js';
 export * from './conditions.js';
 export * from './engine.js';
 export * from './resolve.js';
+export * from './state.js';

@@ -13,21 +13,19 @@ import type { MapFullData, TriggerDef } from '../src/index.js';
 import { DEFAULT_TIME, assignments, makeMap } from './helpers.js';
 
 function withTriggers(map: MapFullData, triggers: TriggerDef[]): MapFullData {
-  return { ...map, trigger_schema_version: 1, triggers };
+  return { ...map, trigger_schema_version: 2, triggers };
 }
 
 const actionTrigger: TriggerDef = {
   id: 'occupy',
-  class: 'action',
-  when: { op: 'tile_owner_appeared', tile: 0, force: 1 },
-  effects: [{ op: 'show_text', text_id: 'hello', text: 'hello' }],
+  when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 1 },
+  effects: [{ op: 'show_text', text_id: 'hello', text: 'hello', placement: { kind: 'screen', position: 'top-right' } }],
 };
 
 const worldTrigger: TriggerDef = {
   id: 'turn-one',
-  class: 'world',
   when: { op: 'turn_start', turn: 1 },
-  effects: [{ op: 'show_text', text_id: 'turn', text: 'turn 1' }],
+  effects: [{ op: 'show_text', text_id: 'turn', text: 'turn 1', placement: { kind: 'screen', position: 'top-right' } }],
 };
 
 describe('trigger map validation', () => {
@@ -37,25 +35,23 @@ describe('trigger map validation', () => {
       worldTrigger,
       {
         id: 'chain',
-        class: 'action',
         when: { op: 'trigger_fired', trigger_id: 'occupy' },
-        effects: [{ op: 'set_fog', reveal: [0] }],
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
       },
       {
         id: 'params',
-        class: 'action',
         once: true,
         priority: 5,
         when: {
           op: 'and',
           items: [
-            { op: 'tile_emptied', tile: 1 },
+            { op: 'tile_owner_changed', tile: 1, from: 'any', to: 'null' },
             { op: 'not', item: { op: 'force_gone', force: 2 } },
           ],
         },
         delay: { amount: 2, unit: 'intent' },
         effects: [
-          { op: 'spawn_soldier', tile: 1, force: 1, strength: 2 },
+          { op: 'spawn_soldier', tile: 1, force: 1, strength: 2, movement: false },
           { op: 'set_turn_order', order: [2, 1] },
         ],
       },
@@ -73,9 +69,9 @@ describe('trigger map validation', () => {
     expect(validateMapData(unknown)).toBe(false);
   });
 
-  it('rejects out-of-bounds tiles, unknown forces and class mismatch', () => {
+  it('rejects out-of-bounds tiles and unknown forces', () => {
     const badTile = withTriggers(makeMap({ rows: 2, columns: 2 }), [
-      { ...actionTrigger, when: { op: 'tile_emptied', tile: 99 } },
+      { ...actionTrigger, when: { op: 'tile_owner_changed', tile: 99, from: 'any', to: 'null' } },
     ]);
     expect(validateMapData(badTile)).toBe(false);
 
@@ -83,11 +79,78 @@ describe('trigger map validation', () => {
       { ...actionTrigger, when: { op: 'force_gone', force: 99 } },
     ]);
     expect(validateMapData(badForce)).toBe(false);
+  });
 
-    const classMismatch = withTriggers(makeMap(), [
-      { ...actionTrigger, class: 'world', when: { op: 'tile_emptied', tile: 0 } },
+  it('accepts classless triggers and mixed action/world conditions', () => {
+    const classless = withTriggers(makeMap(), [
+      {
+        id: 'no-class',
+        when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 'null' },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
     ]);
-    expect(validateMapData(classMismatch)).toBe(false);
+    expect(validateMapData(classless)).toBe(true);
+
+    // class 与条件类别不再绑定：旧地图里 world 触发器的动作条件同样合法
+    const legacyMismatch = withTriggers(makeMap(), [
+      { ...actionTrigger, when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 'null' } },
+    ]);
+    expect(validateMapData(legacyMismatch)).toBe(true);
+
+    // 同一条件树里混排动作类与回合类条件
+    const mixed = withTriggers(makeMap(), [
+      {
+        id: 'mixed',
+        when: {
+          op: 'and',
+          items: [
+            { op: 'tile_owner_changed', tile: 0, from: 'any', to: 1 },
+            { op: 'turn_start', turn: 2 },
+          ],
+        },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
+    ]);
+    expect(validateMapData(mixed)).toBe(true);
+  });
+
+  it('accepts seat/any/null owner refs for tile_owner_changed', () => {
+    const ok = withTriggers(makeMap(), [
+      {
+        id: 'any-to-null',
+        when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 'null' },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
+      {
+        id: 'null-to-seat',
+        when: { op: 'tile_owner_changed', tile: 0, from: 'null', to: 2 },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
+      {
+        id: 'player-owner',
+        when: { op: 'tile_owner_changed', tile: 0, from: 'player', to: 'any' },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
+    ]);
+    expect(validateMapData(ok)).toBe(true);
+
+    const badRef = withTriggers(makeMap(), [
+      {
+        id: 'bad-from',
+        when: { op: 'tile_owner_changed', tile: 0, from: 'nobody' as never, to: 1 },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
+    ]);
+    expect(validateMapData(badRef)).toBe(false);
+
+    const badSeat = withTriggers(makeMap(), [
+      {
+        id: 'bad-to',
+        when: { op: 'tile_owner_changed', tile: 0, from: 1, to: 99 },
+        effects: [{ op: 'set_fog', enabled: 'unchanged', reveal: [0], hide: [] }],
+      },
+    ]);
+    expect(validateMapData(badSeat)).toBe(false);
   });
 
   it('rejects missing chain references and invalid turn order', () => {
@@ -105,7 +168,7 @@ describe('trigger map validation', () => {
     expect(validateMapData(badOrder)).toBe(false);
 
     expect(
-      validateTriggers([{ ...actionTrigger, delay: { amount: 0, unit: 'turn' } }], 4, 5, new Set([1, 2])),
+      validateTriggers([{ ...actionTrigger, delay: { amount: 0, unit: 'turn' } }], 4, 5, new Set([1, 2]), new Set([1, 2])),
     ).toBe(false);
   });
 });
@@ -139,8 +202,9 @@ describe('trigger init and regression', () => {
     });
     expect(init.state.triggerMode).toBe(true);
     expect(init.state.triggerRuntime).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       firedCounts: {},
+      stateWatch: {},
       pending: [],
       intentSeq: 0,
       turnSeq: 0,

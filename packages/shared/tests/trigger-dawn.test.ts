@@ -146,8 +146,7 @@ describe('dawn-trigger.json', () => {
         triggers: [
           {
             id: 'bad-placement',
-            class: 'action',
-            when: { op: 'tile_emptied', tile: 0 },
+            when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 'null' },
             effects: [{ op: 'show_text', text_id: 'bad', text: 'bad', placement }],
           },
         ],

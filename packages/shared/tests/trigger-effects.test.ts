@@ -16,7 +16,7 @@ function start(
 ): GameState {
   const map: MapFullData = {
     ...makeMap({ rows: 3, columns: 3, players: THREE_PLAYERS, tiles }),
-    trigger_schema_version: 1,
+    trigger_schema_version: 2,
     triggers,
   };
   return initState({
@@ -37,8 +37,7 @@ function start(
 const move = (from: number, to: number) => ({ intentType: 'MOVE' as const, from, to });
 const onOccupy = (effects: TriggerDef['effects']): TriggerDef => ({
   id: 'on-occupy',
-  class: 'action',
-  when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
+  when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
   effects,
 });
 
@@ -82,12 +81,11 @@ describe('trigger effects', () => {
 
   it('spawn_soldier can satisfy an occupation trigger in the same transaction', () => {
     const state = start([
-      onOccupy([{ op: 'spawn_soldier', tile: 2, force: 2, strength: 3 }]),
+      onOccupy([{ op: 'spawn_soldier', tile: 2, force: 2, strength: 3, movement: false }]),
       {
         id: 'ambush',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 2, force: 2 },
-        effects: [{ op: 'show_text', text_id: 'ambush', text: 'ambush' }],
+        when: { op: 'tile_owner_changed', tile: 2, from: 'any', to: 2 },
+        effects: [{ op: 'show_text', text_id: 'ambush', text: 'ambush', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
@@ -100,7 +98,7 @@ describe('trigger effects', () => {
 
   it('update_force changes force info and emits FORCE_UPDATE', () => {
     const state = start([
-      onOccupy([{ op: 'update_force', force: 2, patch: { name: '新名字', points: 7, team: 9 } }]),
+      onOccupy([{ op: 'update_force', force: 2, patch: { name: '新名字', flag: 'unchanged', team: 9, points: 7, computer: 'unchanged' } }]),
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
     expect(r.ok).toBe(true);

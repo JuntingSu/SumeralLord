@@ -20,7 +20,7 @@ function start(
       ],
       tiles,
     }),
-    trigger_schema_version: 1,
+    trigger_schema_version: 2,
     triggers,
   };
   return initState({
@@ -39,8 +39,7 @@ const move = (from: number, to: number) => ({ intentType: 'MOVE' as const, from,
 /** 动作触发器：1 号势力从 0 占领 1 号地块后执行 effects */
 const onEnter = (effects: TriggerDef['effects']): TriggerDef => ({
   id: 'on-enter',
-  class: 'action',
-  when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
+  when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
   effects,
 });
 
@@ -142,15 +141,13 @@ describe('触发器插入意图', () => {
       [
         {
           id: 'a',
-          class: 'action',
-          when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
+          when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
           effects: [{ op: 'insert_move_intent', force: 2, from: 6, to: 7 }],
         },
         {
           id: 'b',
-          class: 'action',
-          when: { op: 'tile_owner_appeared', tile: 7, force: 2 },
-          effects: [{ op: 'show_text', text_id: 'inserted', text: '插入意图生效' }],
+          when: { op: 'tile_owner_changed', tile: 7, from: 'any', to: 2 },
+          effects: [{ op: 'show_text', text_id: 'inserted', text: '插入意图生效', placement: { kind: 'screen', position: 'top-right' } }],
         },
       ],
       BASE,
@@ -167,15 +164,13 @@ describe('触发器插入意图', () => {
       [
         {
           id: 'w',
-          class: 'world',
-          when: { op: 'phase_start', force: 1, phase: 'ACTION' },
+          when: { op: 'phase_start', force: 1, phase: 'ACTION', turn: 'any' },
           effects: [{ op: 'insert_move_intent', force: 2, from: 6, to: 7 }],
         },
         {
           id: 'b',
-          class: 'action',
-          when: { op: 'tile_owner_appeared', tile: 7, force: 2 },
-          effects: [{ op: 'show_text', text_id: 'world-inserted', text: '回合触发插入意图' }],
+          when: { op: 'tile_owner_changed', tile: 7, from: 'any', to: 2 },
+          effects: [{ op: 'show_text', text_id: 'world-inserted', text: '回合触发插入意图', placement: { kind: 'screen', position: 'top-right' } }],
         },
       ],
       BASE,
@@ -195,7 +190,7 @@ describe('触发器插入意图', () => {
           { seat: 2, team: 2 },
         ],
       }),
-      trigger_schema_version: 1,
+      trigger_schema_version: 2,
       triggers: [
         onEnter([
           { op: 'insert_move_intent', force: 2, from: 6, to: 7 },

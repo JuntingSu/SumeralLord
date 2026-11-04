@@ -108,13 +108,12 @@ describe('PVE 地图库（懒加载 + mtime 缓存 + 可玩过滤）', () => {
 
   it('触发器地图与普通地图统一出现在 PVE 列表', async () => {
     const triggerMap = pveMapJson({ id: 'trig', title: '触发器图' });
-    triggerMap.trigger_schema_version = 1;
+    triggerMap.trigger_schema_version = 2;
     triggerMap.triggers = [
       {
         id: 't1',
-        class: 'action',
-        when: { op: 'tile_emptied', tile: 0 },
-        effects: [{ op: 'show_text', text_id: 'x', text: '触发' }],
+        when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 'null' },
+        effects: [{ op: 'show_text', text_id: 'x', text: '触发', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ];
     writeMap('trig.json', triggerMap);

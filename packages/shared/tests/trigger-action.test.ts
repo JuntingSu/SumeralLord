@@ -13,7 +13,7 @@ const THREE_PLAYERS = [
 function campaignMap(triggers: TriggerDef[], tiles: Record<number, [number, number, number]>): MapFullData {
   return {
     ...makeMap({ rows: 3, columns: 3, players: THREE_PLAYERS, tiles }),
-    trigger_schema_version: 1,
+    trigger_schema_version: 2,
     triggers,
   };
 }
@@ -41,9 +41,8 @@ describe('action triggers', () => {
     const state = start([
       {
         id: 'occupy',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
-        effects: [{ op: 'show_text', text_id: 't', text: 'occupied' }],
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+        effects: [{ op: 'show_text', text_id: 't', text: 'occupied', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
@@ -59,21 +58,18 @@ describe('action triggers', () => {
     const state = start([
       {
         id: 'vacate',
-        class: 'action',
-        when: { op: 'tile_emptied', tile: 0 },
-        effects: [{ op: 'show_text', text_id: 'v', text: 'vacated' }],
+        when: { op: 'tile_owner_changed', tile: 0, from: 'any', to: 'null' },
+        effects: [{ op: 'show_text', text_id: 'v', text: 'vacated', placement: { kind: 'screen', position: 'top-right' } }],
       },
       {
         id: 'clear',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
         effects: [{ op: 'clear_force', force: 2 }],
       },
       {
         id: 'gone',
-        class: 'action',
         when: { op: 'force_gone', force: 2 },
-        effects: [{ op: 'show_text', text_id: 'g', text: 'gone' }],
+        effects: [{ op: 'show_text', text_id: 'g', text: 'gone', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
@@ -88,24 +84,21 @@ describe('action triggers', () => {
     const state = start([
       {
         id: 'low',
-        class: 'action',
         priority: 0,
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
-        effects: [{ op: 'show_text', text_id: 'low', text: 'low' }],
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+        effects: [{ op: 'show_text', text_id: 'low', text: 'low', placement: { kind: 'screen', position: 'top-right' } }],
       },
       {
         id: 'high',
-        class: 'action',
         priority: 10,
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
-        effects: [{ op: 'show_text', text_id: 'high', text: 'high' }],
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+        effects: [{ op: 'show_text', text_id: 'high', text: 'high', placement: { kind: 'screen', position: 'top-right' } }],
       },
       {
         id: 'after-high',
-        class: 'action',
         priority: 5,
         when: { op: 'trigger_fired', trigger_id: 'high' },
-        effects: [{ op: 'show_text', text_id: 'after', text: 'after' }],
+        effects: [{ op: 'show_text', text_id: 'after', text: 'after', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
@@ -122,16 +115,15 @@ describe('action triggers', () => {
       [
         {
           id: 'once',
-          class: 'action',
           once: true,
           when: {
             op: 'or',
             items: [
-              { op: 'tile_owner_appeared', tile: 1, force: 1 },
-              { op: 'tile_owner_appeared', tile: 4, force: 1 },
+              { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+              { op: 'tile_owner_changed', tile: 4, from: 'any', to: 1 },
             ],
           },
-          effects: [{ op: 'show_text', text_id: 'o', text: 'once' }],
+          effects: [{ op: 'show_text', text_id: 'o', text: 'once', placement: { kind: 'screen', position: 'top-right' } }],
         },
       ],
       { 0: [PLAIN, 1, 1], 3: [PLAIN, 1, 1] },
@@ -152,9 +144,8 @@ describe('action triggers', () => {
     const state = start([
       {
         id: 'occupy',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
-        effects: [{ op: 'show_text', text_id: 't', text: 'occupied' }],
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+        effects: [{ op: 'show_text', text_id: 't', text: 'occupied', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'AI', seat: 1 }, intent: move(0, 1) });
@@ -169,10 +160,9 @@ describe('action triggers', () => {
     const state = start([
       {
         id: 'delayed',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
         delay: { amount: 1, unit: 'intent' },
-        effects: [{ op: 'show_text', text_id: 'd', text: 'delayed' }],
+        effects: [{ op: 'show_text', text_id: 'd', text: 'delayed', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
@@ -187,16 +177,14 @@ describe('action triggers', () => {
     const state = start([
       {
         id: 'starter',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
-        effects: [{ op: 'show_text', text_id: 's', text: 'starter' }],
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+        effects: [{ op: 'show_text', text_id: 's', text: 'starter', placement: { kind: 'screen', position: 'top-right' } }],
       },
       {
         id: 'loop',
-        class: 'action',
         repeatable: true,
         when: { op: 'trigger_fired', trigger_id: 'starter' },
-        effects: [{ op: 'show_text', text_id: 'l', text: 'loop' }],
+        effects: [{ op: 'show_text', text_id: 'l', text: 'loop', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });

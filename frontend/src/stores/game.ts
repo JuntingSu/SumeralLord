@@ -17,7 +17,7 @@ import type {
   SoldierState,
   TextPlacement,
 } from '@dl/shared';
-import { applyIntent, applyInverseDiff, diffGameState, initState } from '@dl/shared';
+import { applyIntent, applyInverseDiff, diffGameState, formatStateText, initState } from '@dl/shared';
 import type { GameState, GameStateDiff } from '@dl/shared';
 import { collectConsensusNodes, sameConsensus } from '../game/consensus';
 import { initialTimer, onTurnChange, tick, type TimerState } from '../game/timer';
@@ -166,8 +166,12 @@ interface GameStore {
 
 type ApplyOutcome = 'applied' | 'duplicate' | 'gap' | 'ignored';
 
-/** 从事件链提取战役触发器文本（show/hide；非阻塞） */
-export function collectTriggerTexts(chain: GameEvent[]): {
+/** 从事件链提取战役触发器文本（show/hide；非阻塞）。
+ *  文本模板里的 {gamestate.xxx} 按“该意图完成后的状态”替换成便于理解的文字。 */
+export function collectTriggerTexts(
+  chain: GameEvent[],
+  state: GameState,
+): {
   show: Array<{ textId: string; text: string; placement?: TextPlacement }>;
   hide: string[];
 } {
@@ -177,7 +181,7 @@ export function collectTriggerTexts(chain: GameEvent[]): {
     if (e.kind === 'TRIGGER_TEXT_SHOW') {
       show.push({
         textId: e.textId,
-        text: e.text,
+        text: formatStateText(state, e.text),
         ...(e.placement ? { placement: e.placement } : {}),
       });
     } else if (e.kind === 'TRIGGER_TEXT_HIDE') hide.push(e.textId);
@@ -288,7 +292,7 @@ function applyStreamMessage(
   // 实时路径收集战役触发器文本（非阻塞）
   let triggerTexts = s.triggerTexts;
   if (!replay) {
-    const texts = collectTriggerTexts(r.chain);
+    const texts = collectTriggerTexts(r.chain, r.state);
     if (texts.show.length > 0 || texts.hide.length > 0) {
       const byId = new Map(triggerTexts.map((t) => [t.textId, t]));
       for (const id of texts.hide) byId.delete(id);
@@ -316,9 +320,8 @@ function applyStreamMessage(
       }
     }
   }
-  // 战役控制转移：切换玩家势力时清空悔棋栈并更新 mySeat
-  const controlChanged =
-    r.state.controlledSeat !== null && r.state.controlledSeat !== board.controlledSeat;
+  // 战役控制转移：切换玩家势力（含失去控制）时清空悔棋栈并更新 mySeat
+  const controlChanged = r.state.controlledSeat !== board.controlledSeat;
   if (controlChanged) {
     undoStack = [];
     undoBaseEventId = eventId;
@@ -326,6 +329,7 @@ function applyStreamMessage(
   set({
     board: r.state,
     mySeat: controlChanged ? r.state.controlledSeat : s.mySeat,
+    isSpectator: controlChanged ? r.state.controlledSeat === null : s.isSpectator,
     appliedEventId: eventId,
     eventQueue: [...s.eventQueue, { chain: r.chain, beforeTiles }],
     lastChain: r.chain,
@@ -469,7 +473,7 @@ export const useGame = create<GameStore>((set, get) => {
       if (mySeat !== null && mySeat === board.currentSeat) announcements.unshift('你的回合');
       const notices: SystemNotice[] = [];
       if (board.currentSeat > 0) notices.push({ kind: 'turnStart', seat: board.currentSeat });
-      const initialTexts = collectTriggerTexts(chain).show;
+      const initialTexts = collectTriggerTexts(chain, board).show;
       set({
         gameId,
         roomId,

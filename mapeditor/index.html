@@ -40,7 +40,7 @@
       <div class="tools">
         <button data-tool="paint">✏️ 涂刷</button>
         <button data-tool="pan" title="拖动地图；单击地块按当前画笔落笔">✋ 拖动</button>
-        <button data-tool="script" id="btn-script" title="脚本（功能开发中）">📜 脚本</button>
+        <button data-tool="script" id="btn-script" title="为地图增加事件响应规则">📜 脚本</button>
         <button data-tool="random" title="随机生成地图">🎲 随机</button>
       </div>
     </section>
@@ -266,19 +266,14 @@
     <div class="tab-page" id="tab-players" hidden>
       <button id="btn-add-player" class="wide">＋ 新增势力</button>
       <div id="player-list"></div>
-      <p class="hint">列表按座次自动排序；拖动「⇕」手柄可把势力调整到任意座次。据点格由「地形=据点 + 归属=该势力座次 + 兵力>0」表达，直接用画笔涂色即可。</p>
     </div>
     <div class="tab-page" id="tab-triggers" hidden>
       <div class="trg-new">
         <input id="trg-new-id" placeholder="触发器 id（≤64 字符）" maxlength="64">
-        <select id="trg-new-class" title="触发器类别">
-          <option value="action">action（动作）</option>
-          <option value="world">world（世界）</option>
-        </select>
         <button id="btn-trg-create" class="wide" type="button">＋ 新建触发器</button>
       </div>
       <div id="trigger-list"></div>
-      <p class="hint">点击「编辑」回到左侧「脚本」栏；提交时以 E 型容器上臂条件、下臂效果生成 trigger。</p>
+      <p class="hint">点击「编辑」回到左侧「脚本」栏进行编辑</p>
     </div>
   </aside>
 </main>
@@ -369,6 +364,50 @@
   </div>
 </dialog>
 
+<!-- 行动顺序排序编辑器 -->
+<dialog id="dlg-order-editor">
+  <div class="dlg-head">
+    <h3>设置行动顺序</h3>
+    <button id="dlg-order-editor-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body">
+    <p class="hint">按住势力拖动调整顺序；从上到下依次行动。</p>
+    <div id="order-editor-list" class="order-editor-list"></div>
+    <div class="dlg-btns">
+      <button id="order-editor-cancel" type="button">取消</button>
+      <button id="order-editor-submit" type="button" class="primary">提交</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- 文本编辑器：任意文本 + gamestate 变量插值 -->
+<dialog id="dlg-text-editor" class="te-dlg">
+  <div class="dlg-head">
+    <h3>文本编辑器</h3>
+    <button id="dlg-text-editor-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body">
+    <textarea id="te-text" rows="7" placeholder="输入文本，可从下方插入 gamestate 变量"></textarea>
+    <div class="te-actions"><button id="te-insert" type="button">＋ 插入变量</button></div>
+    <div id="te-tree" class="te-tree"></div>
+    <div class="dlg-btns">
+      <button id="te-cancel" type="button">取消</button>
+      <button id="te-submit" type="button" class="primary">提交</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- 按触发器选择文本（隐藏文本的 text_id 拾取） -->
+<dialog id="dlg-pick-text">
+  <div class="dlg-head">
+    <h3>选择文本</h3>
+    <button id="dlg-pick-text-close" class="dlg-close" title="关闭">✕</button>
+  </div>
+  <div class="dlg-body">
+    <div id="pick-text-list" class="pick-text-list"></div>
+  </div>
+</dialog>
+
 <!-- 移动端：状态浮层（窄屏顶栏隐藏，操作结果在此提示） -->
 <div id="m-toast"></div>
 
@@ -385,6 +424,7 @@
 <script src="js/io.js"></script>
 <script src="js/players.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/statepaths.js"></script>
 <script src="js/scripteditor.js"></script>
 <script src="js/main.js"></script>
 <script src="js/mobile.js"></script>

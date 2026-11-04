@@ -245,14 +245,14 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  min-height: 26px;
-  padding: 2px;
+  min-height: 34px;
+  padding: 4px 4px 18px;
   border-radius: 4px;
   width: max-content;
 }
 .trg-param {
-  /* 固定 2 字符宽（中文字符约 1em，额外留给内边距与边框） */
-  width: calc(2em + 10px);
+  /* 可变宽度：2..6 字符（由 JS 写入 --pw） */
+  width: calc(var(--pw, 2) * 1em + 10px);
   flex: none;
   padding: 1px 4px;
   font-size: 12px;
@@ -272,7 +272,7 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
   align-items: center;
   justify-content: space-between;
   gap: 2px;
-  width: calc(2em + 14px);
+  width: calc(var(--pw, 2) * 1em + 30px);
   flex: none;
   padding: 1px 4px;
   font-size: 12px;
@@ -297,6 +297,115 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(77, 163, 255, 0.35);
 }
+/* 自由输入 + 特殊值（任意 / 不修改 / 自动 / 翻转） */
+.trg-value-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.trg-sentinel,
+.trg-placement select,
+.te-param-row select,
+.te-param-row input {
+  width: calc(var(--pw, 2) * 1em + 28px);
+  font-size: 11px;
+  padding: 0 2px;
+  background: #1b1e26;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+}
+.trg-placement .trg-param { width: calc(var(--pw, 4) * 1em + 10px); }
+
+/* 文本编辑器：任意文本 + gamestate 变量 */
+.te-dlg {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(560px, 94vw);
+  height: max-content;
+  max-height: 88vh;
+  overflow: auto;
+}
+.te-dlg textarea { width: 100%; min-height: 120px; resize: vertical; }
+.te-tree {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  background: #1b1e26;
+  margin-top: 6px;
+}
+.te-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 3px 2px;
+  margin: 4px 0 2px;
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 1px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.te-group:hover { color: var(--text); }
+.te-group .te-arrow { font-size: 9px; }
+.te-group-body[hidden] { display: none; }
+.pick-text-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow: auto; }
+.pick-text-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  text-align: left;
+  padding: 5px 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.pick-text-item:hover { border-color: var(--accent); }
+.pick-text-id { flex: none; font-weight: 700; color: var(--accent); }
+.pick-text-preview { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.te-def { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 1px 2px; }
+.te-def input[type=checkbox] { margin: 0; }
+.te-def.checked { color: var(--accent); }
+.te-param-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 20px;
+  font-size: 12px;
+  color: var(--dim);
+  padding: 1px 0;
+}
+.te-param-row input,
+.te-param-row select {
+  font-size: 11px;
+  padding: 0 3px;
+  background: #1b1e26;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.te-actions { display: flex; justify-content: flex-end; margin: 6px 0; }
+.te-actions button { padding: 2px 10px; }
+.te-pick-btn { font-size: 11px; padding: 0 6px; background: #1b1e26; border: 1px solid var(--border); border-radius: 4px; }
+.order-editor-list { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; }
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: grab;
+}
+.order-row.dragging { opacity: 0.5; }
+.order-grip { color: var(--dim); }
+.order-name { flex: 1; }
+.order-arrow { text-align: center; color: var(--dim); font-size: 11px; }
+/* 参数拾取时，用蓝色虚线框住可点击区域 */
+.pick-zone { outline: 2px dashed #4da3ff; outline-offset: 2px; }
+.trg-text-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16em; }
 /* 合法值复选框面板 */
 .trg-param-pop {
   position: fixed;
@@ -357,9 +466,6 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
 }
 .trg-item.editing { border-color: var(--accent); }
 .trg-item-id { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
-.trg-item-class { flex: none; font-size: 11px; padding: 0 5px; border-radius: 3px; background: var(--border); color: var(--dim); }
-.trg-item-class.action { color: #9fd0ff; }
-.trg-item-class.world { color: #f0c674; }
 .trg-item-badge { flex: none; font-size: 10px; color: var(--ok); }
 .trg-item button { flex: none; padding: 1px 6px; font-size: 11px; }
 
@@ -564,6 +670,11 @@ input.ro:focus { border-color: var(--border); }
 
 /* 对话框 */
 dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: max-content;
+  max-height: 90vh;
   background: var(--panel2);
   color: var(--text);
   border: 1px solid var(--border);

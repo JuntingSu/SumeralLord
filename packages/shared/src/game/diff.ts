@@ -33,6 +33,7 @@ function cloneRuntime(r: TriggerRuntime | null): TriggerRuntime | null {
     ? {
         ...r,
         firedCounts: { ...r.firedCounts },
+        stateWatch: { ...(r.stateWatch ?? {}) },
         pending: r.pending.map((p) => ({ ...p })),
       }
     : null;

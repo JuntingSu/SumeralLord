@@ -15,7 +15,7 @@ function init(triggers: TriggerDef[]): GameState {
       ],
       tiles: { 0: [PLAIN, 1, 1] },
     }),
-    trigger_schema_version: 1,
+    trigger_schema_version: 2,
     triggers,
   };
   return initState({
@@ -32,15 +32,14 @@ function init(triggers: TriggerDef[]): GameState {
 const move = (from: number, to: number) => ({ intentType: 'MOVE' as const, from, to });
 const delayed = (unit: 'intent' | 'turn' | 'round', effects: TriggerDef['effects']): TriggerDef => ({
   id: 'delayed',
-  class: 'action',
-  when: { op: 'tile_owner_appeared', tile: 1, force: 1 },
+  when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
   delay: { amount: 1, unit },
   effects,
 });
 
 describe('delayed triggers', () => {
   it('executes after the configured number of player intents', () => {
-    const state = init([delayed('intent', [{ op: 'show_text', text_id: 'd', text: 'delayed' }])]);
+    const state = init([delayed('intent', [{ op: 'show_text', text_id: 'd', text: 'delayed', placement: { kind: 'screen', position: 'top-right' } }])]);
     const first = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -56,7 +55,7 @@ describe('delayed triggers', () => {
   });
 
   it('executes at the end of the configured number of turns', () => {
-    const state = init([delayed('turn', [{ op: 'show_text', text_id: 'd', text: 'delayed' }])]);
+    const state = init([delayed('turn', [{ op: 'show_text', text_id: 'd', text: 'delayed', placement: { kind: 'screen', position: 'top-right' } }])]);
     const first = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -72,7 +71,7 @@ describe('delayed triggers', () => {
   });
 
   it('executes during an AI transaction when the round advances', () => {
-    const state = init([delayed('round', [{ op: 'show_text', text_id: 'd', text: 'delayed' }])]);
+    const state = init([delayed('round', [{ op: 'show_text', text_id: 'd', text: 'delayed', placement: { kind: 'screen', position: 'top-right' } }])]);
     let cur = state;
     const first = applyIntent(cur, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
     expect(first.ok).toBe(true);
@@ -100,12 +99,11 @@ describe('delayed triggers', () => {
 
   it('delayed effects can chain action triggers inside a player transaction', () => {
     const state = init([
-      delayed('intent', [{ op: 'spawn_soldier', tile: 2, force: 2, strength: 3 }]),
+      delayed('intent', [{ op: 'spawn_soldier', tile: 2, force: 2, strength: 3, movement: false }]),
       {
         id: 'ambush',
-        class: 'action',
-        when: { op: 'tile_owner_appeared', tile: 2, force: 2 },
-        effects: [{ op: 'show_text', text_id: 'a', text: 'ambush' }],
+        when: { op: 'tile_owner_changed', tile: 2, from: 'any', to: 2 },
+        effects: [{ op: 'show_text', text_id: 'a', text: 'ambush', placement: { kind: 'screen', position: 'top-right' } }],
       },
     ]);
     const first = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
@@ -118,7 +116,7 @@ describe('delayed triggers', () => {
   });
 
   it('undo restores pending schedule and fired counts', () => {
-    const state = init([delayed('intent', [{ op: 'show_text', text_id: 'd', text: 'delayed' }])]);
+    const state = init([delayed('intent', [{ op: 'show_text', text_id: 'd', text: 'delayed', placement: { kind: 'screen', position: 'top-right' } }])]);
     const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
     expect(r.ok).toBe(true);
     if (!r.ok) return;

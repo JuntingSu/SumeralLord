@@ -445,11 +445,10 @@
       0
     ]
   ],
-  "trigger_schema_version": 1,
+  "trigger_schema_version": 2,
   "triggers": [
     {
       "id": "show-a",
-      "class": "world",
       "once": true,
       "when": {
         "op": "phase_start",
@@ -471,40 +470,52 @@
     },
     {
       "id": "hide-a",
-      "class": "action",
       "once": true,
       "when": {
-        "op": "trigger_done",
-        "trigger_id": "show-a"
+        "op": "state_assert",
+        "path": "gamestate.triggerRuntime.firedCounts.show-a",
+        "cmp": ">",
+        "value": 0
       },
       "effects": [
         {
           "op": "hide_text",
           "text_id": "dawn-a"
         }
-      ]
+      ],
+      "delay": {
+        "amount": 1,
+        "unit": "intent"
+      }
     },
     {
       "id": "show-b",
-      "class": "action",
       "once": true,
       "when": {
         "op": "and",
         "items": [
           {
-            "op": "trigger_done",
-            "trigger_id": "hide-a"
-          },
-          {
-            "op": "tile_soldier_owner_not",
-            "tile": 3,
-            "force": "player"
+            "op": "state_assert",
+            "path": "gamestate.triggerRuntime.firedCounts.hide-a",
+            "cmp": ">",
+            "value": 0
           },
           {
             "op": "not",
             "item": {
-              "op": "trigger_done",
-              "trigger_id": "hide-b"
+              "op": "state_assert",
+              "path": "gamestate.tiles.3.soldier.owner",
+              "value": "player",
+              "cmp": "="
+            }
+          },
+          {
+            "op": "not",
+            "item": {
+              "op": "state_assert",
+              "path": "gamestate.triggerRuntime.firedCounts.hide-b",
+              "cmp": ">",
+              "value": 0
             }
           }
         ]
@@ -523,13 +534,13 @@
     },
     {
       "id": "hide-b",
-      "class": "action",
       "once": true,
       "priority": 20,
       "when": {
-        "op": "tile_owner_appeared",
+        "op": "tile_owner_changed",
         "tile": 3,
-        "force": "player"
+        "from": "any",
+        "to": "player"
       },
       "effects": [
         {
@@ -540,20 +551,21 @@
     },
     {
       "id": "spawn-next-force",
-      "class": "action",
       "once": true,
       "priority": 10,
       "when": {
-        "op": "tile_owner_appeared",
+        "op": "tile_owner_changed",
         "tile": 3,
-        "force": "player"
+        "from": "any",
+        "to": "player"
       },
       "effects": [
         {
           "op": "spawn_soldier",
           "tile": 4,
           "force": "next_after_player",
-          "strength": 99
+          "strength": 99,
+          "movement": false
         }
       ]
     }

@@ -1,11 +1,13 @@
 // 触发器事务引擎：动作 pass（HUMAN 意图）、回合 pass（任意来源）、连锁、延时到期。
+// 不再区分 action/world 触发器：动作类条件在动作 pass 求值，回合类条件在回合 pass 求值，
+// 同一触发器可同时包含两类条件（回合 pass 会把本事务的动作增量一并作为上下文）。
 // 确定性顺序：转换 eventIndex 升序 → priority 降序 → 定义序 → id；单事务总触发上限。
 import type { GameEvent, GameState } from '../types.js';
 import type { PendingTrigger, TriggerDef, TriggerDelta } from './types.js';
 import type { WorldTransition } from './types.js';
 import type { TransitionCursor } from './delta.js';
 import { collectTransitions } from './delta.js';
-import { matchActionCondition, matchWorldCondition } from './conditions.js';
+import { hasEventCondition, hasWorldCondition, matchCondition } from './conditions.js';
 
 export const MAX_TRIGGER_FIRINGS = 512;
 
@@ -89,7 +91,8 @@ function runActionPass(
   const runtime = state.triggerRuntime;
   if (!runtime) return;
   const order = triggerOrder(state);
-  const defs = sortDefs(state.triggers.filter((t) => t.class === 'action'), order);
+  // 纯状态触发器（无事件叶子）只在状态监听 pass 求值，避免随每个 delta 重复触发
+  const defs = sortDefs(state.triggers.filter((t) => hasEventCondition(t.when)), order);
   const queue: TriggerDef[] = [];
   const queued = new Set<string>();
   const scheduled = new Set<string>();
@@ -110,7 +113,7 @@ function runActionPass(
     for (const def of defs) {
       if (queued.has(def.id)) continue;
       if (!isEligible(def, state, firedThisTx)) continue;
-      if (!matchActionCondition(def.when, delta, firedThisTx, state)) continue;
+      if (!matchCondition(def.when, { delta }, firedThisTx, state)) continue;
       if (def.delay) {
         if (scheduled.has(def.id)) continue;
         scheduleDelay(def, state);
@@ -167,12 +170,16 @@ function runWorldPass(
   world: WorldPassState,
   firedThisTx: Set<string>,
   counter: { value: number },
+  /** 本事务的动作增量：让同一触发器里的动作条件与回合条件可以联合成立 */
+  actionDelta?: TriggerDelta,
 ): void {
   const { state, chain, executor } = input;
   const runtime = state.triggerRuntime;
   if (!runtime) return;
   const order = triggerOrder(state);
-  const defs = sortDefs(state.triggers.filter((t) => t.class === 'world'), order);
+  // 只有含回合类条件（或 or 分支里含回合条件）的触发器才需要在回合 pass 里求值，
+  // 纯动作触发器已在动作 pass 处理，重复参与会随每个转换重复触发。
+  const defs = sortDefs(state.triggers.filter((t) => hasWorldCondition(t.when)), order);
   const queue: WorldWork[] = [];
 
   const sortQueue = (): void => {
@@ -199,7 +206,7 @@ function runWorldPass(
         const key = workKey(def, tx);
         if (world.seen.has(key)) continue;
         if (!isEligible(def, state, firedThisTx)) continue;
-        if (!matchWorldCondition(def.when, tx, firedThisTx, state)) continue;
+        if (!matchCondition(def.when, { transition: tx, delta: actionDelta }, firedThisTx, state)) continue;
         if (def.delay) {
           if (world.scheduled.has(def.id)) continue;
           scheduleDelay(def, state);
@@ -265,6 +272,57 @@ function runWorldPass(
     // 连锁：同一转换重新求值；firedThisTx 已包含刚执行的触发器
     enqueueTransitions([work.transition]);
     if (state.finished) break;
+  }
+}
+
+// ---------- 状态监听 pass ----------
+
+/**
+ * 纯状态触发器（when 里没有事件叶子）：条件从 false 变为 true 时触发一次。
+ * 每个事务末尾求值一次；本事务内触发器效果造成的状态变化不再级联重新评估。
+ */
+function runStateWatchPass(
+  input: TriggerTransactionInput,
+  firedThisTx: Set<string>,
+  counter: { value: number },
+): void {
+  const { state, chain, executor } = input;
+  const runtime = state.triggerRuntime;
+  if (!runtime) return;
+  const order = triggerOrder(state);
+  const defs = sortDefs(state.triggers.filter((t) => !hasEventCondition(t.when)), order);
+  if (defs.length === 0) return;
+  const watch = (runtime.stateWatch ??= {});
+  const toFire: TriggerDef[] = [];
+  for (const def of defs) {
+    const prev = watch[def.id] ?? false;
+    const now = matchCondition(def.when, {}, firedThisTx, state);
+    watch[def.id] = now;
+    if (!now || prev) continue;
+    if (!isEligible(def, state, firedThisTx)) continue;
+    if (def.delay) {
+      scheduleDelay(def, state);
+      continue;
+    }
+    toFire.push(def);
+  }
+  for (const def of toFire) {
+    if (counter.value >= MAX_TRIGGER_FIRINGS) {
+      chain.push({ level: 5, kind: 'TRIGGER_OVERFLOW', transactionSeq: runtime.transactionSeq });
+      break;
+    }
+    if (state.finished) break;
+    if (!isEligible(def, state, firedThisTx)) continue;
+    firedThisTx.add(def.id);
+    runtime.firedCounts[def.id] = (runtime.firedCounts[def.id] ?? 0) + 1;
+    counter.value += 1;
+    chain.push({ level: 5, kind: 'TRIGGER_FIRE', triggerId: def.id });
+    const delta = executor.execute(def);
+    // 效果内插入的意图仍按现有规则驱动动作类触发器（不属于状态监听的级联）
+    const intentDeltas = executor.takeIntentDeltas();
+    if (intentDeltas.length > 0) {
+      runActionPass({ ...input, intentDelta: delta }, firedThisTx, counter, intentDeltas);
+    }
   }
 }
 
@@ -340,7 +398,8 @@ export function runTriggerTransaction(input: TriggerTransactionInput): void {
   if (input.state.finished) return;
 
   const world = createWorldPassState(input);
-  runWorldPass(input, world, firedThisTx, counter);
+  // 动作类条件仍只为 HUMAN 意图触发；回合 pass 里一并提供本事务的动作增量，供两类条件联合判定
+  runWorldPass(input, world, firedThisTx, counter, input.human ? input.intentDelta : undefined);
 
   let guard = 0;
   while (!input.state.finished && guard++ < 32) {
@@ -348,4 +407,6 @@ export function runTriggerTransaction(input: TriggerTransactionInput): void {
     if (!executed) break;
     runWorldPass(input, world, firedThisTx, counter);
   }
+
+  if (!input.state.finished) runStateWatchPass(input, firedThisTx, counter);
 }

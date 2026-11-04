@@ -105,7 +105,7 @@ export type GameEvent =
   | { level: 5; kind: 'TRIGGER_TEXT_HIDE'; textId: string }
   | { level: 5; kind: 'TERRAIN_CHANGE'; tile: number; from: number; to: number }
   | { level: 5; kind: 'FORCE_UPDATE'; seat: number; patch: Record<string, unknown> }
-  | { level: 5; kind: 'CONTROL_CHANGE'; fromSeat: number | null; toSeat: number; aiLevel: number }
+  | { level: 5; kind: 'CONTROL_CHANGE'; fromSeat: number | null; toSeat: number | null; aiLevel: number }
   | { level: 5; kind: 'TURN_ORDER_CHANGE'; order: number[] }
   | {
       level: 5;
