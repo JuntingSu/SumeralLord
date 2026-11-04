@@ -22,6 +22,7 @@ const Players = (() => {
     list.forEach((p) => {
       const row = document.createElement('div');
       row.className = 'prow';
+      row.dataset.seat = String(p.seat);
       // 旗号 0 为无图片兜底（纯色），其余为有图片的旗号（1..30 标准纯色旗）
       const flagOptions = [0, ...MapConst.FLAG_IMAGE_NUMS];
       row.innerHTML = `

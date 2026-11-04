@@ -106,10 +106,18 @@
   function downAt(clientX, clientY) {
     const s = Editor.getState();
     if (!s.map) return;
-    if (s.tool === 'pan') {
-      panning = true;
-      lastX = clientX;
-      lastY = clientY;
+    // 脚本模式：左键用于参数拾取（点棋盘地块）；不在棋盘上落笔
+    if (s.tool === 'script') {
+      ScriptEditor.handleBoardClick(indexAt(clientX, clientY));
+      return;
+    }
+    // 只有涂刷模式会在棋盘上落笔；拖动模式平移，随机模式不响应左键
+    if (s.tool !== 'paint') {
+      if (s.tool === 'pan') {
+        panning = true;
+        lastX = clientX;
+        lastY = clientY;
+      }
       return;
     }
     const idx = indexAt(clientX, clientY);
@@ -258,12 +266,11 @@
     document.querySelectorAll('#brush-mode [data-mode]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.mode === s.brush.mode);
     });
-    // 面板显隐：画笔工具才显示画笔面板，平移工具隐藏
-    const paintOn = s.tool === 'paint';
-    $('brush-mode').style.display = paintOn ? '' : 'none';
-    $('terrain-palette').style.display = paintOn ? '' : 'none';
-    $('owner-palette').style.display = paintOn ? '' : 'none';
-    $('strength-row').style.display = paintOn ? '' : 'none';
+    // 左栏内容随模式切换：涂刷→画笔，脚本→脚本占位，随机→随机生成；拖动不展示内容
+    const left = $('left');
+    left.classList.toggle('mode-paint', s.tool === 'paint');
+    left.classList.toggle('mode-script', s.tool === 'script');
+    left.classList.toggle('mode-random', s.tool === 'random');
   }
 
   function buildPalette(container, items, current, onClick) {
@@ -579,6 +586,33 @@
     }
   });
 
+  // ==================== 左右侧栏折叠 ====================
+  const leftPanel = $('left');
+  const btnCollapseLeft = $('btn-collapse-left');
+  const btnCollapseRight = $('btn-collapse-right');
+  let rightWidthBeforeCollapse = '';
+  function setLeftCollapsed(collapsed) {
+    leftPanel.classList.toggle('collapsed', collapsed);
+    btnCollapseLeft.textContent = collapsed ? '》' : '《';
+    btnCollapseLeft.title = collapsed ? '展开左侧栏' : '隐藏左侧栏';
+  }
+  function setRightCollapsed(collapsed) {
+    const wasCollapsed = rightPanel.classList.contains('collapsed');
+    if (collapsed && !wasCollapsed) {
+      // 右栏宽度可能被拖拽过（内联样式），折叠前记下，展开时还原
+      rightWidthBeforeCollapse = rightPanel.style.width || '';
+      rightPanel.style.width = '24px';
+    } else if (!collapsed && wasCollapsed) {
+      rightPanel.style.width = rightWidthBeforeCollapse;
+    }
+    rightPanel.classList.toggle('collapsed', collapsed);
+    btnCollapseRight.textContent = collapsed ? '《' : '》';
+    btnCollapseRight.title = collapsed ? '展开右侧栏' : '隐藏右侧栏';
+    rightResizer.style.display = collapsed ? 'none' : '';
+  }
+  btnCollapseLeft.addEventListener('click', () => setLeftCollapsed(!leftPanel.classList.contains('collapsed')));
+  btnCollapseRight.addEventListener('click', () => setRightCollapsed(!rightPanel.classList.contains('collapsed')));
+
   // ==================== 撤销/重做 / 尺寸 / 生成 ====================
   $('btn-undo').addEventListener('click', () => Editor.undo());
   $('btn-redo').addEventListener('click', () => Editor.redo());
@@ -605,7 +639,76 @@
       if (e.key === 'Enter') { e.preventDefault(); apply(); }
     });
   });
+  // ---- 随机生成：普通模式 / 1v1 对称平衡（复用多人模式随机 1v1 算法） ----
+  const symAxisEl = $('gen-sym-axis');
+  const symCenterEl = $('gen-sym-center');
+  function currentSymmetry() {
+    return symAxisEl.checked ? 'axis' : symCenterEl.checked ? 'center' : null;
+  }
+  /** 对称算法只接受奇数尺寸：取区间内最接近的奇数 */
+  function normalizeSymSize(value, min, max) {
+    let n = Math.round(Number(value) || min);
+    n = Math.max(min, Math.min(max, n));
+    if (n % 2 === 0) n = n + 1 <= max ? n + 1 : n - 1;
+    return n;
+  }
+  function syncSymControls() {
+    const symmetry = currentSymmetry();
+    const playersEl = $('gen-players');
+    const rowEl = $('gen-row');
+    const colEl = $('gen-col');
+    // 开启平衡：势力固定 2 人并置灰；尺寸收敛到对称算法支持的奇数区间
+    playersEl.disabled = !!symmetry;
+    if (symmetry) {
+      playersEl.value = 2;
+      rowEl.min = String(SymGen.ROW_RANGE.min);
+      rowEl.max = String(SymGen.ROW_RANGE.max);
+      rowEl.step = '2';
+      colEl.min = String(SymGen.COLUMN_RANGE.min);
+      colEl.max = String(SymGen.COLUMN_RANGE.max);
+      colEl.step = '2';
+      rowEl.value = normalizeSymSize(rowEl.value, SymGen.ROW_RANGE.min, SymGen.ROW_RANGE.max);
+      colEl.value = normalizeSymSize(colEl.value, SymGen.COLUMN_RANGE.min, SymGen.COLUMN_RANGE.max);
+    } else {
+      rowEl.min = '3';
+      rowEl.max = '30';
+      rowEl.step = '1';
+      colEl.min = '3';
+      colEl.max = '40';
+      colEl.step = '1';
+    }
+  }
+  // 两个平衡选项互斥；都取消时回到普通随机生成
+  symAxisEl.addEventListener('change', () => {
+    if (symAxisEl.checked) symCenterEl.checked = false;
+    syncSymControls();
+  });
+  symCenterEl.addEventListener('change', () => {
+    if (symCenterEl.checked) symAxisEl.checked = false;
+    syncSymControls();
+  });
+
   $('btn-generate').addEventListener('click', () => {
+    const symmetry = currentSymmetry();
+    if (symmetry) {
+      const rowEl = $('gen-row');
+      const colEl = $('gen-col');
+      const row = normalizeSymSize(rowEl.value, SymGen.ROW_RANGE.min, SymGen.ROW_RANGE.max);
+      const column = normalizeSymSize(colEl.value, SymGen.COLUMN_RANGE.min, SymGen.COLUMN_RANGE.max);
+      rowEl.value = row;
+      colEl.value = column;
+      let res;
+      try {
+        res = SymGen.generate({ row, column, symmetry, id: MapData.randomId() });
+      } catch (e) {
+        statusMsg(`生成失败：${e.message}`, 'error');
+        return;
+      }
+      res.map.author = MapData.defaultAuthor();
+      Editor.setMap(res.map, res.id);
+      statusMsg(`已生成${symmetry === 'axis' ? '轴对称' : '中心对称'} 1v1 地图（${row}×${column}，出生点距离 ${res.spawnDistance}）`);
+      return;
+    }
     const opts = {
       row: Math.max(3, Math.min(30, Math.round(Number($('gen-row').value) || 9))),
       column: Math.max(3, Math.min(40, Math.round(Number($('gen-col').value) || 11))),

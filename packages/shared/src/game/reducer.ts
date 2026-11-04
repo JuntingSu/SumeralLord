@@ -27,7 +27,7 @@ import {
 import type { BoardGeometry } from './coord.js';
 import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
-import type { TriggerDef, TriggerEffect } from './trigger/types.js';
+import type { TriggerDef, TriggerEffect, TriggerDelta } from './trigger/types.js';
 import type { StepDirty } from './trigger/delta.js';
 import { createStepDirty, resetStepDirty, takeDelta, trackForce, trackTile } from './trigger/delta.js';
 import { runTriggerTransaction } from './trigger/engine.js';
@@ -45,6 +45,8 @@ interface Ctx {
   stepDirty: StepDirty;
   /** 地图触发器定义（来自 GameState，普通对局为空） */
   triggers: TriggerDef[];
+  /** 触发器效果内插入的意图各自产生的增量（供引擎驱动动作类触发器） */
+  intentDeltas: TriggerDelta[];
 }
 
 function cloneState(s: GameState): GameState {
@@ -341,10 +343,15 @@ function victoryJudgeEvent(ctx: Ctx): void {
 
 /** 移动事件（§8.1.1）。完整前置判定；进攻成功进占复用本事件（无效则自然不进占）。
  *  opts.skipBreakDeduction：断兵移动时跳过复制 -1（断兵进攻成功 → 完整进占，§8.1.2）。 */
-function moveEventCore(ctx: Ctx, from: number, to: number, opts?: { skipBreakDeduction?: boolean }): boolean {
-  if (ctx.state.phase !== 'ACTION') return false;
+function moveEventCore(
+  ctx: Ctx,
+  from: number,
+  to: number,
+  opts?: { skipBreakDeduction?: boolean; ignorePhase?: boolean; ignoreMovement?: boolean },
+): boolean {
+  if (!opts?.ignorePhase && ctx.state.phase !== 'ACTION') return false;
   const origin = ctx.state.tiles[from].soldier;
-  if (!origin || !origin.hasMovement) return false;
+  if (!origin || (!opts?.ignoreMovement && !origin.hasMovement)) return false;
   if (origin.isLinked && origin.strength === 1) return false; // 兵力 1 连兵始终无移动力
   if (isFullBreak(ctx.state.tiles[to].terrain)) return false;
   const target = ctx.state.tiles[to].soldier;
@@ -392,11 +399,16 @@ function applyInactiveJudgment(ctx: Ctx, from: number, to: number): void {
   if (lose) updateEvent(ctx, to, { hasMovement: false });
 }
 
-/** 进攻事件（§8.1.2） */
-function attackEventCore(ctx: Ctx, from: number, to: number): boolean {
-  if (ctx.state.phase !== 'ACTION') return false;
+/** 进攻事件（§8.1.2）。ignorePhase/ignoreMovement：触发器插入意图时放宽回合与移动力限制 */
+function attackEventCore(
+  ctx: Ctx,
+  from: number,
+  to: number,
+  opts?: { ignorePhase?: boolean; ignoreMovement?: boolean },
+): boolean {
+  if (!opts?.ignorePhase && ctx.state.phase !== 'ACTION') return false;
   const attacker = ctx.state.tiles[from].soldier;
-  if (!attacker || !attacker.hasMovement) return false;
+  if (!attacker || (!opts?.ignoreMovement && !attacker.hasMovement)) return false;
   if (attacker.isLinked && attacker.strength === 1) return false;
   const defender = ctx.state.tiles[to].soldier;
   if (!defender || sameTeam(ctx.state, attacker.owner, defender.owner)) return false;
@@ -413,6 +425,8 @@ function attackEventCore(ctx: Ctx, from: number, to: number): boolean {
     // 断兵进攻成功 → 进占移动不扣兵力（完整进占，§8.1.2）：损失已由反击结算体现，进占不应再扣复制 -1
     const moved = moveEventCore(ctx, from, to, {
       skipBreakDeduction: !attacker.isLinked,
+      ignorePhase: opts?.ignorePhase,
+      ignoreMovement: opts?.ignoreMovement,
     });
     if (moved) {
       const occupant = ctx.state.tiles[to].soldier;
@@ -541,6 +555,83 @@ function runPreparePhaseContent(ctx: Ctx): void {
 
 function mergeTileList(a: number[], b: number[]): number[] {
   return [...new Set([...a, ...b])].sort((x, y) => x - y);
+}
+
+type InsertIntentEffect = Extract<
+  TriggerEffect,
+  { op: 'insert_move_intent' | 'insert_attack_intent' | 'insert_add_point_intent' }
+>;
+
+/** 把插入意图产生的增量合并回触发器整体的 StepDirty（保留最早的 before 快照） */
+function mergeDirty(target: StepDirty, delta: TriggerDelta): void {
+  for (const t of delta.tiles) {
+    target.tiles.add(t.index);
+    if (!target.beforeTiles.has(t.index)) target.beforeTiles.set(t.index, t.before);
+  }
+  for (const f of delta.forces) {
+    target.forces.add(f.seat);
+    if (!target.beforeForces.has(f.seat)) target.beforeForces.set(f.seat, f.before);
+  }
+}
+
+/**
+ * 以指定势力执行一次意图核心（触发器效果专用）：
+ * - 允许任意势力、任意时刻执行（跳过 actor/回合/阶段校验）
+ * - MOVE/ATTACK 忽略移动力与连断兵移动限制；地形、距离、兵力 1 连兵等规则照常
+ * - ADD_POINT 目标归属/连兵/点数照常检查
+ * - 子事件写入同一条 chain，改动计入当前触发器增量
+ */
+function executeInsertedIntent(ctx: Ctx, effect: InsertIntentEffect): boolean {
+  const seat = resolveForceRef(ctx.state, effect.force);
+  if (seat === null) return false;
+  const state = ctx.state;
+  const inBounds = (i: number) => i >= 0 && i < state.tiles.length;
+
+  if (effect.op === 'insert_add_point_intent') {
+    if (!inBounds(effect.coordinate) || !Number.isInteger(effect.amount) || effect.amount <= 0) return false;
+    const force = forceOf(state, seat);
+    const target = state.tiles[effect.coordinate].soldier;
+    if (!force || !target || target.owner !== seat || !target.isLinked) return false;
+    if (force.points < effect.amount) return false;
+    ctx.chain.push({ level: 1, kind: 'ADD_POINT', seat, coordinate: effect.coordinate, amount: effect.amount });
+    updateEvent(ctx, effect.coordinate, { strength: target.strength + effect.amount });
+    trackForce(ctx.stepDirty, ctx.state, seat);
+    force.points -= effect.amount;
+    return true;
+  }
+
+  const { from, to } = effect;
+  if (!inBounds(from) || !inBounds(to)) return false;
+  const origin = state.tiles[from].soldier;
+  if (!origin || origin.owner !== seat) return false;
+  const opts = { ignorePhase: true, ignoreMovement: true };
+  const target = state.tiles[to].soldier;
+  if (effect.op === 'insert_attack_intent') {
+    if (!target) return false;
+    return attackEventCore(ctx, from, to, opts);
+  }
+  // 移动意图：目标有非同队兵时按普通意图规则转为进攻
+  if (target && sameTeam(state, origin.owner, target.owner)) return false;
+  if (target) return attackEventCore(ctx, from, to, opts);
+  return moveEventCore(ctx, from, to, opts);
+}
+
+/** 执行插入意图并收集其独立增量（供引擎驱动动作类触发器） */
+function runInsertedIntent(ctx: Ctx, effect: InsertIntentEffect): TriggerDelta | null {
+  const before = ctx.state;
+  const savedDirty = ctx.stepDirty;
+  const intentDirty = createStepDirty(true);
+  ctx.stepDirty = intentDirty;
+  let ok = false;
+  try {
+    ok = executeInsertedIntent(ctx, effect);
+  } finally {
+    ctx.stepDirty = savedDirty;
+  }
+  const delta = takeDelta(intentDirty, ctx.state, before);
+  if (!ok) return null;
+  mergeDirty(savedDirty, delta);
+  return delta.tiles.length > 0 || delta.forces.length > 0 ? delta : null;
 }
 
 function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
@@ -710,6 +801,13 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       });
       return;
     }
+    case 'insert_move_intent':
+    case 'insert_attack_intent':
+    case 'insert_add_point_intent': {
+      const delta = runInsertedIntent(ctx, effect);
+      if (delta) ctx.intentDeltas.push(delta);
+      return;
+    }
   }
 }
 
@@ -718,8 +816,14 @@ function makeTriggerExecutor(ctx: Ctx): TriggerExecutor {
     execute(trigger) {
       const before = ctx.state;
       resetStepDirty(ctx.stepDirty);
+      ctx.intentDeltas = [];
       for (const effect of trigger.effects) applyTriggerEffect(ctx, effect);
       return takeDelta(ctx.stepDirty, ctx.state, before);
+    },
+    takeIntentDeltas() {
+      const out = ctx.intentDeltas;
+      ctx.intentDeltas = [];
+      return out;
     },
   };
 }
@@ -754,6 +858,7 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
     consensus: [],
     stepDirty: createStepDirty(state.triggerMode),
     triggers: state.triggers,
+    intentDeltas: [],
   };
   const { actor, intent } = envelope;
   const s = ctx.state;
@@ -917,6 +1022,7 @@ export function initState(input: InitStateInput): InitStateResult {
     consensus: [],
     stepDirty: createStepDirty(triggerMode),
     triggers: state.triggers,
+    intentDeltas: [],
   };
   ctx.chain.push({ level: 1, kind: 'INIT' });
 

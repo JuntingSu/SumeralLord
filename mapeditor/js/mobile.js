@@ -153,6 +153,17 @@
     const was = document.body.classList.contains('mobile');
     if (mobile === was) return;
     document.body.classList.toggle('mobile', mobile);
+    if (mobile) {
+      // 窄屏下侧栏折叠无意义（左栏隐藏、右栏进弹窗），重置为展开，避免桌面状态带入
+      $('left').classList.remove('collapsed');
+      $('right').classList.remove('collapsed');
+      $('right').style.width = '';
+      $('btn-collapse-left').textContent = '《';
+      $('btn-collapse-left').title = '隐藏左侧栏';
+      $('btn-collapse-right').textContent = '》';
+      $('btn-collapse-right').title = '隐藏右侧栏';
+      $('right-resizer').style.display = '';
+    }
     const mainEl = document.querySelector('main');
     const leftAside = $('left');
     const rightAside = $('right');

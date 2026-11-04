@@ -6,7 +6,7 @@ const Editor = (() => {
   const state = {
     map: null,
     id: 'map_new',
-    tool: 'paint', // 'paint' | 'pan'
+    tool: 'paint', // 'paint' | 'pan' | 'script' | 'random'
     brush: {
       terrain: MapConst.TERRAIN.PLAIN,
       owner: MapConst.TILE_OWNER.EMPTY,
