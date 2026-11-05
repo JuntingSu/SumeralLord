@@ -85,7 +85,23 @@
               <div class="trg-row" id="trg-cond-row" data-drop="cond"></div>
             </div>
             <div class="trg-arm" data-arm="effect">
-              <span class="trg-arm-label">则</span>
+              <div class="trg-arm-head">
+                <span class="trg-arm-label">则</span>
+                <select id="trg-once-mode" class="trg-once-select" title="一次性 / 可重复使用">
+                  <option value="once">一次性</option>
+                  <option value="repeat">可重复使用</option>
+                </select>
+                <span class="trg-delay">
+                  <span class="trg-delay-label" title="整条触发器的效果在延迟到期后一起执行">延迟</span>
+                  <select id="trg-delay-unit" title="延迟单位">
+                    <option value="">无延迟</option>
+                    <option value="intent">意图</option>
+                    <option value="turn">回合</option>
+                    <option value="round">轮次</option>
+                  </select>
+                  <input id="trg-delay-amount" type="number" min="1" step="1" value="1" title="延迟数量" disabled>
+                </span>
+              </div>
               <div class="trg-row" id="trg-eff-row" data-drop="eff"></div>
             </div>
           </div>

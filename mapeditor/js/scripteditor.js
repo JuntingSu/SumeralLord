@@ -676,22 +676,48 @@ const ScriptEditor = (() => {
     const cond = state.cond.map((n) => buildCondition(n, ctx));
     const when = cond.length === 1 ? cond[0] : { op: 'and', items: cond };
     const effects = state.eff.map((n) => buildLeaf(n, ctx));
-    const base = state.editing.src ? JSON.parse(JSON.stringify(state.editing.src)) : {};
+    const ed = state.editing;
+    const base = ed.src ? JSON.parse(JSON.stringify(ed.src)) : {};
     delete base.class; // 旧地图的 class 字段在重新提交时去掉
-    return { ...base, id: state.editing.id, when, effects };
+    const trigger = { ...base, id: ed.id, when, effects };
+
+    const priority = Number(ed.priority);
+    trigger.priority = Number.isInteger(priority) ? priority : 0;
+
+    if (ed.delay) {
+      const amount = Number(ed.delay.amount);
+      if (!Number.isInteger(amount) || amount <= 0) throw new Error('延迟数量需为正整数');
+      if (ed.delay.unit !== 'intent' && ed.delay.unit !== 'turn' && ed.delay.unit !== 'round') {
+        throw new Error('延迟单位非法');
+      }
+      trigger.delay = { amount, unit: ed.delay.unit };
+    } else {
+      delete trigger.delay;
+    }
+
+    // 「可重复使用」= 可跨事务再次触发，但同一事务内仍最多触发一次
+    trigger.once = ed.onceMode === 'once';
+    trigger.repeatable = false;
+    return trigger;
   }
 
   // ==================== 渲染：右栏触发器列表 ====================
-  function triggerRow(id, badge) {
+  function triggerRow(id, badge, priority) {
     const row = document.createElement('div');
     row.className = 'trg-item';
     row.dataset.triggerId = id;
     if (state.editing && state.editing.id === id) row.classList.add('editing');
+    const p = Number.isInteger(priority) ? priority : 0;
     row.innerHTML = `
-      <span class="trg-item-id" title="${esc(id)}">${esc(id)}</span>
-      ${badge ? `<span class="trg-item-badge">${esc(badge)}</span>` : ''}
-      <button type="button" data-act="edit">编辑</button>
-      <button type="button" data-act="del">删除</button>
+      <div class="trg-item-info">
+        <span class="trg-item-id" title="${esc(id)}">${esc(id)}</span>
+        ${badge ? `<span class="trg-item-badge">${esc(badge)}</span>` : ''}
+      </div>
+      <div class="trg-item-actions">
+        <label class="trg-priority" title="优先级，越大越先执行">优先级<input class="trg-priority-input" type="number" step="1" value="${p}"></label>
+        <button type="button" data-act="edit">编辑</button>
+        <button type="button" data-act="del">删除</button>
+      </div>
     `;
     return row;
   }
@@ -705,9 +731,9 @@ const ScriptEditor = (() => {
     if (!map) return;
     const triggers = Array.isArray(map.triggers) ? map.triggers : [];
     if (state.editing && state.editing.isNew) {
-      list.appendChild(triggerRow(state.editing.id, '编辑中'));
+      list.appendChild(triggerRow(state.editing.id, '编辑中', state.editing.priority));
     }
-    for (const t of triggers) list.appendChild(triggerRow(t.id));
+    for (const t of triggers) list.appendChild(triggerRow(t.id, '', t.priority ?? 0));
     if (!triggers.length && !(state.editing && state.editing.isNew)) {
       const none = document.createElement('p');
       none.className = 'hint';
@@ -1095,53 +1121,49 @@ const ScriptEditor = (() => {
       return sel;
     };
     const ctx = mapStateCtx();
+    /**
+     * 枚举控件：当前值不在合法选项里（含空值）时落到默认值并写回 params。
+     * 否则控件会显示默认项、但 params.value 仍为空，提交时被误判为“未填预期值”。
+     */
+    const ensureEnumValue = (options, fallback) => {
+      const values = options.map(([v]) => v);
+      const current = values.includes(raw) ? raw : fallback;
+      if (raw !== current) node.params.value = current;
+      return current;
+    };
     switch (def.kind) {
       case 'bool': {
         const opts = [['true', '是'], ['false', '否']];
         if (nullable) opts.push(['null', '无']);
-        wrap.appendChild(makeSelect(opts, raw === 'null' ? 'null' : raw || 'true'));
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, 'true')));
         break;
       }
-      case 'phase':
-        wrap.appendChild(makeSelect(PHASES.map((p) => [p, PHASE_LABELS[p]]), raw || PHASES[0]));
+      case 'phase': {
+        const opts = PHASES.map((p) => [p, PHASE_LABELS[p]]);
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, PHASES[0])));
         break;
-      case 'terrain':
-        wrap.appendChild(
-          makeSelect(
-            ['5', '0', '3', '4', '1'].map((v) => [v, MapConst.TERRAIN_LABELS[Number(v)]]),
-            raw || '0',
-          ),
-        );
+      }
+      case 'terrain': {
+        const opts = ['5', '0', '3', '4', '1'].map((v) => [v, MapConst.TERRAIN_LABELS[Number(v)]]);
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, '0')));
         break;
-      case 'difficulty':
-        wrap.appendChild(
-          makeSelect(
-            AI_LEVELS.map((v) => [String(v), MapConst.AI_LABELS[v] || String(v)]),
-            raw || String(AI_LEVELS[0]),
-          ),
-        );
+      }
+      case 'difficulty': {
+        const opts = AI_LEVELS.map((v) => [String(v), MapConst.AI_LABELS[v] || String(v)]);
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, String(AI_LEVELS[0]))));
         break;
+      }
       case 'seat': {
         const opts = ctx.seats.map((s) => [String(s.seat), `P${s.seat}`]);
         opts.push(['player', '玩家']);
         if (nullable) opts.push(['null', '无']);
-        wrap.appendChild(
-          makeSelect(
-            opts,
-            raw === 'null' || raw === 'player' ? raw : raw || (opts[0] ? opts[0][0] : ''),
-          ),
-        );
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, opts[0] ? opts[0][0] : '')));
         break;
       }
       case 'owner': {
         const opts = ctx.seats.map((s) => [String(s.seat), `P${s.seat}`]);
         opts.push(['player', '玩家'], ['0', '野生'], ['255', '阻挡'], ['null', '无兵']);
-        wrap.appendChild(
-          makeSelect(
-            opts,
-            raw === 'null' || raw === 'player' ? raw : raw || (opts[0] ? opts[0][0] : 'null'),
-          ),
-        );
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, opts[0] ? opts[0][0] : 'null')));
         break;
       }
       case 'text': {
@@ -1821,6 +1843,16 @@ const ScriptEditor = (() => {
     $('trg-kind').value = state.kind;
     renderOpOptions();
 
+    const delayUnit = $('trg-delay-unit');
+    const delayAmount = $('trg-delay-amount');
+    if (delayUnit) delayUnit.value = state.editing.delay?.unit ?? '';
+    if (delayAmount) {
+      delayAmount.value = String(state.editing.delay?.amount ?? 1);
+      delayAmount.disabled = !state.editing.delay;
+    }
+    const onceMode = $('trg-once-mode');
+    if (onceMode) onceMode.value = state.editing.onceMode === 'once' ? 'once' : 'repeat';
+
     const condRow = $('trg-cond-row');
     condRow.innerHTML = '';
     state.cond.forEach((n) => condRow.appendChild(renderNode(n)));
@@ -1868,7 +1900,15 @@ const ScriptEditor = (() => {
     if (document.body.classList.contains('mobile')) {
       return toast('窄屏暂不支持脚本编辑，请使用桌面端', 'error');
     }
-    state.editing = trigger;
+    const map = Editor.getState().map;
+    const isNew = trigger.isNew === true;
+    state.editing = {
+      ...trigger,
+      // 新建默认优先级 = 当前触发器数量（越大越先执行）
+      priority: isNew ? (map?.triggers?.length ?? 0) : (trigger.priority ?? 0),
+      delay: trigger.delay ? { amount: trigger.delay.amount, unit: trigger.delay.unit } : null,
+      onceMode: isNew ? 'once' : (trigger.once === true ? 'once' : 'repeat'),
+    };
     state.cond = trigger.when ? [dslToNode(trigger.when)] : [];
     state.eff = (trigger.effects || []).map(dslToNode);
     state.free = [];
@@ -1889,6 +1929,9 @@ const ScriptEditor = (() => {
       src: JSON.parse(JSON.stringify(t)),
       when: t.when,
       effects: t.effects,
+      priority: t.priority ?? 0,
+      delay: t.delay ?? null,
+      once: t.once === true,
     });
   }
 
@@ -2265,6 +2308,35 @@ const ScriptEditor = (() => {
       state.kind = $('trg-kind').value;
       renderOpOptions();
     });
+    $('trg-delay-unit')?.addEventListener('change', () => {
+      if (!state.editing) return;
+      const unit = $('trg-delay-unit').value;
+      const amountEl = $('trg-delay-amount');
+      if (unit === 'intent' || unit === 'turn' || unit === 'round') {
+        const amount = Math.max(1, Math.round(Number(amountEl.value) || 1));
+        amountEl.value = String(amount);
+        amountEl.disabled = false;
+        state.editing.delay = { amount, unit };
+      } else {
+        amountEl.disabled = true;
+        state.editing.delay = null;
+      }
+    });
+    $('trg-delay-amount')?.addEventListener('input', () => {
+      if (!state.editing?.delay) return;
+      const v = Math.round(Number($('trg-delay-amount').value));
+      if (Number.isInteger(v) && v > 0) state.editing.delay.amount = v;
+    });
+    $('trg-delay-amount')?.addEventListener('change', () => {
+      if (!state.editing?.delay) return;
+      const amount = Math.max(1, Math.round(Number($('trg-delay-amount').value) || 1));
+      $('trg-delay-amount').value = String(amount);
+      state.editing.delay.amount = amount;
+    });
+    $('trg-once-mode')?.addEventListener('change', () => {
+      if (!state.editing) return;
+      state.editing.onceMode = $('trg-once-mode').value === 'once' ? 'once' : 'repeat';
+    });
 
     // 触发器列表：拾取 trigger_id 优先，其次是编辑/删除
     $('trigger-list')?.addEventListener('click', (e) => {
@@ -2287,8 +2359,31 @@ const ScriptEditor = (() => {
       }
       if (!item) return;
       const act = e.target.closest('button')?.dataset.act;
-      if (act === 'edit') editTrigger(item.dataset.triggerId);
-      else if (act === 'del') deleteTrigger(item.dataset.triggerId);
+      if (act === 'edit') {
+        // 草稿尚未写入地图：再次点“编辑”直接回到当前编辑区
+        if (state.editing?.isNew && state.editing.id === item.dataset.triggerId) renderEditor();
+        else editTrigger(item.dataset.triggerId);
+      } else if (act === 'del') deleteTrigger(item.dataset.triggerId);
+    });
+
+    // 触发器列表：优先级编辑（越大越先执行；默认新建时为当前数量）
+    $('trigger-list')?.addEventListener('change', (e) => {
+      const input = e.target.closest('.trg-priority-input');
+      if (!input) return;
+      const item = input.closest('.trg-item');
+      const id = item?.dataset.triggerId;
+      if (!id) return;
+      const value = Number(input.value);
+      const priority = Number.isInteger(value) ? value : 0;
+      input.value = String(priority);
+      if (state.editing && state.editing.id === id) {
+        state.editing.priority = priority;
+        if (state.editing.isNew) return; // 草稿提交时才写入地图
+      }
+      Editor.commit((m) => {
+        const t = (m.triggers || []).find((x) => x.id === id);
+        if (t) t.priority = priority;
+      });
     });
 
     // 势力列表：拾取 force 座次（捕获阶段，优先于势力面板自身交互）
