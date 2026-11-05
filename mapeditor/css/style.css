@@ -268,6 +268,11 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+/* 数值输入：额外给右侧微调按钮和占位文字留空间 */
+.trg-param[type="number"] {
+  width: calc(var(--pw, 2) * 1em + 24px);
+  min-width: 58px;
+}
 .trg-param::placeholder { color: #6c7484; }
 .trg-param.pickable { border-style: dashed; }
 .trg-param.picking {
@@ -320,6 +325,12 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
   color: var(--accent);
 }
 .trg-placement .trg-param { width: calc(var(--pw, 4) * 1em + 10px); }
+
+/* 断言：变量下拉、坐标输入与预期值下拉要给下拉箭头/中文留足空间 */
+.trg-statepath select.trg-param { width: calc(var(--pw, 2) * 1em + 34px); }
+.trg-statepath .trg-path-def { width: calc(var(--pw, 4) * 1em + 34px); }
+.trg-statepath input.trg-param[type="number"] { min-width: 58px; }
+.trg-state-value { width: calc(var(--pw, 2) * 1em + 38px); }
 
 /* 文本编辑器：任意文本 + gamestate 变量 */
 .te-dlg {
