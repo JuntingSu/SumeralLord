@@ -25,6 +25,8 @@ declare module 'fastify' {
     mapsUncensoredDir: string;
     /** PVE 地图目录路径 */
     pveMapsDir: string;
+    /** 演示回放目录（static/demo） */
+    demoDir: string;
     /** PVE 普通 AI 权重文件路径 */
     pveWeightsPath: string;
     /** PVE 存档单账号大小上限（字节） */

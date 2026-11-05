@@ -12,6 +12,7 @@ import Game from './pages/Game';
 import PveRoom from './pages/PveRoom';
 import PveGame from './pages/PveGame';
 import Replay from './pages/Replay';
+import DemoReplay from './pages/DemoReplay';
 import History from './pages/History';
 import Leaderboard from './pages/Leaderboard';
 import Profile from './pages/Profile';
@@ -111,6 +112,7 @@ export default function App() {
           </RequireAuth>
         }
       />
+      <Route path="/demo-replay" element={<DemoReplay />} />
       <Route
         path="/history"
         element={

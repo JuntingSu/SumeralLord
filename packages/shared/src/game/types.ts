@@ -39,6 +39,14 @@ export interface ForceState {
   points: number;
 }
 
+/** 演示模式规则（仅演示回放携带；普通对局为 undefined） */
+export interface DemoRules {
+  /** 加点不校验、不扣除点数（UI 显示 ∞） */
+  infinitePoints?: boolean;
+  /** 不进行自动胜负判定 */
+  noVictory?: boolean;
+}
+
 export interface GameState {
   rows: number;
   columns: number;
@@ -74,6 +82,8 @@ export interface GameState {
   fogOverrides: { enabled?: boolean; revealed: number[]; hidden: number[] } | null;
   /** 地图触发器定义（普通对局空数组）；执行受 triggerMode 控制 */
   triggers: TriggerDef[];
+  /** 演示模式规则；普通对局为 undefined */
+  demo?: DemoRules;
 }
 
 // ---------- 事件（§7 四级全集） ----------
@@ -177,6 +187,8 @@ export interface InitStateInput {
   controlledSeat?: number;
   /** 战役玩家 userId；控制转移写入 playerId 用 */
   humanPlayerId?: number;
+  /** 演示模式规则；缺省 undefined = 普通对局 */
+  demo?: DemoRules;
 }
 
 export interface InitStateResult {
