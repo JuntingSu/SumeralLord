@@ -320,6 +320,8 @@ function forceClearEvent(
 
 function victoryJudgeEvent(ctx: Ctx): void {
   if (ctx.state.finished) return;
+  // 演示模式不做自动胜负判定：势力被清除后仍可继续操作
+  if (ctx.state.demo?.noVictory) return;
   const aliveForces = ctx.state.forces.filter((f) => f.exists && f.alive);
   const teams = [...new Set(aliveForces.map((f) => f.team))];
   // 规则 §8.4.3：存活势力全为同队 → 结束。
@@ -516,7 +518,7 @@ function endTurnEvent(ctx: Ctx): void {
   ctx.state.currentSeat = next;
   ctx.state.phase = 'PREPARE';
   ctx.chain.push({ level: 1, kind: 'END_TURN', fromSeat, toSeat: next, turn: ctx.state.turn });
-  if (!hasAliveHumanForce(ctx.state) && !ctx.state.triggerMode) {
+  if (!hasAliveHumanForce(ctx.state) && !ctx.state.triggerMode && !ctx.state.demo) {
     // 仅剩 AI/无存活人类：轮转无法推进（AI 即时完成回合会死循环），留给胜利判定结束对局
     ctx.state.phase = 'END';
     return;
@@ -593,11 +595,11 @@ function executeInsertedIntent(ctx: Ctx, effect: InsertIntentEffect): boolean {
     const force = forceOf(state, seat);
     const target = state.tiles[effect.coordinate].soldier;
     if (!force || !target || target.owner !== seat || !target.isLinked) return false;
-    if (force.points < effect.amount) return false;
+    if (!state.demo?.infinitePoints && force.points < effect.amount) return false;
     ctx.chain.push({ level: 1, kind: 'ADD_POINT', seat, coordinate: effect.coordinate, amount: effect.amount });
     updateEvent(ctx, effect.coordinate, { strength: target.strength + effect.amount });
     trackForce(ctx.stepDirty, ctx.state, seat);
-    force.points -= effect.amount;
+    if (!state.demo?.infinitePoints) force.points -= effect.amount;
     return true;
   }
 
@@ -899,11 +901,11 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       if (!force || !target || target.owner !== s.currentSeat || !target.isLinked) {
         return reject(state, 'ILLEGAL_MOVE'); // 非当前势力连兵（枚举固定，借用 ILLEGAL_MOVE）
       }
-      if (force.points < intent.amount) return reject(state, 'NO_POINTS');
+      if (!state.demo?.infinitePoints && force.points < intent.amount) return reject(state, 'NO_POINTS');
       ctx.chain.push({ level: 1, kind: 'ADD_POINT', seat: s.currentSeat, coordinate: intent.coordinate, amount: intent.amount });
       updateEvent(ctx, intent.coordinate, { strength: target.strength + intent.amount });
       trackForce(ctx.stepDirty, ctx.state, s.currentSeat);
-      force.points -= intent.amount;
+      if (!state.demo?.infinitePoints) force.points -= intent.amount;
       // 点数耗尽后是否结束回合由前端/AI 驱动以显式 SWITCH_PHASE 发起（reducer 不自动切阶段）
       return finishIntent(ctx, state, actor);
     }
@@ -1014,6 +1016,7 @@ export function initState(input: InitStateInput): InitStateResult {
     turnOrder: [],
     fogOverrides: null,
     triggers: map.triggers ? [...map.triggers] : [],
+    demo: input.demo,
   };
   const ctx: Ctx = {
     state,

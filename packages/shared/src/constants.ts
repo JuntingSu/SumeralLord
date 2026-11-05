@@ -39,6 +39,10 @@ export const ERROR_CODES = {
   RECONNECT_FAILED: 'RECONNECT_FAILED',
   /** PVE 普通 AI 权重文件缺失或格式异常 */
   AI_WEIGHTS_UNAVAILABLE: 'AI_WEIGHTS_UNAVAILABLE',
+  /** 演示回放文件不存在 */
+  DEMO_REPLAY_NOT_FOUND: 'DEMO_REPLAY_NOT_FOUND',
+  /** 演示回放文件超过读取上限 */
+  DEMO_REPLAY_TOO_LARGE: 'DEMO_REPLAY_TOO_LARGE',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

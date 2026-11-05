@@ -22,6 +22,7 @@ import { pveRoutes } from './api/pve.js';
 import { gameRoutes } from './api/game.js';
 import { userRoutes } from './api/users.js';
 import { leaderboardRoutes } from './api/leaderboard.js';
+import { demoRoutes } from './api/demo.js';
 import { ok } from './utils/respond.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +85,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.decorate('mapsUncensoredDir', path.join(staticRoot, 'maps-uncensored'));
   app.decorate('skinDir', opts.skinDir ?? path.join(staticRoot, 'skin'));
   app.decorate('pveMapsDir', path.join(staticRoot, 'pve_maps'));
+  /** 演示回放目录（backend/static/demo；本地生成，不入库） */
+  app.decorate('demoDir', path.join(staticRoot, 'demo'));
   app.decorate('pveWeightsPath', opts.pveWeightsPath ?? config.aiWeightsPath);
   app.decorate('pveSaveMaxBytes', opts.pveSaveMaxBytes ?? config.pveSaveMaxBytes);
   app.decorate('pveMapsReloadMs', opts.pveMapsReloadMs ?? config.pveMapsReloadMs);
@@ -115,6 +118,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(gameRoutes);
   await app.register(userRoutes);
   await app.register(leaderboardRoutes);
+  await app.register(demoRoutes);
 
   gatewayRef = new WsGateway(app, rooms, games, tickets, botSessions, aiBots, app.log, opts.gatewayOpts);
 
