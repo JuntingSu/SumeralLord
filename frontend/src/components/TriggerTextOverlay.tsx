@@ -1,4 +1,5 @@
-// 战役触发器文本展示：8 个屏幕方位（固定） + 绑定地块的方形气泡（随棋盘平移/缩放）。
+// 战役触发器文本展示：9 个屏幕方位（固定） + 绑定地块的方形气泡（随棋盘平移/缩放）。
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { TextPlacement, TextScreenPosition } from '@dl/shared';
 import { TEXT_SCREEN_POSITIONS } from '@dl/shared';
@@ -7,10 +8,17 @@ export interface TriggerTextItem {
   textId: string;
   text: string;
   placement?: TextPlacement;
+  /** 选项文本：已格式化的选项展示文字 */
+  options?: string[];
+  /** 首次显示且尚未选择时为 true，阻塞对局 */
+  blocking?: boolean;
+  /** 再次显示时回显的已选下标 */
+  selected?: number;
 }
 
 const SCREEN_CLASSES: Record<TextScreenPosition, string> = {
   top: 'left-1/2 top-16 -translate-x-1/2 items-center',
+  center: 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 items-center',
   bottom: 'left-1/2 bottom-16 -translate-x-1/2 items-center',
   left: 'left-3 top-1/2 -translate-y-1/2 items-start',
   right: 'right-3 top-1/2 -translate-y-1/2 items-end',
@@ -26,26 +34,58 @@ const CARD =
 function TextCard({
   item,
   onDismiss,
+  onChoose,
 }: {
   item: TriggerTextItem;
   onDismiss: (textId: string) => void;
+  onChoose?: (textId: string, index: number) => void;
 }) {
+  const hasOptions = Array.isArray(item.options);
   return (
     <div className={CARD}>
       <div className="flex items-start gap-2">
-        <span className="mt-0.5 text-amber-400" aria-hidden="true">
-          📜
-        </span>
         <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">{item.text}</p>
-        <button
-          type="button"
-          onClick={() => onDismiss(item.textId)}
-          className="shrink-0 text-slate-400 hover:text-white"
-          aria-label="关闭"
-        >
-          ×
-        </button>
+        {!item.blocking && (
+          <button
+            type="button"
+            onClick={() => onDismiss(item.textId)}
+            className="shrink-0 text-slate-400 hover:text-white"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        )}
       </div>
+      {hasOptions && (
+        <div className="mt-2 flex flex-col gap-1 pl-1">
+          {item.options!.map((option, index) => {
+            if (item.blocking) {
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => onChoose?.(item.textId, index)}
+                  className="rounded border border-amber-600/50 bg-slate-700/70 px-2 py-1 text-left text-sm text-amber-100 hover:bg-slate-600"
+                >
+                  {option}
+                </button>
+              );
+            }
+            const selected = item.selected === index;
+            return (
+              <div
+                key={index}
+                className={`rounded px-2 py-1 text-left text-sm ${
+                  selected ? 'text-slate-500' : 'text-slate-300'
+                }`}
+              >
+                {option}
+                {selected ? '（已选）' : ''}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -53,6 +93,7 @@ function TextCard({
 function emptyScreenGroups(): Record<TextScreenPosition, TriggerTextItem[]> {
   return {
     top: [],
+    center: [],
     bottom: [],
     left: [],
     right: [],
@@ -67,9 +108,11 @@ function emptyScreenGroups(): Record<TextScreenPosition, TriggerTextItem[]> {
 export function TriggerScreenTexts({
   texts,
   onDismiss,
+  onChoose,
 }: {
   texts: TriggerTextItem[];
   onDismiss: (textId: string) => void;
+  onChoose?: (textId: string, index: number) => void;
 }) {
   const groups = emptyScreenGroups();
   for (const t of texts) {
@@ -87,7 +130,7 @@ export function TriggerScreenTexts({
             className={`pointer-events-none fixed z-40 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col gap-2 ${SCREEN_CLASSES[pos]}`}
           >
             {items.map((item) => (
-              <TextCard key={item.textId} item={item} onDismiss={onDismiss} />
+              <TextCard key={item.textId} item={item} onDismiss={onDismiss} onChoose={onChoose} />
             ))}
           </div>
         );
@@ -108,12 +151,31 @@ export function TriggerTileBubbles({
   positionOf,
   viewport,
   onDismiss,
+  onChoose,
 }: {
   texts: TriggerTextItem[];
   positionOf: (tile: number) => TileScreenPosition | null;
   viewport: { w: number; h: number };
   onDismiss: (textId: string) => void;
+  onChoose?: (textId: string, index: number) => void;
 }) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  const toggle = (textId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(textId)) next.delete(textId);
+      else next.add(textId);
+      return next;
+    });
+    setSeenIds((prev) => {
+      if (prev.has(textId)) return prev;
+      const next = new Set(prev);
+      next.add(textId);
+      return next;
+    });
+  };
+
   const groups = new Map<number, TriggerTextItem[]>();
   for (const t of texts) {
     if (t.placement?.kind !== 'tile') continue;
@@ -129,24 +191,55 @@ export function TriggerTileBubbles({
     const above = pos.y > 150;
     // 让气泡尽量留在画布内（宽度上限 18rem，半宽约 144px）
     const half = Math.min(150, Math.max(0, viewport.w / 2 - 8));
-    const x = Math.min(Math.max(pos.x, half + 8), Math.max(half + 8, viewport.w - half - 8));
-    nodes.push(
-      <div key={tile} className="pointer-events-none absolute z-30" style={{ left: x, top: pos.y }}>
+    const baseX = Math.min(Math.max(pos.x, half + 8), Math.max(half + 8, viewport.w - half - 8));
+    items.forEach((item, index) => {
+      const expanded = expandedIds.has(item.textId);
+      const seen = seenIds.has(item.textId);
+      // 同一地块多个文本时横向错开菱形
+      const shift = items.length > 1 ? (index - (items.length - 1) / 2) * 18 : 0;
+      nodes.push(
         <div
-          className="absolute left-0 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border border-amber-600/60 bg-slate-800"
-          style={{ top: above ? -6 : 2 }}
-          aria-hidden="true"
-        />
-        <div
-          className="absolute left-0 flex w-max max-w-[min(18rem,calc(100vw-1.5rem))] -translate-x-1/2 flex-col gap-1"
-          style={above ? { bottom: 12 } : { top: 12 }}
+          key={item.textId}
+          className="pointer-events-none absolute z-30"
+          style={{ left: baseX + shift, top: pos.y }}
         >
-          {items.map((item) => (
-            <TextCard key={item.textId} item={item} onDismiss={onDismiss} />
-          ))}
-        </div>
-      </div>,
-    );
+          {expanded ? (
+            <>
+              <button
+                type="button"
+                onClick={() => toggle(item.textId)}
+                className="pointer-events-auto absolute left-0 h-6 w-6 -translate-x-1/2 -translate-y-1/2"
+                style={{ top: above ? -10 : 6 }}
+                title="收起文本"
+                aria-label="收起文本"
+              >
+                <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-amber-600/60 bg-slate-800" />
+              </button>
+              <div
+                className="absolute left-0 flex w-max max-w-[min(18rem,calc(100vw-1.5rem))] -translate-x-1/2 flex-col gap-1"
+                style={above ? { bottom: 12 } : { top: 12 }}
+              >
+                <TextCard item={item} onDismiss={onDismiss} onChoose={onChoose} />
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => toggle(item.textId)}
+              className="pointer-events-auto absolute left-0 h-7 w-7 -translate-x-1/2 -translate-y-1/2"
+              style={{ top: above ? -12 : 8 }}
+              title="展开文本"
+              aria-label="展开文本"
+            >
+              {!seen && (
+                <span className="absolute left-1/2 top-1/2 h-[17px] w-[17px] -translate-x-1/2 -translate-y-1/2 rotate-45 bg-white/90" />
+              )}
+              <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-amber-600/60 bg-slate-800" />
+            </button>
+          )}
+        </div>,
+      );
+    });
   }
   return <>{nodes}</>;
 }

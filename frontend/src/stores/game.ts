@@ -60,6 +60,19 @@ export interface UndoEntry {
   diff: GameStateDiff;
 }
 
+export interface TriggerTextEntry {
+  textId: string;
+  text: string;
+  template: string;
+  placement?: TextPlacement;
+  /** 选项文本：原始选项模板（展示时按当前 gamestate 动态格式化） */
+  options?: string[];
+  /** 首次显示且尚未选择时为 true，阻塞对局 */
+  blocking?: boolean;
+  /** 再次显示时回显的已选下标 */
+  selected?: number;
+}
+
 interface GameStore {
   /** 对局传输通道（真实 WS 或 Mock；由 attachTransport 注入，不参与渲染） */
   transport: GameTransport | null;
@@ -108,7 +121,7 @@ interface GameStore {
   killCounts: Record<number, number>;
   /** 战役触发器非阻塞文本（textId 去重；placement 缺省 = 右上角）。
    *  text 为展示时格式化后的快照，template 保留原始模板供界面按当前 gamestate 动态重算。 */
-  triggerTexts: Array<{ textId: string; text: string; template: string; placement?: TextPlacement }>;
+  triggerTexts: TriggerTextEntry[];
 
   /** PVE 悔棋：只记录玩家意图的逆 diff；AI 行动/回合切换时清空 */
   undoMode: boolean;
@@ -173,10 +186,10 @@ export function collectTriggerTexts(
   chain: GameEvent[],
   state: GameState,
 ): {
-  show: Array<{ textId: string; text: string; template: string; placement?: TextPlacement }>;
+  show: TriggerTextEntry[];
   hide: string[];
 } {
-  const show: Array<{ textId: string; text: string; template: string; placement?: TextPlacement }> = [];
+  const show: TriggerTextEntry[] = [];
   const hide: string[] = [];
   for (const e of chain) {
     if (e.kind === 'TRIGGER_TEXT_SHOW') {
@@ -185,10 +198,54 @@ export function collectTriggerTexts(
         text: formatStateText(state, e.text),
         template: e.text,
         ...(e.placement ? { placement: e.placement } : {}),
+        ...(e.options
+          ? {
+              options: [...e.options],
+              blocking: e.blocking === true,
+              ...(e.selected === undefined ? {} : { selected: e.selected }),
+            }
+          : {}),
       });
-    } else if (e.kind === 'TRIGGER_TEXT_HIDE') hide.push(e.textId);
+    } else if (e.kind === 'TRIGGER_TEXT_HIDE' || e.kind === 'TRIGGER_TEXT_CHOOSE') {
+      hide.push(e.textId);
+    }
   }
   return { show, hide };
+}
+
+/** 存档/读档/悔棋后，从运行态恢复仍处于阻塞等待的选项文本 */
+export function pendingChoiceTexts(state: GameState): TriggerTextEntry[] {
+  const pending = state.triggerRuntime?.pendingChoices;
+  if (!pending || Object.keys(pending).length === 0) return [];
+  const out: TriggerTextEntry[] = [];
+  const seen = new Set<string>();
+  for (const trigger of state.triggers) {
+    for (const effect of trigger.effects) {
+      if (
+        effect.op !== 'show_choice_text' ||
+        !pending[effect.text_id] ||
+        seen.has(effect.text_id)
+      ) {
+        continue;
+      }
+      seen.add(effect.text_id);
+      out.push({
+        textId: effect.text_id,
+        text: formatStateText(state, effect.text),
+        template: effect.text,
+        placement: effect.placement,
+        options: [...effect.options],
+        blocking: true,
+      });
+    }
+  }
+  return out;
+}
+
+function mergeTriggerTexts(...lists: TriggerTextEntry[][]): TriggerTextEntry[] {
+  const byId = new Map<string, TriggerTextEntry>();
+  for (const list of lists) for (const item of list) byId.set(item.textId, item);
+  return [...byId.values()];
 }
 
 /** 从事件链提取我方回合/阶段开始提示（END_TURN 转到己座；SWITCH_PHASE 切入 ACTION/ADD_POINT） */
@@ -475,7 +532,10 @@ export const useGame = create<GameStore>((set, get) => {
       if (mySeat !== null && mySeat === board.currentSeat) announcements.unshift('你的回合');
       const notices: SystemNotice[] = [];
       if (board.currentSeat > 0) notices.push({ kind: 'turnStart', seat: board.currentSeat });
-      const initialTexts = collectTriggerTexts(chain, board).show;
+      const initialTexts = mergeTriggerTexts(
+        collectTriggerTexts(chain, board).show,
+        pendingChoiceTexts(board),
+      );
       set({
         gameId,
         roomId,
@@ -545,7 +605,7 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: [],
         systemNotices: [],
         killCounts: {},
-        triggerTexts: [],
+        triggerTexts: pendingChoiceTexts(board),
         undoMode: true,
         undoStack: [],
         undoBaseEventId: 0,
@@ -567,6 +627,9 @@ export const useGame = create<GameStore>((set, get) => {
       const stack = s.undoStack.slice(0, -1);
       const newEventId = stack.length > 0 ? stack[stack.length - 1].eventId : s.undoBaseEventId;
       s.transport?.rewindTo?.(restored, newEventId);
+      const pending = pendingChoiceTexts(restored);
+      const pendingIds = new Set(pending.map((p) => p.textId));
+      const keptTexts = s.triggerTexts.filter((t) => !t.blocking || pendingIds.has(t.textId));
       set({
         board: restored,
         appliedEventId: newEventId,
@@ -580,6 +643,7 @@ export const useGame = create<GameStore>((set, get) => {
         phaseAnnouncements: [],
         systemNotices: [],
         killCounts: {},
+        triggerTexts: mergeTriggerTexts(keptTexts, pending),
         undoStack: stack,
         undoAvailable: stack.length > 0,
       });

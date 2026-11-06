@@ -100,7 +100,7 @@ const MapValidate = (() => {
         for (const t of m.triggers) {
           if (!t || !Array.isArray(t.effects)) continue;
           for (const e of t.effects) {
-            if (e && (e.op === 'show_text' || e.op === 'hide_text') && e.text_id) {
+            if (e && (e.op === 'show_text' || e.op === 'show_choice_text' || e.op === 'hide_text') && e.text_id) {
               pathCtx.texts.add(String(e.text_id));
             }
             if (e && e.op === 'declare' && e.var_id) {

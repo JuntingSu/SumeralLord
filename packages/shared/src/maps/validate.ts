@@ -259,6 +259,25 @@ function validateEffect(
         validateStateText(e.text, ctx) &&
         validateTextPlacement(e.placement, total)
       );
+    case 'show_choice_text':
+      return (
+        typeof e.text_id === 'string' &&
+        e.text_id.length > 0 &&
+        e.text_id.length <= 64 &&
+        typeof e.text === 'string' &&
+        e.text.length <= 4000 &&
+        validateStateText(e.text, ctx) &&
+        validateTextPlacement(e.placement, total) &&
+        Array.isArray(e.options) &&
+        e.options.length > 0 &&
+        e.options.every(
+          (option) =>
+            typeof option === 'string' &&
+            option.length > 0 &&
+            option.length <= 4000 &&
+            validateStateText(option, ctx),
+        )
+      );
     case 'hide_text':
       return typeof e.text_id === 'string' && e.text_id.length > 0 && e.text_id.length <= 64;
     case 'declare': {
@@ -336,7 +355,7 @@ export function validateTriggers(
     for (const effect of entry.effects) {
       if (
         isRecord(effect) &&
-        (effect.op === 'show_text' || effect.op === 'hide_text') &&
+        (effect.op === 'show_text' || effect.op === 'show_choice_text' || effect.op === 'hide_text') &&
         typeof effect.text_id === 'string' &&
         effect.text_id.length > 0
       ) {

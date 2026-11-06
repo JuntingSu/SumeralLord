@@ -176,7 +176,12 @@ export class PveTransport implements GameTransport {
   }
 
   private drive(): void {
-    if (this.closed || !this.connected || this.thinking || this.aiTimer !== null || this.planQueue.length > 0) {
+    if (this.closed || !this.connected) return;
+    if (this.hasPendingChoice()) {
+      this.stopAiForChoice();
+      return;
+    }
+    if (this.thinking || this.aiTimer !== null || this.planQueue.length > 0) {
       return;
     }
     if (this.board.finished) {
@@ -269,6 +274,10 @@ export class PveTransport implements GameTransport {
 
   private pump(): void {
     if (this.closed) return;
+    if (this.hasPendingChoice()) {
+      this.stopAiForChoice();
+      return;
+    }
     if (this.planQueue.length === 0) {
       this.planSeat = -1;
       this.drive();
@@ -286,9 +295,28 @@ export class PveTransport implements GameTransport {
     this.aiTimer = setTimeout(() => {
       this.aiTimer = null;
       if (this.closed) return;
+      if (this.hasPendingChoice()) {
+        this.stopAiForChoice();
+        return;
+      }
       this.emitAiIntent(seat, intent);
       this.pump();
     }, this.stepDelayMs);
+  }
+
+  /** 选项文本等待选择：暂停 AI 计划并作废在途规划 */
+  private hasPendingChoice(): boolean {
+    const pending = this.board.triggerRuntime?.pendingChoices;
+    return !!pending && Object.keys(pending).length > 0;
+  }
+
+  private stopAiForChoice(): void {
+    this.clearAiTimer();
+    this.planQueue = [];
+    this.planSeat = -1;
+    this.thinking = false;
+    this.planGeneration += 1;
+    this.opts.onThinking?.(false);
   }
 
   private emitAiIntent(seat: number, intent: PlayerIntent): void {

@@ -80,14 +80,29 @@ export default function PveGame() {
     if (!board) return [];
     return triggerTexts
       .filter((t) => t.placement?.kind !== 'tile')
-      .map((t) => ({ ...t, text: formatStateText(board, t.template) }));
+      .map((t) => ({
+        ...t,
+        text: formatStateText(board, t.template),
+        ...(t.options ? { options: t.options.map((o) => formatStateText(board, o)) } : {}),
+      }));
   }, [triggerTexts, board]);
   const tileTexts = useMemo(() => {
     if (!board) return [];
     return triggerTexts
       .filter((t) => t.placement?.kind === 'tile')
-      .map((t) => ({ ...t, text: formatStateText(board, t.template) }));
+      .map((t) => ({
+        ...t,
+        text: formatStateText(board, t.template),
+        ...(t.options ? { options: t.options.map((o) => formatStateText(board, o)) } : {}),
+      }));
   }, [triggerTexts, board]);
+  const hasPendingChoice = useCallback(() => {
+    const pending = useGame.getState().board?.triggerRuntime?.pendingChoices;
+    return !!pending && Object.keys(pending).length > 0;
+  }, []);
+  const handleChooseTriggerText = useCallback((textId: string, index: number) => {
+    useGame.getState().submitIntent({ intentType: 'CHOOSE_TEXT', textId, index });
+  }, []);
 
   const [runId, setRunId] = useState(0);
   const [starting, setStarting] = useState(true);
@@ -438,6 +453,7 @@ export default function PveGame() {
       const s = useGame.getState();
       const b = s.board;
       if (!b || s.isSpectator || s.gameOver || s.fatal) return;
+      if (hasPendingChoice()) return;
       if (animatorRef.current?.isPlaying) return;
       if (b.currentSeat !== s.mySeat) return;
       if (b.phase !== 'ACTION') return;
@@ -461,7 +477,7 @@ export default function PveGame() {
       s.submitIntent(intent);
       setSelected(nextSelectedTile(b, intent));
     },
-    [selected],
+    [selected, hasPendingChoice],
   );
 
   const stopAddPoint = useCallback(() => {
@@ -470,12 +486,16 @@ export default function PveGame() {
       window.clearInterval(r.timer);
       r.timer = null;
     }
+    if (hasPendingChoice()) {
+      r.accumulated = 0;
+      return;
+    }
     if (r.accumulated > 0) {
       const s = useGame.getState();
       s.submitIntent({ intentType: 'ADD_POINT', coordinate: s.lastPointTile ?? 0, amount: r.accumulated });
       r.accumulated = 0;
     }
-  }, []);
+  }, [hasPendingChoice]);
 
   const cancelAddPoint = useCallback(() => {
     const r = addPointRef.current;
@@ -491,6 +511,7 @@ export default function PveGame() {
       const s = useGame.getState();
       const b = s.board;
       if (!b || s.isSpectator || s.gameOver || s.fatal) return;
+      if (hasPendingChoice()) return;
       if (animatorRef.current?.isPlaying) return;
       if (b.currentSeat !== s.mySeat || b.phase !== 'ADD_POINT') return;
       const soldier = b.tiles[tile].soldier;
@@ -504,6 +525,10 @@ export default function PveGame() {
       r.lastSend = Date.now();
       r.timer = window.setInterval(() => {
         const g = useGame.getState();
+        if (hasPendingChoice()) {
+          stopAddPoint();
+          return;
+        }
         const f = g.board?.forces.find((x) => x.seat === g.mySeat);
         const maxPoints = f?.points ?? 0;
         if (r.accumulated >= maxPoints) {
@@ -518,7 +543,7 @@ export default function PveGame() {
         }
       }, 150);
     },
-    [stopAddPoint],
+    [stopAddPoint, hasPendingChoice],
   );
 
   useEffect(() => () => cancelAddPoint(), [cancelAddPoint]);
@@ -528,12 +553,13 @@ export default function PveGame() {
   const autoSkipKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!board || mySeat === null || isSpectator || gameOver || fatal) return;
+    if (hasPendingChoice()) return;
     if (!shouldAutoSkipPhase(board, mySeat)) return;
     const key = `${appliedEventId}:${board.currentSeat}:${board.phase}`;
     if (autoSkipKeyRef.current === key) return;
     autoSkipKeyRef.current = key;
     useGame.getState().submitIntent({ intentType: 'SWITCH_PHASE' });
-  }, [board, mySeat, isSpectator, gameOver, fatal, appliedEventId]);
+  }, [board, mySeat, isSpectator, gameOver, fatal, appliedEventId, hasPendingChoice]);
 
   // ---------- 操作 ----------
   const phase = board?.phase ?? 'PREPARE';
@@ -543,6 +569,7 @@ export default function PveGame() {
   const handleSwitchPhase = () => {
     const s = useGame.getState();
     if (!s.board || s.gameOver || s.fatal) return;
+    if (hasPendingChoice()) return;
     if (animatorRef.current?.isPlaying) return;
     if (s.board.currentSeat !== s.mySeat) return;
     s.submitIntent({ intentType: 'SWITCH_PHASE' });
@@ -702,7 +729,11 @@ export default function PveGame() {
         </div>
       </header>
 
-      <TriggerScreenTexts texts={screenTexts} onDismiss={dismissTriggerText} />
+      <TriggerScreenTexts
+        texts={screenTexts}
+        onDismiss={dismissTriggerText}
+        onChoose={handleChooseTriggerText}
+      />
 
       {aiWarning && (
         <div className="mx-3 mt-2 rounded bg-amber-900/40 px-3 py-2 text-sm text-amber-200 sm:mx-6">{aiWarning}</div>
@@ -914,10 +945,12 @@ export default function PveGame() {
             className="h-full w-full"
             overlay={({ tileScreenPosition, viewport }) => (
               <TriggerTileBubbles
+                key={runId}
                 texts={tileTexts}
                 positionOf={tileScreenPosition}
                 viewport={viewport}
                 onDismiss={dismissTriggerText}
+                onChoose={handleChooseTriggerText}
               />
             )}
           />

@@ -288,7 +288,10 @@
     <div class="tab-page" id="tab-triggers" hidden>
       <div class="trg-new">
         <input id="trg-new-id" placeholder="触发器 id（≤64 字符）" maxlength="64">
-        <button id="btn-trg-create" class="wide" type="button">＋ 新建触发器</button>
+        <div class="trg-new-actions">
+          <button id="btn-trg-create" type="button" title="新建触发器">＋ 新建触发器</button>
+          <button id="btn-trg-folder" type="button" title="新建文件夹">＋ 新建文件夹</button>
+        </div>
       </div>
       <div id="trigger-list"></div>
       <p class="hint">点击「编辑」回到左侧「脚本」栏进行编辑</p>
@@ -407,6 +410,11 @@
   <div class="dlg-body">
     <textarea id="te-text" rows="7" placeholder="输入文本，可从下方插入 gamestate 变量"></textarea>
     <div class="te-actions"><button id="te-insert" type="button">＋ 插入变量</button></div>
+    <div id="te-choice" hidden>
+      <div class="te-choice-head">选项</div>
+      <div id="te-choice-list"></div>
+      <button id="te-choice-add" type="button">＋ 添加选项</button>
+    </div>
     <div id="te-tree" class="te-tree"></div>
     <div class="dlg-btns">
       <button id="te-cancel" type="button">取消</button>
@@ -431,6 +439,9 @@
 
 <!-- 脚本参数：合法值复选框面板 -->
 <div id="trg-param-pop" class="trg-param-pop" hidden></div>
+
+<!-- 右键上下文菜单 -->
+<div id="ctx-menu" class="ctx-menu" hidden></div>
 
 <script src="js/constants.js"></script>
 <script src="js/mapdata.js"></script>

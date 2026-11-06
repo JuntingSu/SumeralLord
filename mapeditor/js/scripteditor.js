@@ -19,6 +19,7 @@ const ScriptEditor = (() => {
   const PHASE_LABELS = { PREPARE: '准备阶段', ACTION: '行动阶段', ADD_POINT: '加点阶段', END: '结束阶段' };
   const POSITION_LABELS = {
     top: '上',
+    center: '中',
     bottom: '下',
     left: '左',
     right: '右',
@@ -31,7 +32,7 @@ const ScriptEditor = (() => {
   /** 地形参数也接受中文名（虚空/平原/海洋/山地/据点） */
   const TERRAIN_ALIASES = { 虚空: 5, 平原: 0, 海洋: 3, 山地: 4, 据点: 1 };
   const AI_LEVELS = [1, 2, 3, 255];
-  const SCREEN_POSITIONS = ['top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'];
+  const SCREEN_POSITIONS = ['top', 'center', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'];
   /** 用枚举选项面板选择的类型（any/unchanged/flipped 作为额外选项由参数开关控制） */
   const ENUM_TYPES = new Set([
     'force', 'seat', 'owner', 'team', 'trigger', 'phase', 'terrain',
@@ -206,6 +207,15 @@ const ScriptEditor = (() => {
         ],
       },
       {
+        op: 'show_choice_text', label: '显示选项文本',
+        text: '文本ID：{text_id}，内容：{text}（位置 {placement}）',
+        params: [
+          P('text_id', 'textId', '文本ID', { maxLen: 64, placeholder: '指定文本 id 或点触发器拾取' }),
+          P('text', 'textEditor', '内容', { maxLen: 4000 }),
+          P('placement', 'placement', '位置', { def: 'screen:top-right' }),
+        ],
+      },
+      {
         op: 'hide_text', label: '隐藏文本',
         text: '隐藏 {text_id}',
         params: [P('text_id', 'textId', '文本ID', { maxLen: 64, placeholder: '指定文本 id 或点触发器拾取' })],
@@ -266,6 +276,12 @@ const ScriptEditor = (() => {
     pickZones: [],
     pop: null,
     dragUid: null,
+    /** 触发器文件夹（仅编辑器管理用，不写入地图 JSON） */
+    folders: [],
+    /** folderId → trigger id 列表（文件夹内顺序） */
+    folderTriggers: {},
+    folderMapId: null,
+    dragTriggerId: null,
   };
 
   // 目录项补上类别，供 DSL 回填 / 校验区分条件与效果
@@ -311,9 +327,17 @@ const ScriptEditor = (() => {
     if (def) {
       for (const p of def.params || []) node.params[p.key] = p.def ?? '';
     }
-    if (op === 'show_text' && !node.params.text_id) node.params.text_id = nextTextId();
+    if (
+      (op === 'show_text' || op === 'show_choice_text') &&
+      !node.params.text_id
+    ) {
+      node.params.text_id = nextTextId();
+    }
     // 记录进入编辑时的文本 id；提交时用于识别改名并同步引用
-    if (op === 'show_text') node.textIdOrigin = String(node.params.text_id ?? '');
+    if (op === 'show_text' || op === 'show_choice_text') {
+      node.textIdOrigin = String(node.params.text_id ?? '');
+    }
+    if (op === 'show_choice_text') node.choiceOptions = [''];
     if (op === 'set_turn_order' && !node.params.order) {
       const map = Editor.getState().map;
       const seats = (map?.player_list || []).map((p) => p.seat).sort((a, b) => a - b);
@@ -345,12 +369,21 @@ const ScriptEditor = (() => {
     const map = Editor.getState().map;
     for (const t of map?.triggers || []) {
       for (const e of t.effects || []) {
-        if (e && (e.op === 'show_text' || e.op === 'hide_text') && e.text_id) out.add(String(e.text_id));
+        if (
+          e &&
+          (e.op === 'show_text' || e.op === 'show_choice_text' || e.op === 'hide_text') &&
+          e.text_id
+        ) {
+          out.add(String(e.text_id));
+        }
       }
     }
     const walk = (list) => {
       for (const n of list) {
-        if ((n.op === 'show_text' || n.op === 'hide_text') && n.params?.text_id) {
+        if (
+          (n.op === 'show_text' || n.op === 'show_choice_text' || n.op === 'hide_text') &&
+          n.params?.text_id
+        ) {
           out.add(String(n.params.text_id));
         }
         if (n.children) walk(n.children);
@@ -396,7 +429,7 @@ const ScriptEditor = (() => {
     return id;
   }
 
-  /** 查找某个 text_id 已有的文本定义（排除当前组件自身） */
+  /** 查找某个 text_id 已有的显示文本定义（排除当前组件自身） */
   function findTextDefinition(textId, excludeNode) {
     const id = String(textId ?? '').trim();
     if (!id) return null;
@@ -427,6 +460,48 @@ const ScriptEditor = (() => {
       text: String(canonical.params?.text ?? ''),
       placement: String(canonical.params?.placement ?? ''),
     };
+  }
+
+  /** 查找某个 text_id 已有的选项文本定义（排除当前组件自身） */
+  function findChoiceTextDefinition(textId, excludeNode) {
+    const id = String(textId ?? '').trim();
+    if (!id) return null;
+    // 选项文本组件原本就是该 id 的定义：保留自身内容/选项编辑
+    if (
+      excludeNode &&
+      excludeNode.op === 'show_choice_text' &&
+      String(excludeNode.textIdOrigin ?? '').trim() === id
+    ) {
+      return null;
+    }
+    // 编辑区里的定义优先（未提交的最新内容）
+    const candidates = state.eff.filter(
+      (n) => n !== excludeNode && n.op === 'show_choice_text' && String(n.params?.text_id ?? '').trim() === id,
+    );
+    const canonical =
+      candidates.find((n) => String(n.textIdOrigin ?? '').trim() === id) || candidates[0];
+    if (canonical) {
+      return {
+        text: String(canonical.params?.text ?? ''),
+        options: (canonical.choiceOptions || []).map((o) => String(o)),
+        placement: String(canonical.params?.placement ?? ''),
+      };
+    }
+    const map = Editor.getState().map;
+    const editingId = state.editing?.id;
+    for (const t of map?.triggers || []) {
+      if (editingId && t.id === editingId) continue;
+      for (const e of t.effects || []) {
+        if (e && e.op === 'show_choice_text' && String(e.text_id ?? '').trim() === id) {
+          return {
+            text: String(e.text ?? ''),
+            options: Array.isArray(e.options) ? e.options.map((o) => String(o)) : [],
+            placement: encodePlacement(e.placement),
+          };
+        }
+      }
+    }
+    return null;
   }
 
   /** 位置参数编码：screen:top-right / tile:12 */
@@ -466,7 +541,13 @@ const ScriptEditor = (() => {
         ? (p.type === 'placement' ? (p.def ?? '') : (p.def ?? ''))
         : String(v);
     }
-    if (obj.op === 'show_text') node.textIdOrigin = String(node.params.text_id ?? '');
+    if (obj.op === 'show_text' || obj.op === 'show_choice_text') {
+      node.textIdOrigin = String(node.params.text_id ?? '');
+    }
+    if (obj.op === 'show_choice_text') {
+      node.choiceOptions =
+        Array.isArray(obj.options) && obj.options.length ? obj.options.map((o) => String(o)) : [''];
+    }
     return node;
   }
 
@@ -782,6 +863,44 @@ const ScriptEditor = (() => {
       if (!pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
       return { op: 'change', var_id: varId, operator, param: n };
     }
+    if (node.op === 'show_text' || node.op === 'show_choice_text') {
+      const textId = String(node.params.text_id || '').trim();
+      if (!textId) throw new Error('请填写「文本ID」');
+      const pPlacement = def.params.find((p) => p.key === 'placement');
+      // 引用已有选项文本：两种显示文本都统一按“再次显示选项文本”处理
+      const choiceRef = findChoiceTextDefinition(textId, node);
+      if (choiceRef) {
+        if (
+          !choiceRef.options.length ||
+          choiceRef.options.some((o) => !String(o).trim())
+        ) {
+          throw new Error('被引用的选项文本还没有有效选项');
+        }
+        const placementRaw =
+          choiceRef.placement || String(node.params.placement || '') || 'screen:top-right';
+        return {
+          op: 'show_choice_text',
+          text_id: textId,
+          text: choiceRef.text,
+          placement: convertParam(pPlacement, placementRaw, ctx),
+          options: choiceRef.options,
+        };
+      }
+      // 普通显示文本引用已有普通文本
+      if (node.op === 'show_text') {
+        const textRef = findTextDefinition(textId, node);
+        if (textRef) {
+          const placementRaw =
+            textRef.placement || String(node.params.placement || '') || 'screen:top-right';
+          return {
+            op: 'show_text',
+            text_id: textId,
+            text: textRef.text,
+            placement: convertParam(pPlacement, placementRaw, ctx),
+          };
+        }
+      }
+    }
     const out = { op: node.op };
     const patch = {};
     let patchCount = 0;
@@ -805,16 +924,12 @@ const ScriptEditor = (() => {
       if (patchCount === 0) throw new Error('「修改」类效果至少填写一个修改项');
       out.patch = patch;
     }
-    // 显示文本引用已有 text_id 时，内容与位置都沿用已有定义
-    if (node.op === 'show_text') {
-      const reuse = findTextDefinition(out.text_id, node);
-      if (reuse) {
-        out.text = reuse.text;
-        if (reuse.placement) {
-          const pPlacement = def.params.find((p) => p.key === 'placement');
-          out.placement = convertParam(pPlacement, reuse.placement, ctx);
-        }
-      }
+    if (node.op === 'show_choice_text') {
+      const options = (node.choiceOptions || []).map((o) => String(o).trim());
+      if (!options.length) throw new Error('请至少添加一个选项');
+      if (options.some((o) => o === '')) throw new Error('选项内容不能为空');
+      if (options.some((o) => o.length > 4000)) throw new Error('单个选项不能超过 4000 个字符');
+      out.options = options;
     }
     return out;
   }
@@ -870,28 +985,25 @@ const ScriptEditor = (() => {
   }
 
   // ==================== 文本 id 改名：提交时同步引用 ====================
-  function textVisiblePath(id) {
-    return `gamestate.texts.${id}.visible`;
-  }
 
   /** 收集本次提交里 show_text 文本 id 的变化（进入编辑时的 id → 当前 id） */
   function collectTextIdRenames() {
     const renames = new Map();
     for (const n of state.eff) {
-      if (n.op !== 'show_text') continue;
+      if (n.op !== 'show_text' && n.op !== 'show_choice_text') continue;
       const from = String(n.textIdOrigin ?? '').trim();
       const to = String(n.params?.text_id ?? '').trim();
       if (!from || !to || from === to) continue;
-      // 新 id 已有定义 → 这是“引用已有文本”，不是改名，不做全局替换
-      if (findTextDefinition(to, n)) continue;
+      // 普通文本改到已有 id 视为引用；选项文本总是按改名同步旧引用
+      if (n.op === 'show_text' && findTextDefinition(to, n)) continue;
       renames.set(from, to);
     }
     return renames;
   }
 
   function renameTextToken(text, renames) {
-    return String(text).replace(/\{gamestate\.texts\.([^{}]+)\.visible\}/g, (token, id) =>
-      renames.has(id) ? `{${textVisiblePath(renames.get(id))}}` : token,
+    return String(text).replace(/\{gamestate\.texts\.([^{}]+)\.(visible|option)\}/g, (token, id, field) =>
+      renames.has(id) ? `{gamestate.texts.${renames.get(id)}.${field}}` : token,
     );
   }
 
@@ -907,23 +1019,31 @@ const ScriptEditor = (() => {
     }
     if (cond.op === 'state_assert' && typeof cond.path === 'string') {
       const prefix = 'gamestate.texts.';
-      const suffix = '.visible';
-      if (cond.path.startsWith(prefix) && cond.path.endsWith(suffix)) {
+      const suffix = cond.path.endsWith('.option') ? '.option' : cond.path.endsWith('.visible') ? '.visible' : '';
+      if (suffix) {
         const id = cond.path.slice(prefix.length, -suffix.length);
-        if (renames.has(id)) cond.path = textVisiblePath(renames.get(id));
+        if (cond.path.startsWith(prefix) && renames.has(id)) {
+          cond.path = `gamestate.texts.${renames.get(id)}${suffix}`;
+        }
       }
     }
   }
 
   function applyTextIdRenamesToEffect(effect, renames) {
     if (!renames.size || !effect) return;
-    if (effect.op === 'show_text' || effect.op === 'hide_text') {
+    if (effect.op === 'show_text' || effect.op === 'show_choice_text' || effect.op === 'hide_text') {
       if (typeof effect.text_id === 'string' && renames.has(effect.text_id)) {
         effect.text_id = renames.get(effect.text_id);
       }
     }
     if (effect.op === 'show_text' && typeof effect.text === 'string') {
       effect.text = renameTextToken(effect.text, renames);
+    }
+    if (effect.op === 'show_choice_text') {
+      if (typeof effect.text === 'string') effect.text = renameTextToken(effect.text, renames);
+      if (Array.isArray(effect.options)) {
+        effect.options = effect.options.map((o) => renameTextToken(o, renames));
+      }
     }
   }
 
@@ -933,11 +1053,483 @@ const ScriptEditor = (() => {
     for (const e of trigger.effects || []) applyTextIdRenamesToEffect(e, renames);
   }
 
+  // ==================== 触发器文件夹（仅编辑器管理用） ====================
+  const FOLDER_ICON =
+    '<svg class="trg-folder-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 4.2h4.1l1.4 1.6h7v7.2H1.8z"/></svg>';
+
+  function nextFolderId() {
+    let n = state.folders.length + 1;
+    const used = new Set(state.folders.map((f) => f.id));
+    while (used.has(`folder_${n}`)) n++;
+    return `folder_${n}`;
+  }
+
+  function uniqueFolderName() {
+    const used = new Set(state.folders.map((f) => f.name));
+    let n = state.folders.length + 1;
+    while (used.has(`文件夹 ${n}`)) n++;
+    return `文件夹 ${n}`;
+  }
+
+  function createFolder(parentId = null, name = null) {
+    const parent = parentId ? state.folders.find((f) => f.id === parentId) : null;
+    const effectiveParent = parent ? parent.id : null;
+    const folder = {
+      id: nextFolderId(),
+      name: name || uniqueFolderName(),
+      collapsed: false,
+      parentId: effectiveParent,
+    };
+    state.folders.push(folder);
+    state.folderTriggers[folder.id] = [];
+    if (effectiveParent) expandFolderAncestors(effectiveParent);
+    return folder;
+  }
+
+  function expandFolderAncestors(folderId) {
+    let id = folderId;
+    const seen = new Set();
+    while (id && !seen.has(id)) {
+      seen.add(id);
+      const folder = state.folders.find((f) => f.id === id);
+      if (!folder) break;
+      folder.collapsed = false;
+      id = folder.parentId;
+    }
+  }
+
+  function rootFolderList() {
+    return state.folders.filter((f) => !f.parentId);
+  }
+
+  function folderPath(folder) {
+    const names = [];
+    const seen = new Set();
+    let current = folder;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      names.unshift(current.name);
+      current = current.parentId
+        ? state.folders.find((f) => f.id === current.parentId)
+        : null;
+    }
+    return names.join(' / ');
+  }
+
+  /** 从 editor_meta.trigger_tree 还原扁平文件夹模型 */
+  function parseFolderMeta(raw, validTriggers) {
+    const folders = [];
+    const folderTriggers = {};
+    const usedIds = new Set();
+    const seenTriggers = new Set();
+    let seq = 1;
+    const freshId = () => {
+      let id;
+      do {
+        id = `folder_${seq++}`;
+      } while (usedIds.has(id));
+      return id;
+    };
+    const walk = (nodes, parentId, depth) => {
+      if (!Array.isArray(nodes) || depth > 64) return;
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object' || node.type !== 'folder') continue;
+        let id = typeof node.id === 'string' && node.id ? node.id : '';
+        if (!id || usedIds.has(id)) id = freshId();
+        usedIds.add(id);
+        folders.push({
+          id,
+          name: typeof node.name === 'string' && node.name ? node.name : '文件夹',
+          collapsed: node.collapsed === true,
+          parentId,
+        });
+        folderTriggers[id] = [];
+        walk(node.children, id, depth + 1);
+      }
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object' || node.type !== 'trigger') continue;
+        if (typeof node.id !== 'string' || !node.id) continue;
+        if (!validTriggers.has(node.id) || seenTriggers.has(node.id) || parentId === null) continue;
+        seenTriggers.add(node.id);
+        folderTriggers[parentId].push(node.id);
+      }
+    };
+    walk(raw, null, 0);
+    if (!folders.some((f) => !f.parentId)) {
+      const id = freshId();
+      folders.unshift({ id, name: '文件夹 1', collapsed: false, parentId: null });
+      folderTriggers[id] = [];
+    }
+    return { folders, folderTriggers };
+  }
+
+  function loadFolderMeta(map, validTriggers) {
+    const meta = map.editor_meta && typeof map.editor_meta === 'object' ? map.editor_meta : null;
+    const raw = meta && Array.isArray(meta.trigger_tree) ? meta.trigger_tree : null;
+    if (raw) {
+      const parsed = parseFolderMeta(raw, validTriggers);
+      state.folders = parsed.folders;
+      state.folderTriggers = parsed.folderTriggers;
+    } else {
+      state.folders = [];
+      state.folderTriggers = {};
+      createFolder(null, '文件夹 1');
+    }
+  }
+
+  /** 校验父子关系、去重触发器并补齐缺失项 */
+  function sanitizeFolders(validTriggers) {
+    if (!state.folders.length) createFolder(null, '文件夹 1');
+    for (const folder of state.folders) {
+      if (!folder.parentId) folder.parentId = null;
+    }
+    const byId = new Map(state.folders.map((f) => [f.id, f]));
+    // 父节点失效 → 提升为一级文件夹
+    for (const folder of state.folders) {
+      if (folder.parentId && !byId.has(folder.parentId)) folder.parentId = null;
+    }
+    // 断开环
+    for (const folder of state.folders) {
+      let parentId = folder.parentId;
+      const seen = new Set([folder.id]);
+      while (parentId) {
+        if (seen.has(parentId)) {
+          folder.parentId = null;
+          break;
+        }
+        seen.add(parentId);
+        const parent = byId.get(parentId);
+        if (!parent) {
+          folder.parentId = null;
+          break;
+        }
+        parentId = parent.parentId;
+      }
+    }
+    // 至少保留一个一级文件夹
+    if (!state.folders.some((f) => !f.parentId)) {
+      const first = state.folders[0];
+      if (first) first.parentId = null;
+      else createFolder(null, '文件夹 1');
+    }
+    for (const folder of state.folders) {
+      if (!Array.isArray(state.folderTriggers[folder.id])) state.folderTriggers[folder.id] = [];
+    }
+    // 按树顺序去重、清理无效触发器
+    const order = [];
+    const walk = (parentId) => {
+      for (const folder of state.folders.filter((f) => (f.parentId ?? null) === parentId)) {
+        order.push(folder);
+        walk(folder.id);
+      }
+    };
+    walk(null);
+    const seen = new Set();
+    for (const folder of order) {
+      const next = [];
+      for (const id of state.folderTriggers[folder.id] || []) {
+        if (!validTriggers.has(id) || seen.has(id)) continue;
+        seen.add(id);
+        next.push(id);
+      }
+      state.folderTriggers[folder.id] = next;
+    }
+    const root = state.folders.find((f) => !f.parentId);
+    for (const id of validTriggers) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      state.folderTriggers[root.id].push(id);
+    }
+  }
+
+  function buildEditorTree(parentId = null) {
+    return state.folders
+      .filter((f) => (f.parentId ?? null) === parentId)
+      .map((folder) => ({
+        type: 'folder',
+        id: folder.id,
+        name: folder.name,
+        collapsed: !!folder.collapsed,
+        children: [
+          ...buildEditorTree(folder.id),
+          ...(state.folderTriggers[folder.id] || []).map((id) => ({ type: 'trigger', id })),
+        ],
+      }));
+  }
+
+  function syncEditorMetaToMap() {
+    const map = Editor.getState().map;
+    if (!map) return;
+    const base =
+      map.editor_meta && typeof map.editor_meta === 'object' ? map.editor_meta : {};
+    map.editor_meta = {
+      ...base,
+      version: 1,
+      trigger_tree: buildEditorTree(null),
+    };
+  }
+
+  /** 保证每个触发器都有文件夹；切换地图时从 editor_meta 还原层级 */
+  function ensureFolders(map) {
+    const mapId = Editor.getState().id;
+    const switched = state.folderMapId !== mapId;
+    if (switched) {
+      state.folderMapId = mapId;
+      // 切换地图时不保留上一张图的编辑草稿/编辑态
+      state.editing = null;
+      state.cond = [];
+      state.eff = [];
+      state.free = [];
+      state.pick = null;
+    }
+    const valid = new Set((map.triggers || []).map((t) => t.id));
+    if (state.editing?.isNew) valid.add(state.editing.id);
+    if (switched) loadFolderMeta(map, valid);
+    sanitizeFolders(valid);
+    syncEditorMetaToMap();
+  }
+
+  function folderOfTrigger(id) {
+    for (const folder of state.folders) {
+      if ((state.folderTriggers[folder.id] || []).includes(id)) return folder;
+    }
+    return null;
+  }
+
+  function defaultTargetFolder() {
+    if (state.editing) {
+      const folder = folderOfTrigger(state.editing.id);
+      if (folder) return folder.id;
+    }
+    return state.folders.find((f) => !f.parentId)?.id ?? null;
+  }
+
+  function assignTriggerToFolder(triggerId, folderId) {
+    for (const folder of state.folders) {
+      state.folderTriggers[folder.id] = (state.folderTriggers[folder.id] || []).filter((id) => id !== triggerId);
+    }
+    const target =
+      state.folders.find((f) => f.id === folderId) ||
+      state.folders.find((f) => !f.parentId) ||
+      state.folders[0];
+    if (target) (state.folderTriggers[target.id] ??= []).push(triggerId);
+  }
+
+  function removeTriggerFromFolders(triggerId) {
+    for (const folder of state.folders) {
+      state.folderTriggers[folder.id] = (state.folderTriggers[folder.id] || []).filter((id) => id !== triggerId);
+    }
+  }
+
+  function renameTriggerInFolders(oldId, newId) {
+    for (const folder of state.folders) {
+      state.folderTriggers[folder.id] = (state.folderTriggers[folder.id] || []).map((id) =>
+        id === oldId ? newId : id,
+      );
+    }
+  }
+
+  /** 按「文件夹顺序 + 文件夹内顺序」重排地图触发器数组 */
+  /** 按「子文件夹 → 当前文件夹触发器」深度优先展开 */
+  function flattenTriggerIds(parentId = null, out = []) {
+    for (const folder of state.folders.filter((f) => (f.parentId ?? null) === parentId)) {
+      flattenTriggerIds(folder.id, out);
+      for (const id of state.folderTriggers[folder.id] || []) out.push(id);
+    }
+    return out;
+  }
+
+  function orderMapTriggers(m) {
+    const order = flattenTriggerIds();
+    const byId = new Map((m.triggers || []).map((t) => [t.id, t]));
+    const next = [];
+    for (const id of order) {
+      const trigger = byId.get(id);
+      if (!trigger) continue;
+      next.push(trigger);
+      byId.delete(id);
+    }
+    for (const trigger of m.triggers || []) {
+      if (byId.has(trigger.id)) next.push(trigger);
+    }
+    m.triggers = next;
+  }
+
+  function syncMapTriggerOrder() {
+    Editor.commit((m) => orderMapTriggers(m));
+  }
+
+  function moveTriggerToFolder(triggerId, folderId) {
+    clearTriggerDropIndicators();
+    if (!state.folders.some((f) => f.id === folderId)) return;
+    for (const folder of state.folders) {
+      state.folderTriggers[folder.id] = (state.folderTriggers[folder.id] || []).filter((id) => id !== triggerId);
+    }
+    (state.folderTriggers[folderId] ??= []).push(triggerId);
+    expandFolderAncestors(folderId);
+    const inMap = (Editor.getState().map?.triggers || []).some((t) => t.id === triggerId);
+    if (inMap) syncMapTriggerOrder();
+    renderManager();
+  }
+
+  function moveTriggerToTrigger(triggerId, targetFolderId, targetId, before) {
+    clearTriggerDropIndicators();
+    if (!state.folderTriggers[targetFolderId]) return;
+    for (const folder of state.folders) {
+      state.folderTriggers[folder.id] = (state.folderTriggers[folder.id] || []).filter((id) => id !== triggerId);
+    }
+    const list = state.folderTriggers[targetFolderId];
+    const index = list.indexOf(targetId);
+    const insert = index < 0 ? list.length : index + (before ? 0 : 1);
+    list.splice(insert, 0, triggerId);
+    const inMap = (Editor.getState().map?.triggers || []).some((t) => t.id === triggerId);
+    if (inMap) syncMapTriggerOrder();
+    renderManager();
+  }
+
+  function deleteFolder(folder) {
+    if (state.folders.length <= 1) {
+      return toast('至少保留一个触发器文件夹', 'error');
+    }
+    if (!window.confirm(`删除文件夹「${folder.name}」？其内容会移动到上一级。`)) return;
+    const parentId = folder.parentId ?? null;
+    // 子文件夹提升到被删文件夹的上一级
+    for (const child of state.folders) {
+      if (child.parentId === folder.id) child.parentId = parentId;
+    }
+    const moved = state.folderTriggers[folder.id] || [];
+    state.folders = state.folders.filter((f) => f.id !== folder.id);
+    delete state.folderTriggers[folder.id];
+    // 触发器移到上一级文件夹；一级文件夹被删时移到第一个剩余一级文件夹
+    let targetId = parentId;
+    if (!targetId) {
+      targetId = state.folders.find((f) => !f.parentId)?.id ?? null;
+    }
+    if (!targetId) {
+      const created = createFolder(null, '文件夹 1');
+      targetId = created.id;
+    }
+    for (const id of moved) {
+      if (!(state.folderTriggers[targetId] || []).includes(id)) {
+        (state.folderTriggers[targetId] ??= []).push(id);
+      }
+    }
+    syncMapTriggerOrder();
+    renderManager();
+  }
+
+  function startFolderRename(folder, el) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'trg-folder-rename';
+    input.value = folder.name;
+    el.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save) {
+        const name = input.value.trim();
+        if (name) folder.name = name;
+      }
+      renderManager();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  function folderRow(folder) {
+    const row = document.createElement('div');
+    row.className = 'trg-folder';
+    row.dataset.folderId = folder.id;
+    row.innerHTML = `
+      <span class="trg-folder-icon">${FOLDER_ICON}</span>
+      <span class="trg-folder-name" title="点击改名">${esc(folder.name)}</span>
+      <span class="trg-folder-actions">
+        <button type="button" data-act="folder-add" title="新建触发器或子文件夹">＋</button>
+        <button type="button" data-act="folder-toggle" title="${folder.collapsed ? '展开' : '折叠'}">${folder.collapsed ? '▸' : '▾'}</button>
+      </span>
+    `;
+    row.querySelector('.trg-folder-name')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startFolderRename(folder, e.currentTarget);
+    });
+    row.querySelector('[data-act="folder-add"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      const rect = btn.getBoundingClientRect();
+      showContextMenu(rect.left, rect.bottom + 4, [
+        { label: '新建触发器', action: () => createDraft(folder.id) },
+        {
+          label: '新建文件夹',
+          action: () => {
+            createFolder(folder.id);
+            renderManager();
+          },
+        },
+      ]);
+    });
+    row.querySelector('[data-act="folder-toggle"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      folder.collapsed = !folder.collapsed;
+      renderManager();
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!state.dragTriggerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.add('trg-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('trg-drop-target'));
+    row.addEventListener('drop', (e) => {
+      if (!state.dragTriggerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.remove('trg-drop-target');
+      moveTriggerToFolder(state.dragTriggerId, folder.id);
+    });
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showContextMenu(e.clientX, e.clientY, [
+        { label: '在此新建触发器', action: () => createDraft(folder.id) },
+        {
+          label: '在此新建子文件夹',
+          action: () => {
+            createFolder(folder.id);
+            renderManager();
+          },
+        },
+        {
+          label: folder.collapsed ? '展开文件夹' : '折叠文件夹',
+          action: () => {
+            folder.collapsed = !folder.collapsed;
+            renderManager();
+          },
+        },
+        { separator: true },
+        { label: '删除文件夹', action: () => deleteFolder(folder) },
+      ]);
+    });
+    return row;
+  }
+
   // ==================== 渲染：右栏触发器列表 ====================
   function triggerRow(id, badge, priority, isDraft = false) {
     const row = document.createElement('div');
     row.className = 'trg-item';
     row.dataset.triggerId = id;
+    row.draggable = true;
     if (state.editing && state.editing.id === id) row.classList.add('editing');
     const p = Number.isInteger(priority) ? priority : 0;
     row.innerHTML = `
@@ -952,7 +1544,111 @@ const ScriptEditor = (() => {
         <button type="button" data-act="del">删除</button>
       </div>
     `;
+    row.addEventListener('mousedown', (e) => {
+      row.draggable = !e.target.closest('input, button');
+    });
+    row.addEventListener('mouseup', () => {
+      row.draggable = true;
+    });
+    row.addEventListener('mouseleave', () => {
+      row.draggable = true;
+    });
+    row.addEventListener('dragstart', (e) => {
+      state.dragTriggerId = id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      state.dragTriggerId = null;
+      row.classList.remove('dragging');
+      clearTriggerDropIndicators();
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!state.dragTriggerId || state.dragTriggerId === id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.add('trg-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('trg-drop-target'));
+    row.addEventListener('drop', (e) => {
+      if (!state.dragTriggerId || state.dragTriggerId === id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.remove('trg-drop-target');
+      const rect = row.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      const folder = folderOfTrigger(id);
+      if (folder) moveTriggerToTrigger(state.dragTriggerId, folder.id, id, before);
+    });
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showTriggerContextMenu(id, e.clientX, e.clientY);
+    });
     return row;
+  }
+
+  function clearTriggerDropIndicators() {
+    document.querySelectorAll('#trigger-list .trg-drop-target').forEach((el) => {
+      el.classList.remove('trg-drop-target');
+    });
+    state.dragTriggerId = null;
+  }
+
+  function showTriggerContextMenu(id, x, y) {
+    const current = folderOfTrigger(id);
+    const items = [
+      { label: '删除触发器', action: () => deleteTrigger(id) },
+    ];
+    const others = state.folders.filter((f) => f.id !== current?.id);
+    if (others.length) {
+      items.push({ separator: true }, { heading: true, label: '转移到文件夹' });
+      for (const folder of others) {
+        items.push({ label: folderPath(folder), action: () => moveTriggerToFolder(id, folder.id) });
+      }
+    }
+    showContextMenu(x, y, items);
+  }
+
+  function addFolderDropHandlers(container, folderId) {
+    container.addEventListener('dragover', (e) => {
+      if (!state.dragTriggerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      container.classList.add('trg-drop-target');
+    });
+    container.addEventListener('dragleave', () => container.classList.remove('trg-drop-target'));
+    container.addEventListener('drop', (e) => {
+      if (!state.dragTriggerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      container.classList.remove('trg-drop-target');
+      moveTriggerToFolder(state.dragTriggerId, folderId);
+    });
+  }
+
+  function renderFolderBlock(folder, map) {
+    const fragment = document.createDocumentFragment();
+    fragment.appendChild(folderRow(folder));
+    if (folder.collapsed) return fragment;
+    const children = document.createElement('div');
+    children.className = 'trg-folder-children';
+    children.dataset.folderId = folder.id;
+    addFolderDropHandlers(children, folder.id);
+    for (const child of state.folders.filter((f) => f.parentId === folder.id)) {
+      children.appendChild(renderFolderBlock(child, map));
+    }
+    for (const id of state.folderTriggers[folder.id] || []) {
+      if (state.editing?.isNew && state.editing.id === id) {
+        children.appendChild(triggerRow(id, '编辑中', state.editing.priority, true));
+      } else {
+        const trigger = (map.triggers || []).find((t) => t.id === id);
+        if (trigger) children.appendChild(triggerRow(trigger.id, '', trigger.priority ?? 0));
+      }
+    }
+    fragment.appendChild(children);
+    return fragment;
   }
 
   function renderManager() {
@@ -962,16 +1658,9 @@ const ScriptEditor = (() => {
     syncNewTriggerId();
     list.innerHTML = '';
     if (!map) return;
-    const triggers = Array.isArray(map.triggers) ? map.triggers : [];
-    if (state.editing && state.editing.isNew) {
-      list.appendChild(triggerRow(state.editing.id, '编辑中', state.editing.priority, true));
-    }
-    for (const t of triggers) list.appendChild(triggerRow(t.id, '', t.priority ?? 0));
-    if (!triggers.length && !(state.editing && state.editing.isNew)) {
-      const none = document.createElement('p');
-      none.className = 'hint';
-      none.textContent = '还没有触发器。填写 id 后点「新建」。';
-      list.appendChild(none);
+    ensureFolders(map);
+    for (const folder of rootFolderList()) {
+      list.appendChild(renderFolderBlock(folder, map));
     }
   }
 
@@ -1065,6 +1754,7 @@ const ScriptEditor = (() => {
         renameConditionRefs(t.when, oldId, newId);
         for (const e of t.effects || []) renameEffectRefs(e, oldId, newId);
       }
+      renameTriggerInFolders(oldId, newId);
     });
     renderManager();
     renderEditor();
@@ -1195,7 +1885,8 @@ const ScriptEditor = (() => {
     input.addEventListener('input', () => {
       node.params[param.key] = input.value;
       fitWidth(input, input.value);
-      if (node.op === 'show_text' && param.key === 'text_id') {
+      // 显示文本 / 选项文本的 text_id 变化都会影响引用隐藏状态
+      if ((node.op === 'show_text' || node.op === 'show_choice_text') && param.key === 'text_id') {
         syncAllShowTextReuse();
       }
       cancelPick();
@@ -1722,18 +2413,23 @@ const ScriptEditor = (() => {
     return btn;
   }
 
-  /** 输入的 text_id 已有定义时，隐藏内容与位置控件 */
-  function syncShowTextReuse(comp, node) {
-    if (!comp || !node || node.op !== 'show_text') return;
+  /** 输入的 text_id 已有定义时，隐藏内容与位置控件（选项文本引用优先） */
+  function syncShowTextReference(comp, node) {
+    if (!comp || !node) return;
+    const id = node.params?.text_id;
+    const choiceRef = findChoiceTextDefinition(id, node);
+    const textRef = node.op === 'show_text' ? findTextDefinition(id, node) : null;
     const detail = comp.querySelector('.trg-showtext-detail');
-    if (detail) detail.hidden = !!findTextDefinition(node.params?.text_id, node);
+    if (detail) detail.hidden = !!(choiceRef || textRef);
   }
 
-  /** 任一文本身份变化后，刷新所有显示文本组件的复用状态 */
+  /** 任一文本身份变化后，刷新所有显示文本组件的引用状态 */
   function syncAllShowTextReuse() {
     document.querySelectorAll('#trg-editor .trg-comp').forEach((comp) => {
       const entry = findEntry(Number(comp.dataset.uid));
-      if (entry && entry.node.op === 'show_text') syncShowTextReuse(comp, entry.node);
+      if (entry && (entry.node.op === 'show_text' || entry.node.op === 'show_choice_text')) {
+        syncShowTextReference(comp, entry.node);
+      }
     });
   }
 
@@ -1751,10 +2447,65 @@ const ScriptEditor = (() => {
   function openTextEditor(node) {
     const map = Editor.getState().map;
     if (!map) return toast('没有地图', 'error');
-    textEditor = { node, selected: null };
+    const isChoice = node.op === 'show_choice_text';
+    textEditor = { node, selected: null, isChoice, options: [], lastInput: $('te-text') };
+    $('te-choice').hidden = !isChoice;
+    if (isChoice) {
+      const opts = Array.isArray(node.choiceOptions) ? node.choiceOptions.map((o) => String(o)) : [];
+      textEditor.options = opts.length ? opts.slice() : [''];
+      renderChoiceOptions();
+    } else {
+      $('te-choice-list').innerHTML = '';
+    }
     $('te-text').value = String(node.params.text || '');
     buildTextTree();
     $('dlg-text-editor').showModal();
+  }
+
+  function renderChoiceOptions() {
+    if (!textEditor?.isChoice) return;
+    const list = $('te-choice-list');
+    list.innerHTML = '';
+    textEditor.options.forEach((value, i) => {
+      const row = document.createElement('div');
+      row.className = 'te-choice-row';
+      const index = document.createElement('span');
+      index.className = 'te-choice-index';
+      index.textContent = String(i);
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'te-choice-input';
+      input.value = value;
+      input.placeholder = `选项 ${i}`;
+      input.addEventListener('input', () => {
+        textEditor.options[i] = input.value;
+      });
+      input.addEventListener('focus', () => {
+        textEditor.lastInput = input;
+      });
+      row.append(index, input);
+      if (i > 0) {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'te-choice-del';
+        del.textContent = '－';
+        del.title = '删除该选项';
+        del.addEventListener('click', () => {
+          textEditor.options.splice(i, 1);
+          if (textEditor.lastInput === input) textEditor.lastInput = $('te-text');
+          renderChoiceOptions();
+        });
+        row.append(del);
+      }
+      list.append(row);
+    });
+    if (
+      textEditor.lastInput &&
+      textEditor.lastInput !== $('te-text') &&
+      !textEditor.lastInput.isConnected
+    ) {
+      textEditor.lastInput = $('te-text');
+    }
   }
 
 
@@ -1931,11 +2682,18 @@ const ScriptEditor = (() => {
     const missing = def.params.find((p) => args[p] === undefined || args[p] === '');
     if (missing) return toast('请先填写变量参数', 'error');
     const token = `{${StatePaths.fill(def.template, args)}}`;
-    const ta = $('te-text');
+    const ta =
+      textEditor.isChoice && textEditor.lastInput?.isConnected
+        ? textEditor.lastInput
+        : $('te-text');
     const start = ta.selectionStart ?? ta.value.length;
     const end = ta.selectionEnd ?? start;
     ta.value = ta.value.slice(0, start) + token + ta.value.slice(end);
     ta.selectionStart = ta.selectionEnd = start + token.length;
+    if (ta.classList?.contains('te-choice-input')) {
+      const i = [...$('te-choice-list').querySelectorAll('.te-choice-input')].indexOf(ta);
+      if (i >= 0) textEditor.options[i] = ta.value;
+    }
     ta.focus();
   }
 
@@ -1946,7 +2704,19 @@ const ScriptEditor = (() => {
     const ctx = stateCtxForValidation();
     const bad = StatePaths.tokens(text).find((p) => !StatePaths.validatePath(p, ctx));
     if (bad) return toast(`未知的 gamestate 变量：${bad}`, 'error');
+    let options = null;
+    if (textEditor.isChoice) {
+      options = (textEditor.options || []).map((o) => String(o).trim());
+      if (!options.length) return toast('请至少添加一个选项', 'error');
+      if (options.some((o) => o === '')) return toast('选项内容不能为空', 'error');
+      if (options.some((o) => o.length > 4000)) return toast('单个选项不能超过 4000 个字符', 'error');
+      for (const option of options) {
+        const badOption = StatePaths.tokens(option).find((p) => !StatePaths.validatePath(p, ctx));
+        if (badOption) return toast(`选项包含未知的 gamestate 变量：${badOption}`, 'error');
+      }
+    }
     textEditor.node.params.text = text;
+    if (options) textEditor.node.choiceOptions = options;
     $('dlg-text-editor').close();
     textEditor = null;
     renderEditor();
@@ -2239,7 +3009,7 @@ const ScriptEditor = (() => {
       node.children.forEach((child) => children.appendChild(renderNode(child)));
       el.appendChild(head);
       el.appendChild(children);
-    } else if (node.op === 'show_text') {
+    } else if (node.op === 'show_text' || node.op === 'show_choice_text') {
       const grip = document.createElement('span');
       grip.className = 'trg-grip';
       grip.draggable = true;
@@ -2260,7 +3030,7 @@ const ScriptEditor = (() => {
       detail.appendChild(renderParamField(node, pPlacement));
       detail.appendChild(document.createTextNode('）'));
       el.appendChild(detail);
-      syncShowTextReuse(el, node);
+      syncShowTextReference(el, node);
     } else {
       const grip = document.createElement('span');
       grip.className = 'trg-grip';
@@ -2298,7 +3068,10 @@ const ScriptEditor = (() => {
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      deleteNode(node.uid);
+      showContextMenu(e.clientX, e.clientY, [
+        { label: '复制', action: () => copyNode(node.uid) },
+        { label: '删除', action: () => deleteNode(node.uid) },
+      ]);
     });
     return el;
   }
@@ -2361,14 +3134,21 @@ const ScriptEditor = (() => {
     }
   }
 
-  function createDraft() {
+  function createDraft(folderId = null) {
     const map = Editor.getState().map;
     if (!map) return toast('没有地图，无法创建触发器', 'error');
+    ensureFolders(map);
     const id = ($('trg-new-id').value || '').trim() || nextTriggerId();
     if (!id) return toast('请填写触发器 id', 'error');
     if (id.length > 64) return toast('触发器 id 不能超过 64 个字符', 'error');
     if ((map.triggers || []).some((t) => t.id === id)) return toast(`触发器 id「${id}」已存在`, 'error');
     if (state.editing && state.editing.isNew && state.editing.id === id) return;
+    const target =
+      folderId && state.folders.some((f) => f.id === folderId)
+        ? folderId
+        : defaultTargetFolder();
+    if (target) expandFolderAncestors(target);
+    assignTriggerToFolder(id, target);
     startEdit({ id, isNew: true });
     $('trg-new-id').value = '';
     renderManager(); // 预填下一个默认 id
@@ -2421,6 +3201,7 @@ const ScriptEditor = (() => {
     Editor.commit((m) => {
       m.triggers = (m.triggers || []).filter((t) => t.id !== id);
     });
+    removeTriggerFromFolders(id);
     renderManager();
   }
 
@@ -2445,6 +3226,112 @@ const ScriptEditor = (() => {
     }
     cancelPick();
     renderEditor();
+  }
+
+  /** 复制组件时，id 类参数统一追加“1”（原参数1） */
+  function bumpIdSuffix(value) {
+    const v = String(value ?? '');
+    return v ? `${v}1` : v;
+  }
+
+  function bumpPathId(path) {
+    const parsed = StatePaths.parse(path || '');
+    if (!parsed) return path;
+    const args = { ...parsed.args };
+    let changed = false;
+    for (const p of parsed.def.params) {
+      if (p === 'trigger' || p === 'text' || p === 'var') {
+        args[p] = bumpIdSuffix(args[p]);
+        changed = true;
+      }
+    }
+    return changed ? StatePaths.fill(parsed.def.template, args) : path;
+  }
+
+  function bumpNodeIds(node) {
+    const p = node.params;
+    if (p) {
+      for (const key of ['trigger_id', 'text_id', 'var_id']) {
+        const v = p[key];
+        if (typeof v === 'string' && v && !(key === 'trigger_id' && v === 'any')) {
+          p[key] = bumpIdSuffix(v);
+        }
+      }
+      for (const key of ['path', 'value_ref', 'init_ref', 'param_ref']) {
+        if (typeof p[key] === 'string' && p[key]) p[key] = bumpPathId(p[key]);
+      }
+    }
+    for (const child of node.children || []) bumpNodeIds(child);
+  }
+
+  function cloneNodeDeep(node) {
+    const copy = {
+      uid: nextUid(),
+      kind: node.kind,
+      op: node.op,
+      params: { ...(node.params || {}) },
+      children: [],
+    };
+    if (Array.isArray(node.choiceOptions)) copy.choiceOptions = node.choiceOptions.map(String);
+    copy.children = (node.children || []).map(cloneNodeDeep);
+    bumpNodeIds(copy);
+    if (copy.op === 'show_text' || copy.op === 'show_choice_text') {
+      copy.textIdOrigin = String(copy.params.text_id ?? '');
+    }
+    return copy;
+  }
+
+  function copyNode(uid) {
+    const entry = findEntry(uid);
+    if (!entry) return;
+    const copy = cloneNodeDeep(entry.node);
+    entry.list.splice(entry.index + 1, 0, copy);
+    cancelPick();
+    renderEditor();
+  }
+
+  function closeContextMenu() {
+    const el = $('ctx-menu');
+    if (!el) return;
+    el.hidden = true;
+    el.innerHTML = '';
+  }
+
+  function showContextMenu(x, y, items) {
+    const el = $('ctx-menu');
+    if (!el) return;
+    el.innerHTML = '';
+    for (const item of items) {
+      if (item.separator) {
+        const sep = document.createElement('div');
+        sep.className = 'ctx-sep';
+        el.appendChild(sep);
+        continue;
+      }
+      if (item.heading) {
+        const head = document.createElement('div');
+        head.className = 'ctx-label';
+        head.textContent = item.label;
+        el.appendChild(head);
+        continue;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = item.label;
+      if (item.disabled) btn.disabled = true;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextMenu();
+        item.action?.();
+      });
+      el.appendChild(btn);
+    }
+    el.hidden = false;
+    el.style.left = '0px';
+    el.style.top = '0px';
+    const rect = el.getBoundingClientRect();
+    el.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+    el.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 8))}px`;
   }
 
   function addComponent() {
@@ -2560,7 +3447,7 @@ const ScriptEditor = (() => {
     }
     const out = [];
     for (const e of effects || []) {
-      if (e && e.op === 'show_text' && e.text_id) {
+      if (e && (e.op === 'show_text' || e.op === 'show_choice_text') && e.text_id) {
         out.push({ id: String(e.text_id), text: String(e.text || '') });
       }
     }
@@ -2665,7 +3552,12 @@ const ScriptEditor = (() => {
       else updateControlLabel(pick.anchor, pick.param, str);
       pick.anchor.classList.add('picking');
     }
-    if (pick.node.op === 'show_text' && pick.key === 'text_id') syncAllShowTextReuse();
+    if (
+      (pick.node.op === 'show_text' || pick.node.op === 'show_choice_text') &&
+      pick.key === 'text_id'
+    ) {
+      syncAllShowTextReuse();
+    }
     // 拾取状态保留：继续点击合法目标可反复修改，点其他位置才取消
     setHint(`已填入「${pick.label}」：${displayValue(pick.param, str)}；可继续点击修改，点其他位置取消。`);
   }
@@ -2783,20 +3675,27 @@ const ScriptEditor = (() => {
       setHint(msg, true);
       return toast(msg, 'error');
     }
+    const folderId = editing.isNew
+      ? folderOfTrigger(editing.id) || defaultTargetFolder()
+      : null;
     closeEditor();
+    if (editing.isNew) assignTriggerToFolder(editing.id, folderId);
     Editor.commit((m) => {
       // 文本 id 改名：同步其他触发器里的 show_text / hide_text / 断言与文本占位符
       for (const t of m.triggers || []) applyTextIdRenamesToTrigger(t, textRenames);
       applyTextIdRenamesToTrigger(trigger, textRenames);
       m.triggers = Array.isArray(m.triggers) ? m.triggers.slice() : [];
-      if (editing.isNew) m.triggers.push(trigger);
-      else {
+      if (editing.isNew) {
+        m.triggers.push(trigger);
+        orderMapTriggers(m);
+      } else {
         const i = m.triggers.findIndex((t) => t.id === editing.id);
         if (i >= 0) m.triggers[i] = trigger;
         else m.triggers.push(trigger);
       }
       m.trigger_schema_version = 2;
     });
+    renderManager();
     toast(
       textRenames.size
         ? `已提交触发器「${editing.id}」，并同步 ${textRenames.size} 个文本 id 的引用`
@@ -2806,7 +3705,14 @@ const ScriptEditor = (() => {
 
   // ==================== 事件绑定 ====================
   function bind() {
-    $('btn-trg-create')?.addEventListener('click', createDraft);
+    $('btn-trg-create')?.addEventListener('click', () => createDraft());
+    $('btn-trg-folder')?.addEventListener('click', () => {
+      const map = Editor.getState().map;
+      if (!map) return toast('没有地图，无法创建文件夹', 'error');
+      ensureFolders(map);
+      createFolder();
+      renderManager();
+    });
     $('trg-new-id')?.addEventListener('input', (e) => {
       const input = e.currentTarget;
       if (input.value !== (input.dataset.auto || '')) delete input.dataset.auto;
@@ -2833,6 +3739,24 @@ const ScriptEditor = (() => {
     });
     $('te-insert')?.addEventListener('click', insertStateToken);
     $('te-submit')?.addEventListener('click', submitTextEditor);
+    $('te-choice-add')?.addEventListener('click', () => {
+      if (!textEditor?.isChoice) return;
+      textEditor.options.push('');
+      renderChoiceOptions();
+      const inputs = $('te-choice-list').querySelectorAll('.te-choice-input');
+      const last = inputs[inputs.length - 1];
+      if (last) {
+        textEditor.lastInput = last;
+        last.focus();
+      }
+    });
+    $('dlg-text-editor')?.addEventListener('focusin', (e) => {
+      if (!textEditor) return;
+      const target = e.target;
+      if (target === $('te-text') || target.classList?.contains('te-choice-input')) {
+        textEditor.lastInput = target;
+      }
+    });
     $('te-cancel')?.addEventListener('click', () => {
       $('dlg-text-editor').close();
       textEditor = null;
@@ -2915,6 +3839,38 @@ const ScriptEditor = (() => {
         else editTrigger(item.dataset.triggerId);
       } else if (act === 'rename') renameTrigger(item.dataset.triggerId);
       else if (act === 'del') deleteTrigger(item.dataset.triggerId);
+    });
+
+    // 触发器列表空白处右键：新建文件夹
+    $('trigger-list')?.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('.trg-item') || e.target.closest('.trg-folder')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      showContextMenu(e.clientX, e.clientY, [
+        {
+          label: '新建文件夹',
+          action: () => {
+            const map = Editor.getState().map;
+            if (!map) return;
+            ensureFolders(map);
+            createFolder();
+            renderManager();
+          },
+        },
+      ]);
+    });
+    document.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('#ctx-menu')) closeContextMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeContextMenu();
+    });
+    window.addEventListener('blur', closeContextMenu);
+    window.addEventListener('scroll', closeContextMenu, true);
+    $('ctx-menu')?.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 脚本编辑区空白处也屏蔽浏览器默认右键菜单
+    $('trg-editor')?.addEventListener('contextmenu', (e) => {
+      if (!e.defaultPrevented) e.preventDefault();
     });
 
     // 触发器列表：优先级编辑（越大越先执行；默认新建时为当前数量）

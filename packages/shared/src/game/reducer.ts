@@ -71,6 +71,12 @@ function cloneState(s: GameState): GameState {
           ...(s.triggerRuntime.numberVars
             ? { numberVars: { ...s.triggerRuntime.numberVars } }
             : {}),
+          ...(s.triggerRuntime.choiceValues
+            ? { choiceValues: { ...s.triggerRuntime.choiceValues } }
+            : {}),
+          ...(s.triggerRuntime.pendingChoices
+            ? { pendingChoices: { ...s.triggerRuntime.pendingChoices } }
+            : {}),
           pending: s.triggerRuntime.pending.map((p) => ({ ...p })),
         }
       : null,
@@ -799,6 +805,29 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
         placement: effect.placement,
       });
       return;
+    case 'show_choice_text': {
+      const runtime = ctx.state.triggerRuntime;
+      if (!runtime) return;
+      (runtime.visibleTexts ??= {})[effect.text_id] = true;
+      const selected = runtime.choiceValues?.[effect.text_id];
+      const blocking = selected === undefined;
+      if (blocking) {
+        (runtime.pendingChoices ??= {})[effect.text_id] = effect.options.length;
+      } else if (runtime.pendingChoices) {
+        delete runtime.pendingChoices[effect.text_id];
+      }
+      ctx.chain.push({
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: effect.text_id,
+        text: effect.text,
+        placement: effect.placement,
+        options: [...effect.options],
+        blocking,
+        ...(selected === undefined ? {} : { selected }),
+      });
+      return;
+    }
     case 'hide_text':
       if (ctx.state.triggerRuntime?.visibleTexts) {
         delete ctx.state.triggerRuntime.visibleTexts[effect.text_id];
@@ -917,6 +946,15 @@ function finishIntent(
 
 export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyResult {
   if (state.finished) return { ok: false, state, reason: 'NO_GAME' };
+  const pendingChoices = state.triggerRuntime?.pendingChoices;
+  if (
+    pendingChoices &&
+    Object.keys(pendingChoices).length > 0 &&
+    envelope.intent.intentType !== 'CHOOSE_TEXT' &&
+    envelope.intent.intentType !== 'SURRENDER'
+  ) {
+    return reject(state, 'PENDING_CHOICE');
+  }
   const ctx: Ctx = {
     state: cloneState(state),
     geo: { rows: state.rows, columns: state.columns, cylindrical: state.cylindrical },
@@ -979,6 +1017,30 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       if (s.phase !== 'ACTION' && s.phase !== 'ADD_POINT') return reject(state, 'WRONG_PHASE');
       switchPhaseEventCore(ctx);
       return finishIntent(ctx, state, actor, intent.intentType);
+    }
+    case 'CHOOSE_TEXT': {
+      const runtime = s.triggerRuntime;
+      if (!runtime) return reject(state, 'NO_GAME');
+      if (actor.kind !== 'PLAYER') return reject(state, 'NOT_YOUR_TURN');
+      const pending = runtime.pendingChoices;
+      if (!pending || !pending[intent.textId]) return reject(state, 'ILLEGAL_CHOICE');
+      if (
+        !Number.isInteger(intent.index) ||
+        intent.index < 0 ||
+        intent.index >= pending[intent.textId]
+      ) {
+        return reject(state, 'ILLEGAL_CHOICE');
+      }
+      (runtime.choiceValues ??= {})[intent.textId] = intent.index;
+      delete pending[intent.textId];
+      if (runtime.visibleTexts) delete runtime.visibleTexts[intent.textId];
+      ctx.chain.push({
+        level: 5,
+        kind: 'TRIGGER_TEXT_CHOOSE',
+        textId: intent.textId,
+        index: intent.index,
+      });
+      return finishIntent(ctx, state, actor, 'CHOOSE_TEXT');
     }
     case 'SURRENDER': {
       const force = forceOf(s, intent.seat);

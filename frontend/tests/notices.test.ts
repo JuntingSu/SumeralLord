@@ -1,7 +1,11 @@
 // collectSystemNotices 单测（POV）：回合开始 / 被击败（击杀者归属与投降/超时）/ 大杀四方（击杀数 ≥3 每次击杀都发）
 import { describe, it, expect } from 'vitest';
 import type { GameEvent, GameState } from '@dl/shared';
-import { collectSystemNotices, collectTriggerTexts } from '../src/stores/game';
+import {
+  collectSystemNotices,
+  collectTriggerTexts,
+  pendingChoiceTexts,
+} from '../src/stores/game';
 
 const FORCE_CLEAR = (seat: number, reason: 'no_stronghold' | 'surrender' | 'timeout'): GameEvent => ({
   level: 4,
@@ -57,6 +61,68 @@ describe('collectTriggerTexts 战役文本收集', () => {
     ];
     const state = { turn: 3, phase: 'ACTION' } as unknown as GameState;
     expect(collectTriggerTexts(chain, state).show[0].text).toBe('第 3 回合，阶段 行动阶段');
+  });
+
+  it('extracts choice options, blocking flag and selected index', () => {
+    const chain: GameEvent[] = [
+      {
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: 'c',
+        text: '请选择',
+        options: ['A', 'B'],
+        blocking: true,
+        placement: { kind: 'screen', position: 'top-right' },
+      },
+      { level: 5, kind: 'TRIGGER_TEXT_CHOOSE', textId: 'c', index: 1 },
+      {
+        level: 5,
+        kind: 'TRIGGER_TEXT_SHOW',
+        textId: 'c',
+        text: '请选择',
+        options: ['A', 'B'],
+        blocking: false,
+        selected: 1,
+        placement: { kind: 'screen', position: 'top-right' },
+      },
+    ];
+    const out = collectTriggerTexts(chain, {} as GameState);
+    expect(out.show[0]).toMatchObject({ options: ['A', 'B'], blocking: true });
+    expect(out.hide).toEqual(['c']);
+    expect(out.show[1]).toMatchObject({ options: ['A', 'B'], blocking: false, selected: 1 });
+  });
+
+  it('rebuilds pending choice texts from runtime state', () => {
+    const state = {
+      turn: 1,
+      phase: 'ACTION',
+      triggers: [
+        {
+          id: 'ask',
+          when: { op: 'turn_start', turn: 1 },
+          effects: [
+            {
+              op: 'show_choice_text',
+              text_id: 'c',
+              text: '请选择',
+              options: ['A', 'B'],
+              placement: { kind: 'screen', position: 'top-right' },
+            },
+          ],
+        },
+      ],
+      triggerRuntime: { pendingChoices: { c: true } },
+    } as unknown as GameState;
+    expect(pendingChoiceTexts(state)).toEqual([
+      {
+        textId: 'c',
+        text: '请选择',
+        template: '请选择',
+        placement: { kind: 'screen', position: 'top-right' },
+        options: ['A', 'B'],
+        blocking: true,
+      },
+    ]);
   });
 });
 

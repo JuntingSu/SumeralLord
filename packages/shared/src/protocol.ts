@@ -267,6 +267,11 @@ export const PlayerIntentSchema = z.discriminatedUnion('intentType', [
   }),
   z.object({ intentType: z.literal('SWITCH_PHASE') }),
   z.object({
+    intentType: z.literal('CHOOSE_TEXT'),
+    textId: z.string().min(1).max(64),
+    index: z.number().int().nonnegative(),
+  }),
+  z.object({
     intentType: z.literal('SURRENDER'),
     seat: z.number().int().positive(),
     reason: z.enum(['voluntary', 'timeout']).optional(),

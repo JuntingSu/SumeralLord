@@ -36,6 +36,8 @@ function cloneRuntime(r: TriggerRuntime | null): TriggerRuntime | null {
         stateWatch: { ...(r.stateWatch ?? {}) },
         ...(r.visibleTexts ? { visibleTexts: { ...r.visibleTexts } } : {}),
         ...(r.numberVars ? { numberVars: { ...r.numberVars } } : {}),
+        ...(r.choiceValues ? { choiceValues: { ...r.choiceValues } } : {}),
+        ...(r.pendingChoices ? { pendingChoices: { ...r.pendingChoices } } : {}),
         pending: r.pending.map((p) => ({ ...p })),
       }
     : null;

@@ -47,6 +47,7 @@ export const TRIGGER_INTENT_TYPES = [
   'ADD_POINT',
   'SWITCH_PHASE',
   'SURRENDER',
+  'CHOOSE_TEXT',
 ] as const;
 export type TriggerIntentType = (typeof TRIGGER_INTENT_TYPES)[number];
 
@@ -56,9 +57,10 @@ export type TriggerCompare = '=' | '>' | '<' | '>=' | '<=' | 'changed';
 /** 触发器里的 AI 难度取值 */
 export type TriggerDifficulty = 1 | 2 | 3 | 255;
 
-/** 文本屏幕方位：上下左右 + 四角 */
+/** 文本屏幕方位：上下左右 + 四角 + 居中 */
 export const TEXT_SCREEN_POSITIONS = [
   'top',
+  'center',
   'bottom',
   'left',
   'right',
@@ -152,6 +154,8 @@ export type TriggerEffect =
   | { op: 'set_turn_order'; order: number[] }
   | { op: 'set_fog'; enabled: boolean | 'flipped' | 'unchanged'; reveal: number[]; hide: number[] }
   | { op: 'show_text'; text_id: string; text: string; placement: TextPlacement }
+  /** 带选项的阻塞文本：首次显示等待选择，选择后关闭；再次显示不阻塞，仅回显已选项 */
+  | { op: 'show_choice_text'; text_id: string; text: string; placement: TextPlacement; options: string[] }
   | { op: 'hide_text'; text_id: string }
   /** 设置数字变量：init 为具体值，init_ref 为创建时读取的 gamestate 快照值（二选一） */
   | { op: 'declare'; var_id: string; init?: number; init_ref?: string }
@@ -202,6 +206,10 @@ export interface TriggerRuntime {
   visibleTexts?: Record<string, boolean>;
   /** 触发器数字变量（declare 创建，change 修改；旧存档缺省视为空） */
   numberVars?: Record<string, number>;
+  /** 选项文本已选下标（textId → index；选择后永久保留） */
+  choiceValues?: Record<string, number>;
+  /** 正在等待选择的选项文本（textId → 选项数量；选择后删除） */
+  pendingChoices?: Record<string, number>;
 }
 
 export interface TriggerTileDelta {

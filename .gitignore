@@ -3,6 +3,8 @@ dist/
 *.log
 backend/data/
 backend/static/skin/
+# PVE 本地地图产物（运行时生成，不入库）
+backend/static/pve_maps/
 mapeditor-release/
 temp/
 .zcode/

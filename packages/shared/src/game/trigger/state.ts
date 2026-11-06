@@ -59,6 +59,7 @@ const INTENT_LABELS: Record<string, string> = {
   ADD_POINT: '加点',
   SWITCH_PHASE: '切换阶段',
   SURRENDER: '投降',
+  CHOOSE_TEXT: '选择选项',
 };
 
 function forceOf(state: GameState, seat: number) {
@@ -330,6 +331,14 @@ export const STATE_PATH_DEFS: StatePathDef[] = [
     kind: 'textVisible',
     params: ['text'],
     get: (state, args) => !!state.triggerRuntime?.visibleTexts?.[args.text ?? ''],
+  },
+  {
+    template: 'gamestate.texts.{text}.option',
+    label: '已选选项',
+    group: 'text',
+    kind: 'int',
+    params: ['text'],
+    get: (state, args) => state.triggerRuntime?.choiceValues?.[args.text ?? ''],
   },
   {
     template: 'gamestate.vars.{var}',

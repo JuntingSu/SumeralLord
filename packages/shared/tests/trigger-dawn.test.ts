@@ -152,8 +152,9 @@ describe('dawn-trigger.json', () => {
         ],
       }) as unknown as MapFullData;
     expect(validateMapData(make({ kind: 'screen', position: 'top-left' }))).toBe(true);
+    expect(validateMapData(make({ kind: 'screen', position: 'center' }))).toBe(true);
     expect(validateMapData(make({ kind: 'tile', tile: 3 }))).toBe(true);
-    expect(validateMapData(make({ kind: 'screen', position: 'center' }))).toBe(false);
+    expect(validateMapData(make({ kind: 'screen', position: 'middle' }))).toBe(false);
     expect(validateMapData(make({ kind: 'tile', tile: 999 }))).toBe(false);
     expect(validateMapData(make({ kind: 'tile' }))).toBe(false);
     expect(validateMapData(make({ position: 'top' }))).toBe(false);

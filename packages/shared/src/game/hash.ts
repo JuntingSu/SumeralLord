@@ -49,6 +49,8 @@ export function hashGameState(state: GameState): string {
           stateWatch: state.triggerRuntime.stateWatch ?? {},
           visibleTexts: state.triggerRuntime.visibleTexts ?? {},
           numberVars: state.triggerRuntime.numberVars ?? {},
+          choiceValues: state.triggerRuntime.choiceValues ?? {},
+          pendingChoices: state.triggerRuntime.pendingChoices ?? {},
           pending: [...state.triggerRuntime.pending]
             .sort((a, b) => a.serial - b.serial)
             .map((p) => [p.triggerId, p.serial, p.dueIntentSeq ?? -1, p.dueTurnSeq ?? -1, p.dueRound ?? -1]),

@@ -111,7 +111,20 @@ export type GameEvent =
   | { level: 4; kind: 'VICTORY'; winningTeam: number; winners: string[]; losers: string[] }
   // 五级：触发器系统（棋盘变化仍走二级/四级事件，以下用于 UI/日志/控制流）
   | { level: 5; kind: 'TRIGGER_FIRE'; triggerId: string }
-  | { level: 5; kind: 'TRIGGER_TEXT_SHOW'; textId: string; text: string; placement?: TextPlacement }
+  | {
+      level: 5;
+      kind: 'TRIGGER_TEXT_SHOW';
+      textId: string;
+      text: string;
+      placement?: TextPlacement;
+      /** 选项文本的原始模板；存在即表示这是选项文本 */
+      options?: string[];
+      /** 首次显示且尚未选择时阻塞对局 */
+      blocking?: boolean;
+      /** 再次显示时回显的已选下标 */
+      selected?: number;
+    }
+  | { level: 5; kind: 'TRIGGER_TEXT_CHOOSE'; textId: string; index: number }
   | { level: 5; kind: 'TRIGGER_TEXT_HIDE'; textId: string }
   | { level: 5; kind: 'TERRAIN_CHANGE'; tile: number; from: number; to: number }
   | { level: 5; kind: 'FORCE_UPDATE'; seat: number; patch: Record<string, unknown> }
@@ -145,7 +158,9 @@ export type RejectReason =
   | 'NO_POINTS'
   | 'SEAT_CLEARED'
   | 'OUT_OF_BOUNDS'
-  | 'NO_GAME';
+  | 'NO_GAME'
+  | 'PENDING_CHOICE'
+  | 'ILLEGAL_CHOICE';
 
 /** 演算到共识节点时同步产出的上报任务（§11.3；consensusId 由调用方拼接 eventId 组成） */
 export interface ConsensusReport {

@@ -49,6 +49,7 @@ const StatePaths = (() => {
     D('gamestate.fogOverrides.enabled', '迷雾覆盖是否开启', 'fog', 'bool', [], true),
     D('gamestate.triggerRuntime.firedCounts.{trigger}', '触发器已触发次数', 'trigger', 'int', ['trigger']),
     D('gamestate.texts.{text}.visible', '文本状态', 'text', 'textVisible', ['text']),
+    D('gamestate.texts.{text}.option', '已选选项', 'text', 'int', ['text']),
     D('gamestate.vars.{var}', '数字变量', 'var', 'int', ['var']),
   ];
 
@@ -121,13 +122,14 @@ const StatePaths = (() => {
   const TERRAINS = [0, 1, 3, 4, 5];
   const DIFFICULTIES = [1, 2, 3, 255];
   /** 意图类型（“上一个意图”断言的预期值） */
-  const INTENTS = ['MOVE', 'ATTACK', 'ADD_POINT', 'SWITCH_PHASE', 'SURRENDER'];
+  const INTENTS = ['MOVE', 'ATTACK', 'ADD_POINT', 'SWITCH_PHASE', 'SURRENDER', 'CHOOSE_TEXT'];
   const INTENT_LABELS = {
     MOVE: '移动',
     ATTACK: '进攻',
     ADD_POINT: '加点',
     SWITCH_PHASE: '切换阶段',
     SURRENDER: '投降',
+    CHOOSE_TEXT: '选择选项',
   };
 
   function validateValue(path, value, ctx) {
