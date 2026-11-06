@@ -33,6 +33,7 @@ import { createStepDirty, resetStepDirty, takeDelta, trackForce, trackTile } fro
 import { runTriggerTransaction } from './trigger/engine.js';
 import type { TriggerExecutor } from './trigger/engine.js';
 import { resolveForceRef, resolveSpawnForceRef } from './trigger/resolve.js';
+import { resolveStatePath } from './trigger/state.js';
 
 // ---------- 内部上下文 ----------
 
@@ -64,7 +65,12 @@ function cloneState(s: GameState): GameState {
           ...s.triggerRuntime,
           firedCounts: { ...s.triggerRuntime.firedCounts },
           stateWatch: { ...(s.triggerRuntime.stateWatch ?? {}) },
-          visibleTexts: { ...(s.triggerRuntime.visibleTexts ?? {}) },
+          ...(s.triggerRuntime.visibleTexts
+            ? { visibleTexts: { ...s.triggerRuntime.visibleTexts } }
+            : {}),
+          ...(s.triggerRuntime.numberVars
+            ? { numberVars: { ...s.triggerRuntime.numberVars } }
+            : {}),
           pending: s.triggerRuntime.pending.map((p) => ({ ...p })),
         }
       : null,
@@ -799,6 +805,43 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       }
       ctx.chain.push({ level: 5, kind: 'TRIGGER_TEXT_HIDE', textId: effect.text_id });
       return;
+    case 'declare': {
+      const runtime = ctx.state.triggerRuntime;
+      if (!runtime) return;
+      const value =
+        effect.init_ref !== undefined ? resolveStatePath(ctx.state, effect.init_ref) : effect.init;
+      if (typeof value !== 'number' || !Number.isFinite(value)) return;
+      (runtime.numberVars ??= {})[effect.var_id] = value;
+      return;
+    }
+    case 'change': {
+      const runtime = ctx.state.triggerRuntime;
+      if (!runtime) return;
+      const param =
+        effect.param_ref !== undefined ? resolveStatePath(ctx.state, effect.param_ref) : effect.param;
+      if (typeof param !== 'number' || !Number.isFinite(param)) return;
+      const current = runtime.numberVars?.[effect.var_id] ?? 0;
+      let next = current;
+      switch (effect.operator) {
+        case '=':
+          next = param;
+          break;
+        case '+':
+          next = current + param;
+          break;
+        case '-':
+          next = current - param;
+          break;
+        case '*':
+          next = current * param;
+          break;
+        case '/':
+          if (param !== 0) next = Math.floor(current / param);
+          break;
+      }
+      (runtime.numberVars ??= {})[effect.var_id] = next;
+      return;
+    }
     case 'end_game': {
       if (ctx.state.finished) return;
       const winners: string[] = [];

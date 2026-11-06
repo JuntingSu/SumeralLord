@@ -16,7 +16,7 @@ export type StateValueKind =
   | 'intent'
   | 'textVisible';
 
-export type StatePathGroup = 'global' | 'force' | 'tile' | 'fog' | 'trigger' | 'text';
+export type StatePathGroup = 'global' | 'force' | 'tile' | 'fog' | 'trigger' | 'text' | 'var';
 
 export interface StatePathDef {
   /** 路径模板，如 gamestate.forces.{seat}.points */
@@ -27,7 +27,7 @@ export interface StatePathDef {
   /** 该路径的取值可能为 null（显示为“无”） */
   nullable?: boolean;
   /** 模板里的动态参数，按出现顺序 */
-  params: Array<'seat' | 'tile' | 'trigger' | 'text'>;
+  params: Array<'seat' | 'tile' | 'trigger' | 'text' | 'var'>;
   get: (state: GameState, args: Record<string, string>) => unknown;
 }
 
@@ -331,6 +331,14 @@ export const STATE_PATH_DEFS: StatePathDef[] = [
     params: ['text'],
     get: (state, args) => !!state.triggerRuntime?.visibleTexts?.[args.text ?? ''],
   },
+  {
+    template: 'gamestate.vars.{var}',
+    label: '数字变量',
+    group: 'var',
+    kind: 'int',
+    params: ['var'],
+    get: (state, args) => state.triggerRuntime?.numberVars?.[args.var ?? ''],
+  },
 ];
 
 function escapeRegExp(s: string): string {
@@ -338,11 +346,11 @@ function escapeRegExp(s: string): string {
 }
 
 function compileTemplate(def: StatePathDef): RegExp {
-  const parts = def.template.split(/(\{seat\}|\{tile\}|\{trigger\}|\{text\})/);
+  const parts = def.template.split(/(\{seat\}|\{tile\}|\{trigger\}|\{text\}|\{var\})/);
   let pattern = '^';
   for (const part of parts) {
     if (part === '{seat}' || part === '{tile}') pattern += '([^.]+)';
-    else if (part === '{trigger}' || part === '{text}') pattern += '(.+)';
+    else if (part === '{trigger}' || part === '{text}' || part === '{var}') pattern += '(.+)';
     else pattern += escapeRegExp(part);
   }
   return new RegExp(pattern + '$');
@@ -380,6 +388,8 @@ export interface StatePathContext {
   ids: ReadonlySet<string>;
   /** 合法文本 id（gamestate.texts.{text}.visible）；缺省视为无 */
   texts?: ReadonlySet<string>;
+  /** 合法数字变量 id（gamestate.vars.{var}）；缺省视为无 */
+  vars?: ReadonlySet<string>;
 }
 
 export function validateStatePath(path: string, ctx: StatePathContext): boolean {
@@ -398,6 +408,8 @@ export function validateStatePath(path: string, ctx: StatePathContext): boolean 
       if (!ctx.ids.has(raw)) return false;
     } else if (param === 'text') {
       if (!(ctx.texts ?? new Set<string>()).has(raw)) return false;
+    } else if (param === 'var') {
+      if (!(ctx.vars ?? new Set<string>()).has(raw)) return false;
     }
   }
   return true;

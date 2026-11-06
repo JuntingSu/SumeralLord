@@ -11,6 +11,7 @@ const StatePaths = (() => {
     fog: '迷雾',
     trigger: '触发器',
     text: '文本',
+    var: '变量',
   };
 
   const D = (template, label, group, kind, params = [], nullable = false) => ({
@@ -48,16 +49,17 @@ const StatePaths = (() => {
     D('gamestate.fogOverrides.enabled', '迷雾覆盖是否开启', 'fog', 'bool', [], true),
     D('gamestate.triggerRuntime.firedCounts.{trigger}', '触发器已触发次数', 'trigger', 'int', ['trigger']),
     D('gamestate.texts.{text}.visible', '文本状态', 'text', 'textVisible', ['text']),
+    D('gamestate.vars.{var}', '数字变量', 'var', 'int', ['var']),
   ];
 
   const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   function compileTemplate(template) {
-    const parts = template.split(/(\{seat\}|\{tile\}|\{trigger\}|\{text\})/);
+    const parts = template.split(/(\{seat\}|\{tile\}|\{trigger\}|\{text\}|\{var\})/);
     let pattern = '^';
     for (const part of parts) {
       if (part === '{seat}' || part === '{tile}') pattern += '([^.]+)';
-      else if (part === '{trigger}' || part === '{text}') pattern += '(.+)';
+      else if (part === '{trigger}' || part === '{text}' || part === '{var}') pattern += '(.+)';
       else pattern += escapeRegExp(part);
     }
     return new RegExp(pattern + '$');
@@ -77,7 +79,7 @@ const StatePaths = (() => {
   }
 
   function fill(template, args) {
-    return template.replace(/\{(seat|tile|trigger|text)\}/g, (_, key) => String(args[key] ?? ''));
+    return template.replace(/\{(seat|tile|trigger|text|var)\}/g, (_, key) => String(args[key] ?? ''));
   }
 
   function validatePath(path, ctx) {
@@ -96,6 +98,8 @@ const StatePaths = (() => {
         if (!ctx.ids.has(raw)) return false;
       } else if (param === 'text') {
         if (!(ctx.texts ?? new Set()).has(raw)) return false;
+      } else if (param === 'var') {
+        if (!(ctx.vars ?? new Set()).has(raw)) return false;
       }
     }
     return true;

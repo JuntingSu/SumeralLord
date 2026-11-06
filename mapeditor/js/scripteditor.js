@@ -36,6 +36,7 @@ const ScriptEditor = (() => {
   const ENUM_TYPES = new Set([
     'force', 'seat', 'owner', 'team', 'trigger', 'phase', 'terrain',
     'difficulty', 'bool', 'position', 'seatList', 'compare', 'valueMode',
+    'varValueMode', 'operator',
   ]);
   /** 可从棋盘/列表拾取的参数 */
   const PICK_TYPES = new Set(['force', 'trigger', 'terrain']);
@@ -206,8 +207,29 @@ const ScriptEditor = (() => {
       },
       {
         op: 'hide_text', label: '隐藏文本',
-        text: '文本ID：{text_id}',
+        text: '隐藏 {text_id}',
         params: [P('text_id', 'textId', '文本ID', { maxLen: 64, placeholder: '指定文本 id 或点触发器拾取' })],
+      },
+      {
+        op: 'declare', label: '设置数字变量',
+        text: '设置数字变量 ID {var_id} 值 {init} {init_mode} {init_ref}',
+        params: [
+          P('var_id', 'text', 'ID', { maxLen: 64, placeholder: '变量 id' }),
+          P('init', 'int', '值'),
+          P('init_mode', 'varValueMode', '输入方式', { def: 'literal' }),
+          P('init_ref', 'statePath', '变量'),
+        ],
+      },
+      {
+        op: 'change', label: '修改数字变量',
+        text: '修改数字变量 ID {var_id} {operator} {param} {param_mode} {param_ref}',
+        params: [
+          P('var_id', 'varId', 'ID', { maxLen: 64, placeholder: '变量 id 或点触发器拾取' }),
+          P('operator', 'operator', '运算符', { def: '+' }),
+          P('param', 'int', '值'),
+          P('param_mode', 'varValueMode', '输入方式', { def: 'literal' }),
+          P('param_ref', 'statePath', '变量'),
+        ],
       },
       {
         op: 'insert_move_intent', label: '插入移动意图',
@@ -340,6 +362,29 @@ const ScriptEditor = (() => {
     return out;
   }
 
+  /** 已声明的数字变量 id（declare 效果） */
+  function collectVarIds() {
+    const out = new Set();
+    const map = Editor.getState().map;
+    const editingId = state.editing?.id;
+    for (const t of map?.triggers || []) {
+      if (editingId && t.id === editingId) continue; // 当前编辑中的触发器以编辑区为准
+      for (const e of t.effects || []) {
+        if (e && e.op === 'declare' && e.var_id) out.add(String(e.var_id));
+      }
+    }
+    const walk = (list) => {
+      for (const n of list) {
+        if (n.op === 'declare' && n.params?.var_id) out.add(String(n.params.var_id));
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(state.cond);
+    walk(state.eff);
+    walk(state.free);
+    return out;
+  }
+
   function nextTextId() {
     const used = collectTextIds();
     let n = 1;
@@ -412,6 +457,8 @@ const ScriptEditor = (() => {
       else if (obj.op === 'state_assert' && p.key === 'value' && obj.value === null) v = 'null';
       else if (obj.op === 'state_assert' && p.key === 'cmp') v = obj.cmp ?? '=';
       else if (obj.op === 'state_assert' && p.key === 'value_mode') v = obj.value_ref ? 'gamestate' : 'literal';
+      else if (obj.op === 'declare' && p.key === 'init_mode') v = obj.init_ref !== undefined ? 'gamestate' : 'literal';
+      else if (obj.op === 'change' && p.key === 'param_mode') v = obj.param_ref !== undefined ? 'gamestate' : 'literal';
       else v = obj[p.key];
       if (Array.isArray(v)) v = v.join(', ');
       // 数据缺项时回落默认值，保证编辑态不出现“空缺”
@@ -465,6 +512,7 @@ const ScriptEditor = (() => {
       seatCount: map.player_list.length,
       ids,
       texts: collectTextIds(),
+      vars: collectVarIds(),
     };
   }
 
@@ -698,6 +746,41 @@ const ScriptEditor = (() => {
           value = raw;
       }
       return { op: 'state_assert', path, cmp, value };
+    }
+    if (node.op === 'declare' || node.op === 'change') {
+      const varId = String(node.params.var_id || '').trim();
+      if (!varId) throw new Error('请填写「ID」');
+      if (varId.length > 64) throw new Error('变量 id 不能超过 64 个字符');
+      const pathCtx = {
+        total: ctx.total,
+        seats: ctx.seats,
+        ids: ctx.ids,
+        texts: ctx.texts ?? new Set(),
+        vars: ctx.vars ?? new Set(),
+      };
+      const modeKey = node.op === 'declare' ? 'init_mode' : 'param_mode';
+      const refKey = node.op === 'declare' ? 'init_ref' : 'param_ref';
+      const valueKey = node.op === 'declare' ? 'init' : 'param';
+      const mode = String(node.params[modeKey] || 'literal');
+      if (mode === 'gamestate') {
+        const ref = String(node.params[refKey] || '').trim();
+        if (!ref) throw new Error('请选择「变量」');
+        if (!StatePaths.validatePath(ref, pathCtx)) throw new Error('「变量」非法');
+        if (node.op === 'declare') return { op: 'declare', var_id: varId, init_ref: ref };
+        const operator = String(node.params.operator || '+');
+        if (!['+', '-', '*', '/', '='].includes(operator)) throw new Error('「运算符」非法');
+        if (!pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
+        return { op: 'change', var_id: varId, operator, param_ref: ref };
+      }
+      const raw = String(node.params[valueKey] ?? '').trim();
+      if (raw === '') throw new Error('请填写「值」');
+      const n = Number(raw);
+      if (!Number.isInteger(n)) throw new Error('「值」需为整数');
+      if (node.op === 'declare') return { op: 'declare', var_id: varId, init: n };
+      const operator = String(node.params.operator || '+');
+      if (!['+', '-', '*', '/', '='].includes(operator)) throw new Error('「运算符」非法');
+      if (!pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
+      return { op: 'change', var_id: varId, operator, param: n };
     }
     const out = { op: node.op };
     const patch = {};
@@ -1104,6 +1187,9 @@ const ScriptEditor = (() => {
     } else if (param.type === 'textId') {
       input.classList.add('pickable');
       input.title = `${param.label}：可手输，或点击右侧「触发器」列表按触发器拾取`;
+    } else if (param.type === 'varId') {
+      input.classList.add('pickable');
+      input.title = `${param.label}：可手输，或点击右侧「触发器」列表按触发器拾取数字变量`;
     }
     fitWidth(input, input.value);
     input.addEventListener('input', () => {
@@ -1115,12 +1201,12 @@ const ScriptEditor = (() => {
       cancelPick();
     });
     input.addEventListener('focus', () => {
-      if (param.type === 'tile' || param.type === 'textId') setPick(node, param, input);
+      if (param.type === 'tile' || param.type === 'textId' || param.type === 'varId') setPick(node, param, input);
       else cancelPick();
     });
     // 某些嵌入环境（窗口未聚焦）不会派发 focus，这里补一次点击触发
     input.addEventListener('click', () => {
-      if (param.type === 'tile' || param.type === 'textId') setPick(node, param, input);
+      if (param.type === 'tile' || param.type === 'textId' || param.type === 'varId') setPick(node, param, input);
     });
     return input;
   }
@@ -1216,6 +1302,7 @@ const ScriptEditor = (() => {
       seats: map ? [...map.player_list].sort((a, b) => a.seat - b.seat) : [],
       ids: map ? (map.triggers || []).map((t) => t.id) : [],
       texts: [...collectTextIds()],
+      vars: [...collectVarIds()],
     };
   }
 
@@ -1223,6 +1310,7 @@ const ScriptEditor = (() => {
     if (kind === 'seat') return ctx.seats.length ? String(ctx.seats[0].seat) : 'player';
     if (kind === 'tile') return '0';
     if (kind === 'text') return ctx.texts[0] ?? '';
+    if (kind === 'var') return ctx.vars[0] ?? '';
     return ctx.ids[0] ?? '';
   }
 
@@ -1271,7 +1359,14 @@ const ScriptEditor = (() => {
       }
       if (next.params.some((p) => String(nextArgs[p] ?? '') === '')) {
         const missing = next.params.find((p) => String(nextArgs[p] ?? '') === '');
-        toast(missing === 'text' ? '没有可用的文本' : '没有可用的触发器', 'error');
+        toast(
+          missing === 'text'
+            ? '没有可用的文本'
+            : missing === 'var'
+              ? '没有可用的数字变量'
+              : '没有可用的触发器',
+          'error',
+        );
         defSel.value = def.template;
         return;
       }
@@ -1302,6 +1397,12 @@ const ScriptEditor = (() => {
         const selected = ctx.texts.includes(args.text) ? args.text : (ctx.texts[0] ?? '');
         el.value = selected;
         args.text = selected;
+      } else if (p === 'var') {
+        el = document.createElement('select');
+        el.innerHTML = ctx.vars.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+        const selected = ctx.vars.includes(args.var) ? args.var : (ctx.vars[0] ?? '');
+        el.value = selected;
+        args.var = selected;
       } else {
         el = document.createElement('select');
         el.innerHTML = ctx.ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
@@ -1313,12 +1414,12 @@ const ScriptEditor = (() => {
       el.dataset.uid = String(node.uid);
       el.dataset.key = `${param.key}.${p}`;
       el.dataset.type = 'statePathArg';
-      el.title = p === 'seat' ? '座次' : p === 'tile' ? '地块序号' : p === 'text' ? '文本' : '触发器';
+      el.title = p === 'seat' ? '座次' : p === 'tile' ? '地块序号' : p === 'text' ? '文本' : p === 'var' ? '数字变量' : '触发器';
       el.addEventListener('change', () => {
         args[p] = el.value;
         apply();
       });
-      if (p === 'text') {
+      if (p === 'text' || p === 'var') {
         wrap.append(el);
         continue;
       }
@@ -1346,7 +1447,8 @@ const ScriptEditor = (() => {
 
     const filled = StatePaths.fill(def.template, args);
     const repairText = def.params.includes('text') && ctx.texts.length > 0 && filled !== node.params[param.key];
-    if (!node.params[param.key] || repairText) node.params[param.key] = filled;
+    const repairVar = def.params.includes('var') && ctx.vars.length > 0 && filled !== node.params[param.key];
+    if (!node.params[param.key] || repairText || repairVar) node.params[param.key] = filled;
     return wrap;
   }
 
@@ -1642,6 +1744,7 @@ const ScriptEditor = (() => {
       seats: new Set(map.player_list.map((p) => p.seat)),
       ids: new Set((map.triggers || []).map((t) => t.id)),
       texts: collectTextIds(),
+      vars: collectVarIds(),
     };
   }
 
@@ -1710,6 +1813,7 @@ const ScriptEditor = (() => {
     const seats = [...map.player_list].sort((a, b) => a.seat - b.seat);
     const ids = (map.triggers || []).map((t) => t.id);
     const texts = [...collectTextIds()];
+    const vars = [...collectVarIds()];
     const total = map.row * map.column;
     for (const [g, label] of Object.entries(StatePaths.GROUPS)) {
       const defs = StatePaths.DEFS.filter((d) => d.group === g);
@@ -1750,7 +1854,7 @@ const ScriptEditor = (() => {
           paramRow.hidden = true;
           for (const p of def.params) {
             const tag = document.createElement('span');
-            tag.textContent = p === 'seat' ? '座次' : p === 'tile' ? '地块' : p === 'text' ? '文本' : '触发器';
+            tag.textContent = p === 'seat' ? '座次' : p === 'tile' ? '地块' : p === 'text' ? '文本' : p === 'var' ? '数字变量' : '触发器';
             let el;
             if (p === 'seat') {
               el = document.createElement('select');
@@ -1767,6 +1871,9 @@ const ScriptEditor = (() => {
             } else if (p === 'text') {
               el = document.createElement('select');
               el.innerHTML = texts.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+            } else if (p === 'var') {
+              el = document.createElement('select');
+              el.innerHTML = vars.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
             } else {
               el = document.createElement('select');
               el.innerHTML = ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
@@ -1778,7 +1885,7 @@ const ScriptEditor = (() => {
               args[p] = el.value;
               fitWidth(el, el.selectedOptions?.[0]?.textContent || el.value || '');
             });
-            if (p === 'text') {
+            if (p === 'text' || p === 'var') {
               paramRow.append(tag, el);
               continue;
             }
@@ -1907,6 +2014,10 @@ const ScriptEditor = (() => {
         return { '=': '等于', '>': '>', '<': '<', '>=': '≥', '<=': '≤', changed: '改变' }[v] ?? v;
       case 'valueMode':
         return v === 'gamestate' ? '变量' : '具体值';
+      case 'varValueMode':
+        return v === 'gamestate' ? '变量' : '值';
+      case 'operator':
+        return v;
       case 'bool':
         return v === 'true' ? '是' : v === 'false' ? '否' : v;
       case 'position':
@@ -1980,6 +2091,19 @@ const ScriptEditor = (() => {
         return [
           { value: 'literal', label: '具体值' },
           { value: 'gamestate', label: '变量' },
+        ];
+      case 'varValueMode':
+        return [
+          { value: 'literal', label: '值' },
+          { value: 'gamestate', label: '变量' },
+        ];
+      case 'operator':
+        return [
+          { value: '+', label: '+' },
+          { value: '-', label: '-' },
+          { value: '*', label: '*' },
+          { value: '/', label: '/' },
+          { value: '=', label: '=' },
         ];
       case 'position':
         return Object.keys(POSITION_LABELS).map((v) => ({ value: v, label: POSITION_LABELS[v] }));
@@ -2075,10 +2199,12 @@ const ScriptEditor = (() => {
           updateControlLabel(control, param, opt.value);
           cancelPick();
           closeParamPop();
-          // 断言的“改变”谓词 / 预期值来源会改变后续控件，切换后重绘
-          if (node.op === 'state_assert' && (param.key === 'cmp' || param.key === 'value_mode')) {
-            renderEditor();
-          }
+          // 断言的“改变”/预期值来源、数字变量的输入方式都会改变后续控件，切换后重绘
+          const needsRedraw =
+            (node.op === 'state_assert' && (param.key === 'cmp' || param.key === 'value_mode')) ||
+            ((node.op === 'declare' || node.op === 'change') &&
+              (param.key === 'init_mode' || param.key === 'param_mode'));
+          if (needsRedraw) renderEditor();
         }
       });
       pop.appendChild(label);
@@ -2154,6 +2280,14 @@ const ScriptEditor = (() => {
             if (part === 'value_mode' && changed) return;
             if (part === 'value' && (changed || byRef)) return;
             if (part === 'value_ref' && (changed || !byRef)) return;
+          } else if (node.op === 'declare') {
+            const byRef = String(node.params.init_mode) === 'gamestate';
+            if (part === 'init' && byRef) return;
+            if (part === 'init_ref' && !byRef) return;
+          } else if (node.op === 'change') {
+            const byRef = String(node.params.param_mode) === 'gamestate';
+            if (part === 'param' && byRef) return;
+            if (part === 'param_ref' && !byRef) return;
           }
           const param = def.params.find((p) => p.key === part);
           if (param) el.appendChild(renderParamField(node, param));
@@ -2343,11 +2477,11 @@ const ScriptEditor = (() => {
     const els = [];
     if (type === 'tile' || type === 'terrain') els.push($('canvas-wrap'));
     else if (type === 'force') els.push($('right'), $('player-list'));
-    else if (type === 'trigger' || type === 'textId') els.push($('right'), $('trigger-list'));
+    else if (type === 'trigger' || type === 'textId' || type === 'varId') els.push($('right'), $('trigger-list'));
     state.pickZones = els.filter(Boolean);
     state.pickZones.forEach((el) => el.classList.add('pick-zone'));
     if (type === 'force') activateRightTab('players');
-    else if (type === 'trigger' || type === 'textId') activateRightTab('triggers');
+    else if (type === 'trigger' || type === 'textId' || type === 'varId') activateRightTab('triggers');
   }
 
   function setPick(node, param, anchor, placement = false) {
@@ -2365,7 +2499,9 @@ const ScriptEditor = (() => {
             ? '右侧「势力」列表中的势力'
             : param.type === 'textId'
               ? '右侧「触发器」列表中的触发器（取其文本）'
-              : '右侧「触发器」列表中的触发器';
+              : param.type === 'varId'
+                ? '右侧「触发器」列表中的触发器（取其数字变量）'
+                : '右侧「触发器」列表中的触发器';
     setHint(`点击${where}填充「${param.label}」；也可以直接从选项中选择，点其他位置取消。`);
     markPickZones(param.type);
   }
@@ -2441,6 +2577,8 @@ const ScriptEditor = (() => {
       return;
     }
     const dlg = $('dlg-pick-text');
+    const title = dlg.querySelector('h3');
+    if (title) title.textContent = '选择文本';
     const list = $('pick-text-list');
     list.innerHTML = '';
     for (const t of texts) {
@@ -2450,6 +2588,56 @@ const ScriptEditor = (() => {
       b.innerHTML = `<span class="pick-text-id">${esc(t.id)}</span><span class="pick-text-preview">${esc(t.text || '（空文本）')}</span>`;
       b.addEventListener('click', () => {
         fillPick(t.id);
+        dlg.close();
+        closeParamPop();
+      });
+      list.appendChild(b);
+    }
+    dlg.showModal();
+  }
+
+  /** 某触发器里声明的数字变量 id（用于 change 的 var_id 拾取） */
+  function triggerVarsFor(triggerId) {
+    const map = Editor.getState().map;
+    const editingId = state.editing?.id;
+    let effects = null;
+    if (editingId && triggerId === editingId) {
+      effects = state.eff.map((n) => ({ op: n.op, var_id: n.params?.var_id }));
+    } else {
+      const t = (map?.triggers || []).find((x) => x.id === triggerId);
+      effects = t ? t.effects : null;
+    }
+    const out = [];
+    for (const e of effects || []) {
+      if (e && e.op === 'declare' && e.var_id) {
+        const id = String(e.var_id);
+        if (!out.includes(id)) out.push(id);
+      }
+    }
+    return out;
+  }
+
+  /** 点击触发器填充数字变量 id；多个变量时弹出选择框 */
+  function pickVarFromTrigger(triggerId) {
+    const vars = triggerVarsFor(triggerId);
+    if (!vars.length) return toast('该触发器没有数字变量', 'error');
+    if (vars.length === 1) {
+      fillPick(vars[0]);
+      closeParamPop();
+      return;
+    }
+    const dlg = $('dlg-pick-text');
+    const title = dlg.querySelector('h3');
+    if (title) title.textContent = '选择数字变量';
+    const list = $('pick-text-list');
+    list.innerHTML = '';
+    for (const id of vars) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pick-text-item';
+      b.innerHTML = `<span class="pick-text-id">${esc(id)}</span><span class="pick-text-preview">数字变量</span>`;
+      b.addEventListener('click', () => {
+        fillPick(id);
         dlg.close();
         closeParamPop();
       });
@@ -2638,7 +2826,11 @@ const ScriptEditor = (() => {
     $('dlg-pick-text-close')?.addEventListener('click', () => {
       $('dlg-pick-text').close();
     });
-    $('dlg-pick-text')?.addEventListener('close', () => cancelPick());
+    $('dlg-pick-text')?.addEventListener('close', () => {
+      const title = $('dlg-pick-text')?.querySelector('h3');
+      if (title) title.textContent = '选择文本';
+      cancelPick();
+    });
     $('te-insert')?.addEventListener('click', insertStateToken);
     $('te-submit')?.addEventListener('click', submitTextEditor);
     $('te-cancel')?.addEventListener('click', () => {
@@ -2704,6 +2896,11 @@ const ScriptEditor = (() => {
           e.preventDefault();
           e.stopPropagation();
           pickTextFromTrigger(item.dataset.triggerId);
+          closeParamPop();
+        } else if (state.pick.type === 'varId' && item) {
+          e.preventDefault();
+          e.stopPropagation();
+          pickVarFromTrigger(item.dataset.triggerId);
           closeParamPop();
         } else {
           cancelPick();

@@ -1,6 +1,6 @@
 // 战役触发器 Phase 3：效果执行器（turnOrder / fog / terrain / endGame / spawn 链 / 势力信息）。
 import { describe, expect, it } from 'vitest';
-import { applyIntent, initState } from '../src/index.js';
+import { applyIntent, initState, resolveStatePath } from '../src/index.js';
 import type { GameState, MapFullData, TriggerDef } from '../src/index.js';
 import { DEFAULT_TIME, MOUNTAIN, PLAIN, assignments, chainKinds, force, makeMap, soldierAt } from './helpers.js';
 
@@ -39,6 +39,58 @@ const onOccupy = (effects: TriggerDef['effects']): TriggerDef => ({
   id: 'on-occupy',
   when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
   effects,
+});
+
+describe('数字变量 declare/change', () => {
+  const run = (effects: TriggerDef['effects']) => {
+    const state = start([onOccupy(effects)]);
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
+    expect(r.ok).toBe(true);
+    return r.ok ? r.state : state;
+  };
+
+  it('declare 具体值', () => {
+    const state = run([{ op: 'declare', var_id: 'x', init: 5 }]);
+    expect(state.triggerRuntime?.numberVars?.x).toBe(5);
+    expect(resolveStatePath(state, 'gamestate.vars.x')).toBe(5);
+  });
+
+  it('declare 引用 gamestate 时取创建时快照', () => {
+    const state = run([
+      { op: 'declare', var_id: 'x', init_ref: 'gamestate.forces.1.points' },
+      {
+        op: 'update_force',
+        force: 1,
+        patch: { name: 'unchanged', flag: 'unchanged', team: 'unchanged', points: 50, computer: 'unchanged' },
+      },
+    ]);
+    expect(state.forces.find((f) => f.seat === 1)?.points).toBe(50);
+    expect(state.triggerRuntime?.numberVars?.x).toBe(0);
+  });
+
+  it('change 五种运算符与变量参数', () => {
+    const cases: Array<[TriggerDef['effects'], number]> = [
+      [[{ op: 'declare', var_id: 'x', init: 10 }, { op: 'change', var_id: 'x', operator: '+', param: 5 }], 15],
+      [[{ op: 'declare', var_id: 'x', init: 10 }, { op: 'change', var_id: 'x', operator: '-', param: 4 }], 6],
+      [[{ op: 'declare', var_id: 'x', init: 10 }, { op: 'change', var_id: 'x', operator: '*', param: 3 }], 30],
+      [[{ op: 'declare', var_id: 'x', init: 10 }, { op: 'change', var_id: 'x', operator: '/', param: 4 }], 2],
+      [[{ op: 'declare', var_id: 'x', init: 10 }, { op: 'change', var_id: 'x', operator: '=', param: 7 }], 7],
+      // param 引用变量
+      [
+        [
+          { op: 'declare', var_id: 'x', init: 10 },
+          { op: 'declare', var_id: 'y', init_ref: 'gamestate.turn' },
+          { op: 'change', var_id: 'x', operator: '+', param_ref: 'gamestate.vars.y' },
+        ],
+        11,
+      ],
+      // 除零保持原值
+      [[{ op: 'declare', var_id: 'x', init: 10 }, { op: 'change', var_id: 'x', operator: '/', param: 0 }], 10],
+    ];
+    for (const [effects, expected] of cases) {
+      expect(run(effects).triggerRuntime?.numberVars?.x).toBe(expected);
+    }
+  });
 });
 
 describe('trigger effects', () => {

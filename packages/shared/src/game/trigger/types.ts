@@ -153,6 +153,16 @@ export type TriggerEffect =
   | { op: 'set_fog'; enabled: boolean | 'flipped' | 'unchanged'; reveal: number[]; hide: number[] }
   | { op: 'show_text'; text_id: string; text: string; placement: TextPlacement }
   | { op: 'hide_text'; text_id: string }
+  /** 设置数字变量：init 为具体值，init_ref 为创建时读取的 gamestate 快照值（二选一） */
+  | { op: 'declare'; var_id: string; init?: number; init_ref?: string }
+  /** 修改数字变量：param 为具体值，param_ref 为当前读取的 gamestate 值（二选一）；除法向下取整 */
+  | {
+      op: 'change';
+      var_id: string;
+      operator: '+' | '-' | '*' | '/' | '=';
+      param?: number;
+      param_ref?: string;
+    }
   | { op: 'end_game'; winning_team: number }
   // 以指定势力执行一次玩家意图（战役脚本用）：可指定任意势力、任意时刻执行；
   // MOVE/ATTACK 忽略移动力与连断兵移动限制，ADD_POINT 忽略回合/阶段，其余规则照常检查。
@@ -190,6 +200,8 @@ export interface TriggerRuntime {
   lastIntentType?: TriggerIntentType;
   /** 触发器文本当前是否展示（textId → true；hide_text 时删除；旧存档缺省视为全部隐藏） */
   visibleTexts?: Record<string, boolean>;
+  /** 触发器数字变量（declare 创建，change 修改；旧存档缺省视为空） */
+  numberVars?: Record<string, number>;
 }
 
 export interface TriggerTileDelta {

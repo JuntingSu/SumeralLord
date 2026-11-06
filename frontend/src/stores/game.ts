@@ -106,8 +106,9 @@ interface GameStore {
   systemNotices: SystemNotice[];
   /** 本局击杀计数（seat → 击杀数；驱动「大杀四方」通知） */
   killCounts: Record<number, number>;
-  /** 战役触发器非阻塞文本（textId 去重；placement 缺省 = 右上角） */
-  triggerTexts: Array<{ textId: string; text: string; placement?: TextPlacement }>;
+  /** 战役触发器非阻塞文本（textId 去重；placement 缺省 = 右上角）。
+   *  text 为展示时格式化后的快照，template 保留原始模板供界面按当前 gamestate 动态重算。 */
+  triggerTexts: Array<{ textId: string; text: string; template: string; placement?: TextPlacement }>;
 
   /** PVE 悔棋：只记录玩家意图的逆 diff；AI 行动/回合切换时清空 */
   undoMode: boolean;
@@ -167,21 +168,22 @@ interface GameStore {
 type ApplyOutcome = 'applied' | 'duplicate' | 'gap' | 'ignored';
 
 /** 从事件链提取战役触发器文本（show/hide；非阻塞）。
- *  文本模板里的 {gamestate.xxx} 按“该意图完成后的状态”替换成便于理解的文字。 */
+ *  保留 template 原模板；text 为按该意图完成后状态的格式化快照。 */
 export function collectTriggerTexts(
   chain: GameEvent[],
   state: GameState,
 ): {
-  show: Array<{ textId: string; text: string; placement?: TextPlacement }>;
+  show: Array<{ textId: string; text: string; template: string; placement?: TextPlacement }>;
   hide: string[];
 } {
-  const show: Array<{ textId: string; text: string; placement?: TextPlacement }> = [];
+  const show: Array<{ textId: string; text: string; template: string; placement?: TextPlacement }> = [];
   const hide: string[] = [];
   for (const e of chain) {
     if (e.kind === 'TRIGGER_TEXT_SHOW') {
       show.push({
         textId: e.textId,
         text: formatStateText(state, e.text),
+        template: e.text,
         ...(e.placement ? { placement: e.placement } : {}),
       });
     } else if (e.kind === 'TRIGGER_TEXT_HIDE') hide.push(e.textId);

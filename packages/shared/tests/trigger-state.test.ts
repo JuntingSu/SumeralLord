@@ -485,6 +485,72 @@ describe('状态路径与文本校验', () => {
     expect(validateMapData(nonIntRef)).toBe(false);
   });
 
+  it('数字变量声明、引用与修改校验', () => {
+    const ok = map([
+      {
+        id: 'decl',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [{ op: 'declare', var_id: 'x', init: 1 }],
+      },
+      {
+        id: 'use',
+        when: { op: 'state_assert', path: 'gamestate.vars.x', cmp: '=', value: 1 },
+        effects: [{ op: 'change', var_id: 'x', operator: '+', param: 1 }],
+      },
+    ]);
+    expect(validateMapData(ok)).toBe(true);
+
+    const unknownVar = map([
+      {
+        id: 'bad',
+        when: { op: 'state_assert', path: 'gamestate.vars.nope', cmp: '=', value: 1 },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(unknownVar)).toBe(false);
+
+    const undeclaredChange = map([
+      {
+        id: 'decl',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [{ op: 'change', var_id: 'y', operator: '+', param: 1 }],
+      },
+    ]);
+    expect(validateMapData(undeclaredChange)).toBe(false);
+
+    const bothInit = map([
+      {
+        id: 'decl',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [{ op: 'declare', var_id: 'x', init: 1, init_ref: 'gamestate.turn' }],
+      },
+    ]);
+    expect(validateMapData(bothInit)).toBe(false);
+
+    const badRef = map([
+      {
+        id: 'decl',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [{ op: 'declare', var_id: 'x', init_ref: 'gamestate.nope' }],
+      },
+    ]);
+    expect(validateMapData(badRef)).toBe(false);
+
+    const bothParam = map([
+      {
+        id: 'decl',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [{ op: 'declare', var_id: 'x', init: 1 }],
+      },
+      {
+        id: 'chg',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [{ op: 'change', var_id: 'x', operator: '+', param: 1, param_ref: 'gamestate.turn' }],
+      },
+    ]);
+    expect(validateMapData(bothParam)).toBe(false);
+  });
+
   it('拒绝未知路径、越界参数与不匹配的预期值', () => {
     const badPath = map([
       { id: 'bad', when: { op: 'state_assert', path: 'gamestate.mystery', cmp: '=', value: 1 }, effects: text('x') },

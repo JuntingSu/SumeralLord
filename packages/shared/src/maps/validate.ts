@@ -101,6 +101,7 @@ interface StatePathCtx {
   seats: ReadonlySet<number>;
   ids: ReadonlySet<string>;
   texts: ReadonlySet<string>;
+  vars: ReadonlySet<string>;
 }
 
 function validateCondition(c: unknown, ctx: StatePathCtx): boolean {
@@ -260,6 +261,25 @@ function validateEffect(
       );
     case 'hide_text':
       return typeof e.text_id === 'string' && e.text_id.length > 0 && e.text_id.length <= 64;
+    case 'declare': {
+      if (typeof e.var_id !== 'string' || e.var_id.length === 0 || e.var_id.length > 64) return false;
+      if (e.init_ref !== undefined) {
+        if (typeof e.init_ref !== 'string' || !validateStatePath(e.init_ref, ctx)) return false;
+        return e.init === undefined;
+      }
+      return isInt(e.init);
+    }
+    case 'change': {
+      if (typeof e.var_id !== 'string' || !ctx.vars.has(e.var_id)) return false;
+      if (e.operator !== '+' && e.operator !== '-' && e.operator !== '*' && e.operator !== '/' && e.operator !== '=') {
+        return false;
+      }
+      if (e.param_ref !== undefined) {
+        if (typeof e.param_ref !== 'string' || !validateStatePath(e.param_ref, ctx)) return false;
+        return e.param === undefined;
+      }
+      return isInt(e.param);
+    }
     case 'end_game':
       return isInt(e.winning_team) && teams.has(e.winning_team);
     case 'insert_move_intent':
@@ -308,7 +328,8 @@ export function validateTriggers(
     ids.add(entry.id);
   }
   const textIds = new Set<string>();
-  const ctx: StatePathCtx = { total, seats, ids, texts: textIds };
+  const varIds = new Set<string>();
+  const ctx: StatePathCtx = { total, seats, ids, texts: textIds, vars: varIds };
   // 文本 id 来自 show_text / hide_text 效果：状态路径 gamestate.texts.{text}.visible 需要完整集合
   for (const entry of raw) {
     if (!isRecord(entry) || !Array.isArray(entry.effects)) continue;
@@ -320,6 +341,14 @@ export function validateTriggers(
         effect.text_id.length > 0
       ) {
         textIds.add(effect.text_id);
+      }
+      if (
+        isRecord(effect) &&
+        effect.op === 'declare' &&
+        typeof effect.var_id === 'string' &&
+        effect.var_id.length > 0
+      ) {
+        varIds.add(effect.var_id);
       }
     }
   }

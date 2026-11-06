@@ -95,12 +95,16 @@ const MapValidate = (() => {
           seats: new Set((m.player_list || []).map((p) => p.seat)),
           ids: new Set(m.triggers.map((t) => (t && t.id) || '')),
           texts: new Set(),
+          vars: new Set(),
         };
         for (const t of m.triggers) {
           if (!t || !Array.isArray(t.effects)) continue;
           for (const e of t.effects) {
             if (e && (e.op === 'show_text' || e.op === 'hide_text') && e.text_id) {
               pathCtx.texts.add(String(e.text_id));
+            }
+            if (e && e.op === 'declare' && e.var_id) {
+              pathCtx.vars.add(String(e.var_id));
             }
           }
         }

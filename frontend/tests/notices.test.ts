@@ -38,8 +38,8 @@ describe('collectTriggerTexts 战役文本收集', () => {
     ];
     expect(collectTriggerTexts(chain, {} as GameState)).toEqual({
       show: [
-        { textId: 'a', text: 'A', placement: { kind: 'screen', position: 'top' } },
-        { textId: 'b', text: 'B', placement: { kind: 'tile', tile: 3 } },
+        { textId: 'a', text: 'A', template: 'A', placement: { kind: 'screen', position: 'top' } },
+        { textId: 'b', text: 'B', template: 'B', placement: { kind: 'tile', tile: 3 } },
       ],
       hide: ['a'],
     });

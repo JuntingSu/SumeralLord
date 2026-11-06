@@ -34,7 +34,8 @@ function cloneRuntime(r: TriggerRuntime | null): TriggerRuntime | null {
         ...r,
         firedCounts: { ...r.firedCounts },
         stateWatch: { ...(r.stateWatch ?? {}) },
-        visibleTexts: { ...(r.visibleTexts ?? {}) },
+        ...(r.visibleTexts ? { visibleTexts: { ...r.visibleTexts } } : {}),
+        ...(r.numberVars ? { numberVars: { ...r.numberVars } } : {}),
         pending: r.pending.map((p) => ({ ...p })),
       }
     : null;

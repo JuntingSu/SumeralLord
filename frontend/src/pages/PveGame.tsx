@@ -1,7 +1,7 @@
 // PVE 对局：复用棋盘/交互/动画，但使用本地 PveTransport；无计时、无聊天、无系统通知。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { applyIntent, initState, reducerVersion } from '@dl/shared';
+import { applyIntent, formatStateText, initState, reducerVersion } from '@dl/shared';
 import type {
   GameOverMsg,
   GameState,
@@ -76,14 +76,18 @@ export default function PveGame() {
   const phaseAnnouncements = useGame((s) => s.phaseAnnouncements);
   const triggerTexts = useGame((s) => s.triggerTexts);
   const dismissTriggerText = useGame((s) => s.dismissTriggerText);
-  const screenTexts = useMemo(
-    () => triggerTexts.filter((t) => t.placement?.kind !== 'tile'),
-    [triggerTexts],
-  );
-  const tileTexts = useMemo(
-    () => triggerTexts.filter((t) => t.placement?.kind === 'tile'),
-    [triggerTexts],
-  );
+  const screenTexts = useMemo(() => {
+    if (!board) return [];
+    return triggerTexts
+      .filter((t) => t.placement?.kind !== 'tile')
+      .map((t) => ({ ...t, text: formatStateText(board, t.template) }));
+  }, [triggerTexts, board]);
+  const tileTexts = useMemo(() => {
+    if (!board) return [];
+    return triggerTexts
+      .filter((t) => t.placement?.kind === 'tile')
+      .map((t) => ({ ...t, text: formatStateText(board, t.template) }));
+  }, [triggerTexts, board]);
 
   const [runId, setRunId] = useState(0);
   const [starting, setStarting] = useState(true);
