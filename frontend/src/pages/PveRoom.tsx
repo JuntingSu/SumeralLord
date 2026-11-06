@@ -62,6 +62,35 @@ export default function PveRoom() {
   const [codeBusy, setCodeBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 从地图编辑器「测试」进入：返回时带当前地图回到编辑器
+  const isEditorTest = (() => {
+    const fromQuery = new URLSearchParams(window.location.search).get('test') === '1';
+    try {
+      return fromQuery || sessionStorage.getItem('dl_pve_test_mode') === '1';
+    } catch {
+      return fromQuery;
+    }
+  })();
+
+  const backToMapEditor = () => {
+    try {
+      if (room.map) {
+        const originId = sessionStorage.getItem('dl_pve_test_origin');
+        sessionStorage.setItem(
+          'dl_editor_map_v1',
+          JSON.stringify({ id: room.mapId || originId || room.map.id, map: room.map }),
+        );
+      } else {
+        sessionStorage.removeItem('dl_editor_map_v1');
+      }
+      sessionStorage.removeItem('dl_pve_test_mode');
+      sessionStorage.removeItem('dl_pve_test_origin');
+    } catch {
+      // 本地存储不可用时仍返回编辑器（编辑器会加载服务器默认地图）
+    }
+    window.location.href = '/mapeditor/?embed=1';
+  };
+
   const loadSaveMeta = useCallback(async () => {
     try {
       setSaveMeta(await getPveSaveMeta());
@@ -275,9 +304,19 @@ export default function PveRoom() {
     <div className="flex min-h-screen flex-col bg-slate-900 text-white lg:h-screen lg:overflow-hidden">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-3 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-3">
-          <Link to="/modes" className="text-sm text-emerald-400 hover:underline">
-            ← 模式选择
-          </Link>
+          {isEditorTest ? (
+            <button
+              type="button"
+              onClick={backToMapEditor}
+              className="cursor-pointer text-sm text-emerald-400 hover:underline"
+            >
+              ← 返回
+            </button>
+          ) : (
+            <Link to="/modes" className="text-sm text-emerald-400 hover:underline">
+              ← 模式选择
+            </Link>
+          )}
           <h1 className="text-lg font-bold">单人 PVE</h1>
           <span className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
             {hasTriggers ? '触发器地图' : '本地对局'}

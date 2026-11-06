@@ -40,8 +40,18 @@ export type TriggerTurnRef = number | 'any';
 /** 条件里的触发器引用：any 表示任意触发器 */
 export type TriggerTriggerRef = string | 'any';
 
-/** 断言比较方式 */
-export type TriggerCompare = '=' | '>' | '<' | '>=' | '<=';
+/** 玩家意图类型（地图触发器的“上一个意图”断言取值） */
+export const TRIGGER_INTENT_TYPES = [
+  'MOVE',
+  'ATTACK',
+  'ADD_POINT',
+  'SWITCH_PHASE',
+  'SURRENDER',
+] as const;
+export type TriggerIntentType = (typeof TRIGGER_INTENT_TYPES)[number];
+
+/** 断言比较方式；changed = 本步骤前后该 gamestate 值发生变化（不需要预期值） */
+export type TriggerCompare = '=' | '>' | '<' | '>=' | '<=' | 'changed';
 
 /** 触发器里的 AI 难度取值 */
 export type TriggerDifficulty = 1 | 2 | 3 | 255;
@@ -87,7 +97,15 @@ export type TriggerCondition =
   | { op: 'tile_owner_changed'; tile: TriggerTileRef; from: TriggerOwnerRef; to: TriggerOwnerRef }
   | { op: 'force_gone'; force: TriggerAnyForceRef }
   // 断言：读取白名单 gamestate 路径并与预期值比较（状态叶子；纯状态触发器走状态监听）
-  | { op: 'state_assert'; path: string; cmp: TriggerCompare; value: number | string | boolean | null }
+  // 预期值二选一：value = 具体值；value_ref = 另一个 gamestate 路径（引用的变量）
+  // cmp = changed 时两者都不需要：只判定本步骤前后该路径的值是否变化
+  | {
+      op: 'state_assert';
+      path: string;
+      cmp: TriggerCompare;
+      value?: number | string | boolean | null;
+      value_ref?: string;
+    }
   // 回合类叶子：判定事件链里的阶段/回合转换
   | { op: 'phase_start'; force: TriggerAnyForceRef; phase: TriggerPhaseRef; turn: TriggerTurnRef }
   | { op: 'phase_end'; force: TriggerAnyForceRef; phase: TriggerPhaseRef; turn: TriggerTurnRef }
@@ -168,6 +186,10 @@ export interface TriggerRuntime {
   nextSerial: number;
   /** 触发器事务序号（任何来源的 applyIntent 事务） */
   transactionSeq: number;
+  /** 最近一次成功执行的意图类型（旧存档缺省视为“无”） */
+  lastIntentType?: TriggerIntentType;
+  /** 触发器文本当前是否展示（textId → true；hide_text 时删除；旧存档缺省视为全部隐藏） */
+  visibleTexts?: Record<string, boolean>;
 }
 
 export interface TriggerTileDelta {

@@ -27,7 +27,7 @@ import {
 import type { BoardGeometry } from './coord.js';
 import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
-import type { TriggerDef, TriggerEffect, TriggerDelta } from './trigger/types.js';
+import type { TriggerDef, TriggerEffect, TriggerDelta, TriggerIntentType } from './trigger/types.js';
 import type { StepDirty } from './trigger/delta.js';
 import { createStepDirty, resetStepDirty, takeDelta, trackForce, trackTile } from './trigger/delta.js';
 import { runTriggerTransaction } from './trigger/engine.js';
@@ -64,6 +64,7 @@ function cloneState(s: GameState): GameState {
           ...s.triggerRuntime,
           firedCounts: { ...s.triggerRuntime.firedCounts },
           stateWatch: { ...(s.triggerRuntime.stateWatch ?? {}) },
+          visibleTexts: { ...(s.triggerRuntime.visibleTexts ?? {}) },
           pending: s.triggerRuntime.pending.map((p) => ({ ...p })),
         }
       : null,
@@ -577,6 +578,12 @@ function mergeDirty(target: StepDirty, delta: TriggerDelta): void {
   }
 }
 
+function insertedIntentType(effect: InsertIntentEffect): TriggerIntentType {
+  if (effect.op === 'insert_attack_intent') return 'ATTACK';
+  if (effect.op === 'insert_add_point_intent') return 'ADD_POINT';
+  return 'MOVE';
+}
+
 /**
  * 以指定势力执行一次意图核心（触发器效果专用）：
  * - 允许任意势力、任意时刻执行（跳过 actor/回合/阶段校验）
@@ -621,13 +628,16 @@ function executeInsertedIntent(ctx: Ctx, effect: InsertIntentEffect): boolean {
 
 /** 执行插入意图并收集其独立增量（供引擎驱动动作类触发器） */
 function runInsertedIntent(ctx: Ctx, effect: InsertIntentEffect): TriggerDelta | null {
-  const before = ctx.state;
+  const before = cloneState(ctx.state);
   const savedDirty = ctx.stepDirty;
   const intentDirty = createStepDirty(true);
   ctx.stepDirty = intentDirty;
   let ok = false;
   try {
     ok = executeInsertedIntent(ctx, effect);
+    if (ok && ctx.state.triggerRuntime) {
+      ctx.state.triggerRuntime.lastIntentType = insertedIntentType(effect);
+    }
   } finally {
     ctx.stepDirty = savedDirty;
   }
@@ -772,6 +782,9 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       return;
     }
     case 'show_text':
+      if (ctx.state.triggerRuntime) {
+        (ctx.state.triggerRuntime.visibleTexts ??= {})[effect.text_id] = true;
+      }
       ctx.chain.push({
         level: 5,
         kind: 'TRIGGER_TEXT_SHOW',
@@ -781,6 +794,9 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
       });
       return;
     case 'hide_text':
+      if (ctx.state.triggerRuntime?.visibleTexts) {
+        delete ctx.state.triggerRuntime.visibleTexts[effect.text_id];
+      }
       ctx.chain.push({ level: 5, kind: 'TRIGGER_TEXT_HIDE', textId: effect.text_id });
       return;
     case 'end_game': {
@@ -815,7 +831,7 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
 function makeTriggerExecutor(ctx: Ctx): TriggerExecutor {
   return {
     execute(trigger) {
-      const before = ctx.state;
+      const before = cloneState(ctx.state);
       resetStepDirty(ctx.stepDirty);
       ctx.intentDeltas = [];
       for (const effect of trigger.effects) applyTriggerEffect(ctx, effect);
@@ -830,9 +846,15 @@ function makeTriggerExecutor(ctx: Ctx): TriggerExecutor {
 }
 
 /** 成功意图的收尾：triggerMode 下跑触发器事务，再返回 ok */
-function finishIntent(ctx: Ctx, beforeState: GameState, actor: Actor): ApplyResult {
+function finishIntent(
+  ctx: Ctx,
+  beforeState: GameState,
+  actor: Actor,
+  intentType: TriggerIntentType,
+): ApplyResult {
   const s = ctx.state;
   if (s.triggerMode && s.triggerRuntime) {
+    s.triggerRuntime.lastIntentType = intentType;
     const intentDelta = takeDelta(ctx.stepDirty, s, beforeState);
     runTriggerTransaction({
       state: s,
@@ -884,13 +906,13 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       if (!isAttack && target && !sameTeam(s, origin.owner, target.owner)) {
         // §8.1.1 第 5 条：目标有非同队兵 → 转进攻
         const executed = attackEventCore(ctx, intent.from, intent.to);
-        return executed ? finishIntent(ctx, state, actor) : reject(state, 'ILLEGAL_ATTACK');
+        return executed ? finishIntent(ctx, state, actor, intent.intentType) : reject(state, 'ILLEGAL_ATTACK');
       }
       if (target && sameTeam(s, origin.owner, target.owner)) return reject(state, illegal);
       if (!target && isAttack) return reject(state, illegal);
       if (hexDistance(intent.from, intent.to, ctx.geo) > maxDist) return reject(state, illegal);
       const executed = isAttack ? attackEventCore(ctx, intent.from, intent.to) : moveEventCore(ctx, intent.from, intent.to);
-      return executed ? finishIntent(ctx, state, actor) : reject(state, illegal);
+      return executed ? finishIntent(ctx, state, actor, intent.intentType) : reject(state, illegal);
     }
     case 'ADD_POINT': {
       if (!actorIsCurrent) return reject(state, 'NOT_YOUR_TURN');
@@ -907,13 +929,13 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
       trackForce(ctx.stepDirty, ctx.state, s.currentSeat);
       if (!state.demo?.infinitePoints) force.points -= intent.amount;
       // 点数耗尽后是否结束回合由前端/AI 驱动以显式 SWITCH_PHASE 发起（reducer 不自动切阶段）
-      return finishIntent(ctx, state, actor);
+      return finishIntent(ctx, state, actor, intent.intentType);
     }
     case 'SWITCH_PHASE': {
       if (!actorIsCurrent) return reject(state, 'NOT_YOUR_TURN');
       if (s.phase !== 'ACTION' && s.phase !== 'ADD_POINT') return reject(state, 'WRONG_PHASE');
       switchPhaseEventCore(ctx);
-      return finishIntent(ctx, state, actor);
+      return finishIntent(ctx, state, actor, intent.intentType);
     }
     case 'SURRENDER': {
       const force = forceOf(s, intent.seat);
@@ -931,7 +953,7 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
         checkStronghold: false,
         reason: reason === 'timeout' ? 'timeout' : 'surrender',
       });
-      return finishIntent(ctx, state, actor);
+      return finishIntent(ctx, state, actor, intent.intentType);
     }
   }
 }

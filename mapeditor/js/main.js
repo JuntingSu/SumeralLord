@@ -444,10 +444,11 @@
     statusMsg(`已导出 ${s.id}.json`);
   });
 
-  // PVE游玩：当前地图经 sessionStorage 交给前端 PVE 房间（不经过服务器、不进地图库）
-  function playPve() {
+  // PVE游玩 / 测试：当前地图经 sessionStorage 交给前端 PVE 房间（不经过服务器、不进地图库）
+  // 测试模式会在 PVE 房间把「← 模式选择」显示为「← 返回」，返回时把 PVE 当前地图带回编辑器。
+  function openPve(test) {
     if (!EMBEDDED) {
-      statusMsg('请从主程序（模式选择/大厅）进入地图编辑器后再使用 PVE游玩', 'error');
+      statusMsg('请从主程序（模式选择/大厅）进入地图编辑器后再使用 PVE游玩/测试', 'error');
       return;
     }
     const s = Editor.getState();
@@ -466,17 +467,28 @@
       return;
     }
     try {
+      sessionStorage.removeItem('dl_editor_map_v1'); // 清掉可能残留的回传地图
       sessionStorage.setItem(
         'dl_pve_map_v1',
         JSON.stringify({ source: 'mapeditor', id: s.id, map: MapData.serialize(s.map) }),
       );
+      if (test) {
+        sessionStorage.setItem('dl_pve_test_mode', '1');
+        sessionStorage.setItem('dl_pve_test_origin', s.id);
+      } else {
+        sessionStorage.removeItem('dl_pve_test_mode');
+        sessionStorage.removeItem('dl_pve_test_origin');
+      }
     } catch {
       statusMsg('浏览器本地存储不可用，无法带入 PVE', 'error');
       return;
     }
-    window.location.href = '/pve?from=mapeditor';
+    window.location.href = test ? '/pve?from=mapeditor&test=1' : '/pve?from=mapeditor';
   }
+  function playPve() { openPve(false); }
+  function playPveTest() { openPve(true); }
   $('btn-pve-play').addEventListener('click', playPve);
+  $('btn-pve-test').addEventListener('click', playPveTest);
 
   $('btn-save').addEventListener('click', async () => {
     const s = Editor.getState();
@@ -875,8 +887,30 @@
   });
   HexRender.preloadAllFlags();
 
-  // 起始画布：从服务器地图库（backend/static/maps）加载；未连接服务器则建默认图
+  // 起始画布：优先导入 PVE「测试」返回的地图；否则从服务器地图库（backend/static/maps）加载
   (async () => {
+    try {
+      const raw = sessionStorage.getItem('dl_editor_map_v1');
+      if (raw) {
+        sessionStorage.removeItem('dl_editor_map_v1');
+        const parsed = JSON.parse(raw);
+        const map = parsed && parsed.map ? parsed.map : parsed;
+        if (!map || typeof map !== 'object') throw new Error('地图数据为空');
+        const id = (parsed && parsed.id) || map.id || MapData.randomId();
+        Editor.setMap(map, id);
+        const errors = MapValidate.validate(map).filter((i) => i.level === 'error');
+        statusMsg(
+          errors.length
+            ? `已从 PVE 导入「${map.title || id}」（${errors.length} 处校验问题，请检查）`
+            : `已从 PVE 返回并导入「${map.title || id}」`,
+          errors.length ? 'error' : 'ok',
+        );
+        return;
+      }
+    } catch {
+      statusMsg('PVE 地图回传解析失败，已改为加载服务器地图', 'error');
+    }
+
     try {
       const list = await IO.loadServerMapList(serverUrl());
       const preferred = list.find((m) => m.id === 'map_duo_plain') || list[0];
@@ -898,5 +932,5 @@
   // ==================== 供 mobile.js 复用的入口 ====================
   // 窄屏顶栏整体隐藏后，服务器地址与状态提示只在这里可取；
   // 其余「新建 / 本地导入 / 地图码导入 / 随机生成 / 保存 / 导出」沿用各自按钮的 click（事件处理器不变）。
-  window.MapEditorActions = { serverUrl, statusMsg, playPve };
+  window.MapEditorActions = { serverUrl, statusMsg, playPve, playPveTest };
 })();

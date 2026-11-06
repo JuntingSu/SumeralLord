@@ -76,6 +76,9 @@ function contextCovers(cond: TriggerCondition, ctx: TriggerMatchContext): boolea
     case 'phase_end':
     case 'turn_start':
       return !!ctx.transition;
+    case 'state_assert':
+      // “改变”需要本步骤的前后增量；普通断言只看当前局面
+      return cond.cmp !== 'changed' || !!ctx.delta;
     default:
       return true;
   }
@@ -115,14 +118,28 @@ export function matchCondition(
       return f.before.alive && !f.after.alive;
     }
     case 'state_assert': {
+      if (cond.cmp === 'changed') {
+        const delta = ctx.delta;
+        if (!delta) return false;
+        const before = resolveStatePath(delta.before, cond.path);
+        const after = resolveStatePath(delta.after, cond.path);
+        if (before === undefined || after === undefined) return false;
+        return before !== after;
+      }
       const actual = resolveStatePath(state, cond.path);
       if (actual === undefined) return false;
-      let expected = cond.value;
-      if (expected === 'player') {
-        const parsed = parseStatePath(cond.path);
-        if (parsed && (parsed.def.kind === 'seat' || parsed.def.kind === 'owner')) {
-          if (state.controlledSeat === null) return false;
-          expected = state.controlledSeat;
+      let expected: unknown;
+      if (cond.value_ref !== undefined) {
+        expected = resolveStatePath(state, cond.value_ref);
+        if (expected === undefined) return false;
+      } else {
+        expected = cond.value;
+        if (expected === 'player') {
+          const parsed = parseStatePath(cond.path);
+          if (parsed && (parsed.def.kind === 'seat' || parsed.def.kind === 'owner')) {
+            if (state.controlledSeat === null) return false;
+            expected = state.controlledSeat;
+          }
         }
       }
       if (cond.cmp === '=') return actual === expected;
@@ -206,6 +223,9 @@ export function hasEventCondition(cond: TriggerCondition): boolean {
     case 'turn_start':
     case 'trigger_fired':
       return true;
+    case 'state_assert':
+      // 纯状态断言走状态监听；“改变”断言依赖本步骤增量，属于事件叶子
+      return cond.cmp === 'changed';
     default:
       return false;
   }

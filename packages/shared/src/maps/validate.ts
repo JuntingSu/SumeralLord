@@ -100,6 +100,7 @@ interface StatePathCtx {
   total: number;
   seats: ReadonlySet<number>;
   ids: ReadonlySet<string>;
+  texts: ReadonlySet<string>;
 }
 
 function validateCondition(c: unknown, ctx: StatePathCtx): boolean {
@@ -131,7 +132,20 @@ function validateCondition(c: unknown, ctx: StatePathCtx): boolean {
     case 'state_assert': {
       if (typeof c.path !== 'string' || !validateStatePath(c.path, ctx)) return false;
       const cmp = c.cmp;
+      if (cmp === 'changed') return true; // 比较“改变”不需要预期值
       if (cmp !== '=' && cmp !== '>' && cmp !== '<' && cmp !== '>=' && cmp !== '<=') return false;
+      if (c.value_ref !== undefined) {
+        // 预期值引用另一个 gamestate 路径；与具体值二选一
+        if (typeof c.value_ref !== 'string' || !validateStatePath(c.value_ref, ctx)) return false;
+        if (c.value !== undefined) return false;
+        if (cmp !== '=') {
+          const actual = parseStatePath(c.path);
+          const ref = parseStatePath(c.value_ref);
+          if (!actual || actual.def.kind !== 'int') return false;
+          if (!ref || ref.def.kind !== 'int') return false;
+        }
+        return true;
+      }
       if (cmp !== '=') {
         const parsed = parseStatePath(c.path);
         if (!parsed || parsed.def.kind !== 'int') return false;
@@ -293,7 +307,22 @@ export function validateTriggers(
     if (ids.has(entry.id)) return false;
     ids.add(entry.id);
   }
-  const ctx: StatePathCtx = { total, seats, ids };
+  const textIds = new Set<string>();
+  const ctx: StatePathCtx = { total, seats, ids, texts: textIds };
+  // 文本 id 来自 show_text / hide_text 效果：状态路径 gamestate.texts.{text}.visible 需要完整集合
+  for (const entry of raw) {
+    if (!isRecord(entry) || !Array.isArray(entry.effects)) continue;
+    for (const effect of entry.effects) {
+      if (
+        isRecord(effect) &&
+        (effect.op === 'show_text' || effect.op === 'hide_text') &&
+        typeof effect.text_id === 'string' &&
+        effect.text_id.length > 0
+      ) {
+        textIds.add(effect.text_id);
+      }
+    }
+  }
   for (const entry of raw) {
     if (!isRecord(entry)) return false;
     if (entry.priority !== undefined && !isInt(entry.priority)) return false;

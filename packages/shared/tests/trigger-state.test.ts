@@ -8,6 +8,7 @@ import {
   formatStateText,
   initState,
   matchCondition,
+  resolveStatePath,
   validateMapData,
 } from '../src/index.js';
 import type { GameState, MapFullData, TriggerDef } from '../src/index.js';
@@ -109,6 +110,180 @@ describe('state_assert', () => {
     expect(
       matchCondition({ op: 'state_assert', path: 'gamestate.nope', cmp: '=', value: 1 }, {}, fired, state),
     ).toBe(false);
+  });
+
+  it('cmp=changed 比较本步骤前后的值', () => {
+    const before = start([]);
+    const after = start([]);
+    after.turn = 2;
+    const delta = { before, after, tiles: [], forces: [] };
+    const fired = new Set<string>();
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.turn', cmp: 'changed' },
+        { delta },
+        fired,
+        after,
+      ),
+    ).toBe(true);
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.phase', cmp: 'changed' },
+        { delta },
+        fired,
+        after,
+      ),
+    ).toBe(false);
+    // 缺少本步骤增量时不能判定为“改变”
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.turn', cmp: 'changed' },
+        {},
+        fired,
+        after,
+      ),
+    ).toBe(false);
+  });
+
+  it('value_ref 引用另一个 gamestate 变量作为预期值', () => {
+    const state = start([]);
+    state.turn = 5;
+    const force = state.forces.find((f) => f.seat === 1)!;
+    force.points = 5;
+    const fired = new Set<string>();
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.turn', cmp: '=', value_ref: 'gamestate.forces.1.points' },
+        {},
+        fired,
+        state,
+      ),
+    ).toBe(true);
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.turn', cmp: '>', value_ref: 'gamestate.forces.1.points' },
+        {},
+        fired,
+        state,
+      ),
+    ).toBe(false);
+    force.points = 4;
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.turn', cmp: '>', value_ref: 'gamestate.forces.1.points' },
+        {},
+        fired,
+        state,
+      ),
+    ).toBe(true);
+    // 引用路径非法 → 不成立
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.turn', cmp: '=', value_ref: 'gamestate.nope' },
+        {},
+        fired,
+        state,
+      ),
+    ).toBe(false);
+  });
+
+  it('“改变”断言在意图造成的值变化后触发', () => {
+    const state = start([
+      {
+        id: 'moved',
+        when: { op: 'state_assert', path: 'gamestate.tiles.1.soldier.exists', cmp: 'changed' },
+        effects: text('moved'),
+      },
+    ]);
+    // 纯状态监听不参与，初始不触发
+    expect(state.triggerRuntime?.firedCounts.moved).toBeUndefined();
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.triggerRuntime?.firedCounts.moved).toBe(1);
+  });
+
+  it('“改变”断言同样响应触发器效果造成的值变化', () => {
+    const state = start([
+      {
+        id: 'spawn',
+        when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+        effects: [{ op: 'spawn_soldier', tile: 2, force: 1, strength: 1, movement: false }],
+      },
+      {
+        id: 'spawned',
+        when: { op: 'state_assert', path: 'gamestate.tiles.2.soldier.exists', cmp: 'changed' },
+        effects: text('spawned'),
+      },
+    ]);
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.triggerRuntime?.firedCounts.spawn).toBe(1);
+    expect(r.state.triggerRuntime?.firedCounts.spawned).toBe(1);
+  });
+
+  it('“上一个意图”记录最近一次成功意图类型', () => {
+    const state = start([
+      { id: 'nop', when: { op: 'state_assert', path: 'gamestate.finished', cmp: '=', value: false }, effects: text('n') },
+    ]);
+    expect(resolveStatePath(state, 'gamestate.lastIntentType')).toBeNull();
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(resolveStatePath(r.state, 'gamestate.lastIntentType')).toBe('MOVE');
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.lastIntentType', cmp: '=', value: 'MOVE' },
+        {},
+        new Set<string>(),
+        r.state,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('文本状态断言', () => {
+  const showTrigger: TriggerDef = {
+    id: 'show',
+    when: { op: 'tile_owner_changed', tile: 1, from: 'any', to: 1 },
+    effects: [
+      { op: 'show_text', text_id: 't1', text: 'hello', placement: { kind: 'screen', position: 'top-right' } },
+    ],
+  };
+
+  it('show_text 后文本状态为 true', () => {
+    const state = start([showTrigger]);
+    expect(resolveStatePath(state, 'gamestate.texts.t1.visible')).toBe(false);
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.triggerRuntime?.visibleTexts?.t1).toBe(true);
+    expect(resolveStatePath(r.state, 'gamestate.texts.t1.visible')).toBe(true);
+    expect(
+      matchCondition(
+        { op: 'state_assert', path: 'gamestate.texts.t1.visible', cmp: '=', value: true },
+        {},
+        new Set<string>(),
+        r.state,
+      ),
+    ).toBe(true);
+  });
+
+  it('hide_text 后文本状态为 false', () => {
+    const state = start([
+      showTrigger,
+      {
+        id: 'hide',
+        when: { op: 'trigger_fired', trigger_id: 'show' },
+        effects: [{ op: 'hide_text', text_id: 't1' }],
+      },
+    ]);
+    const r = applyIntent(state, { actor: { kind: 'PLAYER', seat: 1 }, intent: move(0, 1) });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.triggerRuntime?.visibleTexts?.t1).toBeUndefined();
+    expect(resolveStatePath(r.state, 'gamestate.texts.t1.visible')).toBe(false);
   });
 });
 
@@ -213,6 +388,103 @@ describe('状态路径与文本校验', () => {
     ).toBe(true);
   });
 
+  it('文本状态断言只接受已有文本 id 与布尔值', () => {
+    const ok = map([
+      {
+        id: 'show',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [
+          {
+            op: 'show_text',
+            text_id: 't1',
+            text: 'hi',
+            placement: { kind: 'screen', position: 'top-right' },
+          },
+        ],
+      },
+      {
+        id: 'see',
+        when: { op: 'state_assert', path: 'gamestate.texts.t1.visible', cmp: '=', value: true },
+        effects: text('s'),
+      },
+    ]);
+    expect(validateMapData(ok)).toBe(true);
+
+    const unknown = map([
+      {
+        id: 'bad',
+        when: { op: 'state_assert', path: 'gamestate.texts.nope.visible', cmp: '=', value: false },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(unknown)).toBe(false);
+
+    const badValue = map([
+      {
+        id: 'show',
+        when: { op: 'turn_start', turn: 1 },
+        effects: [
+          {
+            op: 'show_text',
+            text_id: 't1',
+            text: 'hi',
+            placement: { kind: 'screen', position: 'top-right' },
+          },
+        ],
+      },
+      {
+        id: 'bad',
+        when: { op: 'state_assert', path: 'gamestate.texts.t1.visible', cmp: '=', value: 1 },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(badValue)).toBe(false);
+  });
+
+  it('预期值支持引用 gamestate 变量', () => {
+    const okRef = map([
+      {
+        id: 'ok',
+        when: { op: 'state_assert', path: 'gamestate.turn', cmp: '=', value_ref: 'gamestate.forces.1.points' },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(okRef)).toBe(true);
+
+    const badRef = map([
+      {
+        id: 'bad',
+        when: { op: 'state_assert', path: 'gamestate.turn', cmp: '=', value_ref: 'gamestate.nope' },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(badRef)).toBe(false);
+
+    const bothValues = map([
+      {
+        id: 'bad',
+        when: {
+          op: 'state_assert',
+          path: 'gamestate.turn',
+          cmp: '=',
+          value: 1,
+          value_ref: 'gamestate.turn',
+        },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(bothValues)).toBe(false);
+
+    const nonIntRef = map([
+      {
+        id: 'bad',
+        when: { op: 'state_assert', path: 'gamestate.turn', cmp: '>', value_ref: 'gamestate.phase' },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(nonIntRef)).toBe(false);
+  });
+
   it('拒绝未知路径、越界参数与不匹配的预期值', () => {
     const badPath = map([
       { id: 'bad', when: { op: 'state_assert', path: 'gamestate.mystery', cmp: '=', value: 1 }, effects: text('x') },
@@ -238,6 +510,33 @@ describe('状态路径与文本校验', () => {
       { id: 'ok', when: { op: 'state_assert', path: 'gamestate.turn', cmp: '>=', value: 1 }, effects: text('x') },
     ]);
     expect(validateMapData(okCompare)).toBe(true);
+
+    const changedWithoutValue = map([
+      {
+        id: 'ok',
+        when: { op: 'state_assert', path: 'gamestate.tiles.0.soldier.strength', cmp: 'changed' },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(changedWithoutValue)).toBe(true);
+
+    const intentValue = map([
+      {
+        id: 'ok',
+        when: { op: 'state_assert', path: 'gamestate.lastIntentType', cmp: '=', value: 'MOVE' },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(intentValue)).toBe(true);
+
+    const badIntentValue = map([
+      {
+        id: 'bad',
+        when: { op: 'state_assert', path: 'gamestate.lastIntentType', cmp: '=', value: 'FLY' },
+        effects: text('x'),
+      },
+    ]);
+    expect(validateMapData(badIntentValue)).toBe(false);
 
     const badText = map([
       {

@@ -28,6 +28,7 @@
     <button id="btn-save" title="保存到服务器（对局数>15 或积分>150 时直存正式地图，否则进审查队列）">💾 保存到服务器</button>
     <button id="btn-export" title="导出为 JSON 文件下载">📥 导出 JSON</button>
     <button id="btn-pve-play" title="把当前地图带到 PVE 房间（不保存到服务器）">🎮 PVE游玩</button>
+    <button id="btn-pve-test" title="把当前地图带到 PVE 房间测试；返回时把当前 PVE 地图带回编辑器">🧪 测试</button>
   </div>
   <div id="status" class="status">就绪</div>
 </header>
@@ -210,11 +211,12 @@
     <div id="mobile-actions" class="m-only" hidden>
       <button id="btn-settings-m" title="地图信息 / 势力">⚙</button>
       <button id="btn-more-m" title="新建 / 导入 / 随机生成">＋</button>
-      <button id="btn-upload-m" title="导出 JSON / 导出到服务器 / PVE游玩">📤</button>
+      <button id="btn-upload-m" title="导出 JSON / 导出到服务器 / PVE游玩 / 测试">📤</button>
       <div id="upload-menu" hidden>
         <button type="button" data-act="json">📥 导出 JSON</button>
         <button type="button" data-act="server">📤 导出到服务器</button>
         <button type="button" data-act="pve">🎮 PVE游玩</button>
+        <button type="button" data-act="pve-test">🧪 测试</button>
       </div>
     </div>
 

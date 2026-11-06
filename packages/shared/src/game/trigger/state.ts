@@ -2,6 +2,7 @@
 // 仅允许表内路径；动态段只能是座次（数字或 player）、地块序号、触发器 id。
 import type { GameState } from '../types.js';
 import type { TriggerDifficulty } from './types.js';
+import { TRIGGER_INTENT_TYPES } from './types.js';
 
 export type StateValueKind =
   | 'int'
@@ -11,9 +12,11 @@ export type StateValueKind =
   | 'terrain'
   | 'difficulty'
   | 'seat'
-  | 'owner';
+  | 'owner'
+  | 'intent'
+  | 'textVisible';
 
-export type StatePathGroup = 'global' | 'force' | 'tile' | 'fog' | 'trigger';
+export type StatePathGroup = 'global' | 'force' | 'tile' | 'fog' | 'trigger' | 'text';
 
 export interface StatePathDef {
   /** 路径模板，如 gamestate.forces.{seat}.points */
@@ -24,7 +27,7 @@ export interface StatePathDef {
   /** 该路径的取值可能为 null（显示为“无”） */
   nullable?: boolean;
   /** 模板里的动态参数，按出现顺序 */
-  params: Array<'seat' | 'tile' | 'trigger'>;
+  params: Array<'seat' | 'tile' | 'trigger' | 'text'>;
   get: (state: GameState, args: Record<string, string>) => unknown;
 }
 
@@ -48,6 +51,14 @@ const DIFFICULTY_LABELS: Record<number, string> = {
   2: '普通',
   3: '困难',
   255: '休闲',
+};
+
+const INTENT_LABELS: Record<string, string> = {
+  MOVE: '移动',
+  ATTACK: '进攻',
+  ADD_POINT: '加点',
+  SWITCH_PHASE: '切换阶段',
+  SURRENDER: '投降',
 };
 
 function forceOf(state: GameState, seat: number) {
@@ -138,6 +149,15 @@ export const STATE_PATH_DEFS: StatePathDef[] = [
     kind: 'int',
     params: [],
     get: (state) => state.triggerRuntime?.turnSeq ?? 0,
+  },
+  {
+    template: 'gamestate.lastIntentType',
+    label: '上一个意图',
+    group: 'global',
+    kind: 'intent',
+    nullable: true,
+    params: [],
+    get: (state) => state.triggerRuntime?.lastIntentType ?? null,
   },
   {
     template: 'gamestate.forces.{seat}.alive',
@@ -303,6 +323,14 @@ export const STATE_PATH_DEFS: StatePathDef[] = [
     params: ['trigger'],
     get: (state, args) => state.triggerRuntime?.firedCounts[args.trigger ?? ''] ?? 0,
   },
+  {
+    template: 'gamestate.texts.{text}.visible',
+    label: '文本状态',
+    group: 'text',
+    kind: 'textVisible',
+    params: ['text'],
+    get: (state, args) => !!state.triggerRuntime?.visibleTexts?.[args.text ?? ''],
+  },
 ];
 
 function escapeRegExp(s: string): string {
@@ -310,11 +338,11 @@ function escapeRegExp(s: string): string {
 }
 
 function compileTemplate(def: StatePathDef): RegExp {
-  const parts = def.template.split(/(\{seat\}|\{tile\}|\{trigger\})/);
+  const parts = def.template.split(/(\{seat\}|\{tile\}|\{trigger\}|\{text\})/);
   let pattern = '^';
   for (const part of parts) {
     if (part === '{seat}' || part === '{tile}') pattern += '([^.]+)';
-    else if (part === '{trigger}') pattern += '(.+)';
+    else if (part === '{trigger}' || part === '{text}') pattern += '(.+)';
     else pattern += escapeRegExp(part);
   }
   return new RegExp(pattern + '$');
@@ -350,6 +378,8 @@ export interface StatePathContext {
   total: number;
   seats: ReadonlySet<number>;
   ids: ReadonlySet<string>;
+  /** 合法文本 id（gamestate.texts.{text}.visible）；缺省视为无 */
+  texts?: ReadonlySet<string>;
 }
 
 export function validateStatePath(path: string, ctx: StatePathContext): boolean {
@@ -366,6 +396,8 @@ export function validateStatePath(path: string, ctx: StatePathContext): boolean 
       if (!Number.isInteger(n) || n < 0 || n >= ctx.total) return false;
     } else if (param === 'trigger') {
       if (!ctx.ids.has(raw)) return false;
+    } else if (param === 'text') {
+      if (!(ctx.texts ?? new Set<string>()).has(raw)) return false;
     }
   }
   return true;
@@ -374,6 +406,7 @@ export function validateStatePath(path: string, ctx: StatePathContext): boolean 
 const PHASE_VALUES = new Set(['PREPARE', 'ACTION', 'ADD_POINT', 'END']);
 const TERRAIN_VALUES = new Set([0, 1, 3, 4, 5]);
 const DIFFICULTY_VALUES = new Set([1, 2, 3, 255]);
+const INTENT_VALUES = new Set<string>(TRIGGER_INTENT_TYPES);
 
 /** 断言预期值是否与路径类型匹配 */
 export function validateStateValue(
@@ -405,6 +438,10 @@ export function validateStateValue(
         value === 'player' ||
         (typeof value === 'number' && (value === 0 || value === 255 || ctx.seats.has(value)))
       );
+    case 'intent':
+      return typeof value === 'string' && INTENT_VALUES.has(value);
+    case 'textVisible':
+      return typeof value === 'boolean';
   }
 }
 
@@ -435,6 +472,10 @@ export function formatStateValue(state: GameState, def: StatePathDef, value: unk
       return TERRAIN_LABELS[Number(value)] ?? String(value);
     case 'difficulty':
       return DIFFICULTY_LABELS[Number(value)] ?? String(value);
+    case 'intent':
+      return INTENT_LABELS[String(value)] ?? String(value);
+    case 'textVisible':
+      return value ? '展示' : '隐藏';
     case 'seat':
       return forceName(state, Number(value));
     case 'owner': {

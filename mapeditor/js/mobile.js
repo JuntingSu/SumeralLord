@@ -238,6 +238,7 @@
       uploadMenu.hidden = true;
       if (btn.dataset.act === 'json') $('btn-export').click();
       else if (btn.dataset.act === 'pve') window.MapEditorActions?.playPve?.();
+      else if (btn.dataset.act === 'pve-test') window.MapEditorActions?.playPveTest?.();
       else exportToServerFlow();
     });
   });

@@ -10,6 +10,7 @@ const StatePaths = (() => {
     tile: '地块',
     fog: '迷雾',
     trigger: '触发器',
+    text: '文本',
   };
 
   const D = (template, label, group, kind, params = [], nullable = false) => ({
@@ -30,6 +31,7 @@ const StatePaths = (() => {
     D('gamestate.winningTeam', '获胜队伍', 'global', 'int', [], true),
     D('gamestate.intentSeq', '意图计数', 'global', 'int'),
     D('gamestate.turnSeq', '结束回合计数', 'global', 'int'),
+    D('gamestate.lastIntentType', '上一个意图', 'global', 'intent', [], true),
     D('gamestate.forces.{seat}.alive', '势力存活', 'force', 'bool', ['seat']),
     D('gamestate.forces.{seat}.exists', '势力存在', 'force', 'bool', ['seat']),
     D('gamestate.forces.{seat}.points', '势力点数', 'force', 'int', ['seat']),
@@ -45,16 +47,17 @@ const StatePaths = (() => {
     D('gamestate.tiles.{tile}.soldier.hasMovement', '地块守军是否有移动力', 'tile', 'bool', ['tile'], true),
     D('gamestate.fogOverrides.enabled', '迷雾覆盖是否开启', 'fog', 'bool', [], true),
     D('gamestate.triggerRuntime.firedCounts.{trigger}', '触发器已触发次数', 'trigger', 'int', ['trigger']),
+    D('gamestate.texts.{text}.visible', '文本状态', 'text', 'textVisible', ['text']),
   ];
 
   const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   function compileTemplate(template) {
-    const parts = template.split(/(\{seat\}|\{tile\}|\{trigger\})/);
+    const parts = template.split(/(\{seat\}|\{tile\}|\{trigger\}|\{text\})/);
     let pattern = '^';
     for (const part of parts) {
       if (part === '{seat}' || part === '{tile}') pattern += '([^.]+)';
-      else if (part === '{trigger}') pattern += '(.+)';
+      else if (part === '{trigger}' || part === '{text}') pattern += '(.+)';
       else pattern += escapeRegExp(part);
     }
     return new RegExp(pattern + '$');
@@ -74,7 +77,7 @@ const StatePaths = (() => {
   }
 
   function fill(template, args) {
-    return template.replace(/\{(seat|tile|trigger)\}/g, (_, key) => String(args[key] ?? ''));
+    return template.replace(/\{(seat|tile|trigger|text)\}/g, (_, key) => String(args[key] ?? ''));
   }
 
   function validatePath(path, ctx) {
@@ -91,6 +94,8 @@ const StatePaths = (() => {
         if (!Number.isInteger(n) || n < 0 || n >= ctx.total) return false;
       } else if (param === 'trigger') {
         if (!ctx.ids.has(raw)) return false;
+      } else if (param === 'text') {
+        if (!(ctx.texts ?? new Set()).has(raw)) return false;
       }
     }
     return true;
@@ -111,6 +116,15 @@ const StatePaths = (() => {
   const PHASES = ['PREPARE', 'ACTION', 'ADD_POINT', 'END'];
   const TERRAINS = [0, 1, 3, 4, 5];
   const DIFFICULTIES = [1, 2, 3, 255];
+  /** 意图类型（“上一个意图”断言的预期值） */
+  const INTENTS = ['MOVE', 'ATTACK', 'ADD_POINT', 'SWITCH_PHASE', 'SURRENDER'];
+  const INTENT_LABELS = {
+    MOVE: '移动',
+    ATTACK: '进攻',
+    ADD_POINT: '加点',
+    SWITCH_PHASE: '切换阶段',
+    SURRENDER: '投降',
+  };
 
   function validateValue(path, value, ctx) {
     const parsed = parse(path);
@@ -137,10 +151,14 @@ const StatePaths = (() => {
           value === 'player' ||
           (typeof value === 'number' && (value === 0 || value === 255 || ctx.seats.has(value)))
         );
+      case 'intent':
+        return typeof value === 'string' && INTENTS.includes(value);
+      case 'textVisible':
+        return typeof value === 'boolean';
       default:
         return false;
     }
   }
 
-  return { GROUPS, DEFS, parse, fill, validatePath, validateValue, tokens, validateText };
+  return { GROUPS, DEFS, INTENTS, INTENT_LABELS, parse, fill, validatePath, validateValue, tokens, validateText };
 })();

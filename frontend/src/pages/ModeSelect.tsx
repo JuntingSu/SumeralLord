@@ -53,7 +53,18 @@ export default function ModeSelect() {
             </span>
           </Link>
 
-          <Link to="/pve" className={`${CARD} hover:border-emerald-500 hover:bg-slate-700`}>
+          <Link
+            to="/pve"
+            onClick={() => {
+              try {
+                sessionStorage.removeItem('dl_pve_test_mode');
+                sessionStorage.removeItem('dl_pve_test_origin');
+              } catch {
+                // ignore
+              }
+            }}
+            className={`${CARD} hover:border-emerald-500 hover:bg-slate-700`}
+          >
             <span className="text-3xl" aria-hidden="true">🤖</span>
             <span>
               <span className="block text-lg font-semibold">单人 PVE</span>

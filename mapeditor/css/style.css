@@ -425,6 +425,8 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
 /* 参数拾取时，用蓝色虚线框住可点击区域 */
 .pick-zone { outline: 2px dashed #4da3ff; outline-offset: 2px; }
 .trg-text-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16em; }
+/* 显示文本引用已有 text_id 时，隐藏内容与位置控件 */
+.trg-showtext-detail[hidden] { display: none; }
 /* 合法值复选框面板 */
 .trg-param-pop {
   position: fixed;

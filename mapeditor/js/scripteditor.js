@@ -35,7 +35,7 @@ const ScriptEditor = (() => {
   /** 用枚举选项面板选择的类型（any/unchanged/flipped 作为额外选项由参数开关控制） */
   const ENUM_TYPES = new Set([
     'force', 'seat', 'owner', 'team', 'trigger', 'phase', 'terrain',
-    'difficulty', 'bool', 'position', 'seatList', 'compare',
+    'difficulty', 'bool', 'position', 'seatList', 'compare', 'valueMode',
   ]);
   /** 可从棋盘/列表拾取的参数 */
   const PICK_TYPES = new Set(['force', 'trigger', 'terrain']);
@@ -90,11 +90,13 @@ const ScriptEditor = (() => {
       },
       {
         op: 'state_assert', label: '断言',
-        text: '断言 {path} {cmp} {value}',
+        text: '断言 {path} {cmp} {value_mode} {value} {value_ref}',
         params: [
-          P('path', 'statePath', 'gamestate 变量'),
+          P('path', 'statePath', '变量'),
           P('cmp', 'compare', '比较', { def: '=' }),
+          P('value_mode', 'valueMode', '预期值来源', { def: 'literal' }),
           P('value', 'stateValue', '预期值'),
+          P('value_ref', 'statePath', '预期值变量'),
         ],
       },
       {
@@ -121,8 +123,8 @@ const ScriptEditor = (() => {
         params: [P('turn', 'int', '回合', { any: true, def: 'any', min: 1 })],
       },
       {
-        op: 'trigger_fired', label: '触发器已触发',
-        text: '触发器 {trigger_id} 已触发',
+        op: 'trigger_fired', label: '触发器连锁',
+        text: '连锁自触发器 {trigger_id}',
         params: [P('trigger_id', 'trigger', '触发器', { any: true, def: 'any' })],
       },
     ],
@@ -197,7 +199,7 @@ const ScriptEditor = (() => {
         op: 'show_text', label: '显示文本',
         text: '文本ID：{text_id}，内容：{text}（位置 {placement}）',
         params: [
-          P('text_id', 'text', '文本ID', { maxLen: 64, placeholder: '指定文本 id' }),
+          P('text_id', 'textId', '文本ID', { maxLen: 64, placeholder: '指定文本 id 或点触发器拾取' }),
           P('text', 'textEditor', '内容', { maxLen: 4000 }),
           P('placement', 'placement', '位置', { def: 'screen:top-right' }),
         ],
@@ -288,6 +290,8 @@ const ScriptEditor = (() => {
       for (const p of def.params || []) node.params[p.key] = p.def ?? '';
     }
     if (op === 'show_text' && !node.params.text_id) node.params.text_id = nextTextId();
+    // 记录进入编辑时的文本 id；提交时用于识别改名并同步引用
+    if (op === 'show_text') node.textIdOrigin = String(node.params.text_id ?? '');
     if (op === 'set_turn_order' && !node.params.order) {
       const map = Editor.getState().map;
       const seats = (map?.player_list || []).map((p) => p.seat).sort((a, b) => a - b);
@@ -319,12 +323,14 @@ const ScriptEditor = (() => {
     const map = Editor.getState().map;
     for (const t of map?.triggers || []) {
       for (const e of t.effects || []) {
-        if (e && e.op === 'show_text' && e.text_id) out.add(String(e.text_id));
+        if (e && (e.op === 'show_text' || e.op === 'hide_text') && e.text_id) out.add(String(e.text_id));
       }
     }
     const walk = (list) => {
       for (const n of list) {
-        if (n.op === 'show_text' && n.params?.text_id) out.add(String(n.params.text_id));
+        if ((n.op === 'show_text' || n.op === 'hide_text') && n.params?.text_id) {
+          out.add(String(n.params.text_id));
+        }
         if (n.children) walk(n.children);
       }
     };
@@ -343,6 +349,39 @@ const ScriptEditor = (() => {
       n++;
     } while (used.has(id));
     return id;
+  }
+
+  /** 查找某个 text_id 已有的文本定义（排除当前组件自身） */
+  function findTextDefinition(textId, excludeNode) {
+    const id = String(textId ?? '').trim();
+    if (!id) return null;
+    // 组件原本就使用这个 id：它本身就是一个定义，保持内容可编辑
+    if (excludeNode && String(excludeNode.textIdOrigin ?? '').trim() === id) return null;
+    const map = Editor.getState().map;
+    const editingId = state.editing?.id;
+    // 其他触发器里已提交的文本定义
+    for (const t of map?.triggers || []) {
+      if (editingId && t.id === editingId) continue; // 当前编辑中的触发器以编辑区为准
+      for (const e of t.effects || []) {
+        if (e && e.op === 'show_text' && String(e.text_id ?? '').trim() === id) {
+          return {
+            text: String(e.text ?? ''),
+            placement: encodePlacement(e.placement),
+          };
+        }
+      }
+    }
+    // 编辑区里其他同 id 的组件
+    const candidates = state.eff.filter(
+      (n) => n !== excludeNode && n.op === 'show_text' && String(n.params?.text_id ?? '').trim() === id,
+    );
+    const canonical =
+      candidates.find((n) => String(n.textIdOrigin ?? '').trim() === id) || candidates[0];
+    if (!canonical) return null;
+    return {
+      text: String(canonical.params?.text ?? ''),
+      placement: String(canonical.params?.placement ?? ''),
+    };
   }
 
   /** 位置参数编码：screen:top-right / tile:12 */
@@ -372,6 +411,7 @@ const ScriptEditor = (() => {
       else if (p.type === 'placement') v = encodePlacement(obj.placement);
       else if (obj.op === 'state_assert' && p.key === 'value' && obj.value === null) v = 'null';
       else if (obj.op === 'state_assert' && p.key === 'cmp') v = obj.cmp ?? '=';
+      else if (obj.op === 'state_assert' && p.key === 'value_mode') v = obj.value_ref ? 'gamestate' : 'literal';
       else v = obj[p.key];
       if (Array.isArray(v)) v = v.join(', ');
       // 数据缺项时回落默认值，保证编辑态不出现“空缺”
@@ -379,6 +419,7 @@ const ScriptEditor = (() => {
         ? (p.type === 'placement' ? (p.def ?? '') : (p.def ?? ''))
         : String(v);
     }
+    if (obj.op === 'show_text') node.textIdOrigin = String(node.params.text_id ?? '');
     return node;
   }
 
@@ -423,6 +464,7 @@ const ScriptEditor = (() => {
       teams: new Set(map.player_list.map((p) => p.team)),
       seatCount: map.player_list.length,
       ids,
+      texts: collectTextIds(),
     };
   }
 
@@ -511,7 +553,7 @@ const ScriptEditor = (() => {
         return n;
       }
       case 'compare':
-        if (!['=', '>', '<', '>=', '<='].includes(v)) throw new Error('「比较」需为 = / > / < / >= / <=');
+        if (!['=', '>', '<', '>=', '<=', 'changed'].includes(v)) throw new Error('「比较」需为 = / > / < / >= / <= / changed');
         return v;
       case 'position':
         if (!SCREEN_POSITIONS.includes(v)) throw new Error(`「${param.label}」需为 ${SCREEN_POSITIONS.join('/')}`);
@@ -562,12 +604,36 @@ const ScriptEditor = (() => {
     if (node.op === 'state_assert') {
       const path = String(node.params.path || '').trim();
       const parsed = StatePaths.parse(path);
-      if (!parsed) throw new Error('请选择「gamestate 变量」');
-      const raw = String(node.params.value ?? '').trim();
-      if (raw === '') throw new Error('请填写「预期值」');
+      if (!parsed) throw new Error('请选择「变量」');
       const kind = parsed.def.kind;
       const cmp = String(node.params.cmp || '=').trim() || '=';
-      if (!['=', '>', '<', '>=', '<='].includes(cmp)) throw new Error('「比较」非法');
+      if (!['=', '>', '<', '>=', '<=', 'changed'].includes(cmp)) throw new Error('「比较」非法');
+      // “改变”比较本步骤前后值，不需要预期值
+      if (cmp === 'changed') return { op: 'state_assert', path, cmp };
+      const mode = String(node.params.value_mode || 'literal');
+      if (mode === 'gamestate') {
+        const ref = String(node.params.value_ref ?? '').trim();
+        if (!ref) throw new Error('请选择「预期值变量」');
+        if (
+          !StatePaths.validatePath(ref, {
+            total: ctx.total,
+            seats: ctx.seats,
+            ids: ctx.ids,
+            texts: ctx.texts ?? new Set(),
+          })
+        ) {
+          throw new Error('「预期值变量」非法');
+        }
+        if (cmp !== '=') {
+          const parsedRef = StatePaths.parse(ref);
+          if (kind !== 'int' || !parsedRef || parsedRef.def.kind !== 'int') {
+            throw new Error('只有整数变量支持大小比较');
+          }
+        }
+        return { op: 'state_assert', path, cmp, value_ref: ref };
+      }
+      const raw = String(node.params.value ?? '').trim();
+      if (raw === '') throw new Error('请填写「预期值」');
       if (raw === 'player' && (kind === 'seat' || kind === 'owner')) {
         if (cmp !== '=') throw new Error('只有整数变量支持大小比较');
         return { op: 'state_assert', path, cmp, value: 'player' };
@@ -620,6 +686,14 @@ const ScriptEditor = (() => {
           value = n;
           break;
         }
+        case 'intent': {
+          if (!StatePaths.INTENTS.includes(raw)) throw new Error('「预期值」意图类型非法');
+          value = raw;
+          break;
+        }
+        case 'textVisible':
+          value = raw === 'true';
+          break;
         default:
           value = raw;
       }
@@ -647,6 +721,17 @@ const ScriptEditor = (() => {
     if (def.params.some((p) => p.patch)) {
       if (patchCount === 0) throw new Error('「修改」类效果至少填写一个修改项');
       out.patch = patch;
+    }
+    // 显示文本引用已有 text_id 时，内容与位置都沿用已有定义
+    if (node.op === 'show_text') {
+      const reuse = findTextDefinition(out.text_id, node);
+      if (reuse) {
+        out.text = reuse.text;
+        if (reuse.placement) {
+          const pPlacement = def.params.find((p) => p.key === 'placement');
+          out.placement = convertParam(pPlacement, reuse.placement, ctx);
+        }
+      }
     }
     return out;
   }
@@ -701,8 +786,72 @@ const ScriptEditor = (() => {
     return trigger;
   }
 
+  // ==================== 文本 id 改名：提交时同步引用 ====================
+  function textVisiblePath(id) {
+    return `gamestate.texts.${id}.visible`;
+  }
+
+  /** 收集本次提交里 show_text 文本 id 的变化（进入编辑时的 id → 当前 id） */
+  function collectTextIdRenames() {
+    const renames = new Map();
+    for (const n of state.eff) {
+      if (n.op !== 'show_text') continue;
+      const from = String(n.textIdOrigin ?? '').trim();
+      const to = String(n.params?.text_id ?? '').trim();
+      if (!from || !to || from === to) continue;
+      // 新 id 已有定义 → 这是“引用已有文本”，不是改名，不做全局替换
+      if (findTextDefinition(to, n)) continue;
+      renames.set(from, to);
+    }
+    return renames;
+  }
+
+  function renameTextToken(text, renames) {
+    return String(text).replace(/\{gamestate\.texts\.([^{}]+)\.visible\}/g, (token, id) =>
+      renames.has(id) ? `{${textVisiblePath(renames.get(id))}}` : token,
+    );
+  }
+
+  function applyTextIdRenamesToCondition(cond, renames) {
+    if (!renames.size || !cond || typeof cond !== 'object') return;
+    if ((cond.op === 'and' || cond.op === 'or') && Array.isArray(cond.items)) {
+      cond.items.forEach((item) => applyTextIdRenamesToCondition(item, renames));
+      return;
+    }
+    if (cond.op === 'not') {
+      applyTextIdRenamesToCondition(cond.item, renames);
+      return;
+    }
+    if (cond.op === 'state_assert' && typeof cond.path === 'string') {
+      const prefix = 'gamestate.texts.';
+      const suffix = '.visible';
+      if (cond.path.startsWith(prefix) && cond.path.endsWith(suffix)) {
+        const id = cond.path.slice(prefix.length, -suffix.length);
+        if (renames.has(id)) cond.path = textVisiblePath(renames.get(id));
+      }
+    }
+  }
+
+  function applyTextIdRenamesToEffect(effect, renames) {
+    if (!renames.size || !effect) return;
+    if (effect.op === 'show_text' || effect.op === 'hide_text') {
+      if (typeof effect.text_id === 'string' && renames.has(effect.text_id)) {
+        effect.text_id = renames.get(effect.text_id);
+      }
+    }
+    if (effect.op === 'show_text' && typeof effect.text === 'string') {
+      effect.text = renameTextToken(effect.text, renames);
+    }
+  }
+
+  function applyTextIdRenamesToTrigger(trigger, renames) {
+    if (!renames.size || !trigger) return;
+    applyTextIdRenamesToCondition(trigger.when, renames);
+    for (const e of trigger.effects || []) applyTextIdRenamesToEffect(e, renames);
+  }
+
   // ==================== 渲染：右栏触发器列表 ====================
-  function triggerRow(id, badge, priority) {
+  function triggerRow(id, badge, priority, isDraft = false) {
     const row = document.createElement('div');
     row.className = 'trg-item';
     row.dataset.triggerId = id;
@@ -716,6 +865,7 @@ const ScriptEditor = (() => {
       <div class="trg-item-actions">
         <label class="trg-priority" title="优先级，越大越先执行">优先级<input class="trg-priority-input" type="number" step="1" value="${p}"></label>
         <button type="button" data-act="edit">编辑</button>
+        ${isDraft ? '' : '<button type="button" data-act="rename">改名</button>'}
         <button type="button" data-act="del">删除</button>
       </div>
     `;
@@ -731,7 +881,7 @@ const ScriptEditor = (() => {
     if (!map) return;
     const triggers = Array.isArray(map.triggers) ? map.triggers : [];
     if (state.editing && state.editing.isNew) {
-      list.appendChild(triggerRow(state.editing.id, '编辑中', state.editing.priority));
+      list.appendChild(triggerRow(state.editing.id, '编辑中', state.editing.priority, true));
     }
     for (const t of triggers) list.appendChild(triggerRow(t.id, '', t.priority ?? 0));
     if (!triggers.length && !(state.editing && state.editing.isNew)) {
@@ -740,6 +890,102 @@ const ScriptEditor = (() => {
       none.textContent = '还没有触发器。填写 id 后点「新建」。';
       list.appendChild(none);
     }
+  }
+
+  // ==================== 触发器改名：同步引用 ====================
+  function firedCountsPath(id) {
+    return `gamestate.triggerRuntime.firedCounts.${id}`;
+  }
+
+  function replaceTriggerTextRefs(text, oldId, newId) {
+    const from = `{${firedCountsPath(oldId)}}`;
+    const to = `{${firedCountsPath(newId)}}`;
+    return String(text).split(from).join(to);
+  }
+
+  /** 条件里的 trigger_fired / firedCounts 断言路径 */
+  function renameConditionRefs(cond, oldId, newId) {
+    if (!cond || typeof cond !== 'object') return;
+    if ((cond.op === 'and' || cond.op === 'or') && Array.isArray(cond.items)) {
+      cond.items.forEach((item) => renameConditionRefs(item, oldId, newId));
+      return;
+    }
+    if (cond.op === 'not') {
+      renameConditionRefs(cond.item, oldId, newId);
+      return;
+    }
+    if (cond.op === 'trigger_fired' && cond.trigger_id === oldId) {
+      cond.trigger_id = newId;
+    } else if (cond.op === 'state_assert' && cond.path === firedCountsPath(oldId)) {
+      cond.path = firedCountsPath(newId);
+    }
+  }
+
+  /** 效果文本里的 {gamestate.triggerRuntime.firedCounts.<id>} 占位符 */
+  function renameEffectRefs(effect, oldId, newId) {
+    if (effect && effect.op === 'show_text' && typeof effect.text === 'string') {
+      effect.text = replaceTriggerTextRefs(effect.text, oldId, newId);
+    }
+  }
+
+  /** 编辑区中的节点参数（含游离组件与未提交修改） */
+  function renameNodeRefs(node, oldId, newId) {
+    if (!node) return;
+    if (Array.isArray(node.children)) {
+      node.children.forEach((child) => renameNodeRefs(child, oldId, newId));
+    }
+    const p = node.params;
+    if (!p) return;
+    if (node.op === 'trigger_fired' && p.trigger_id === oldId) {
+      p.trigger_id = newId;
+    } else if (node.op === 'state_assert' && p.path === firedCountsPath(oldId)) {
+      p.path = firedCountsPath(newId);
+    } else if (node.op === 'show_text' && typeof p.text === 'string') {
+      p.text = replaceTriggerTextRefs(p.text, oldId, newId);
+    }
+  }
+
+  function renameTrigger(oldId) {
+    const map = Editor.getState().map;
+    if (!map) return;
+    if (!(map.triggers || []).some((t) => t.id === oldId)) {
+      return toast(`触发器「${oldId}」不存在`, 'error');
+    }
+    const input = window.prompt(`把触发器「${oldId}」改名为：`, oldId);
+    if (input === null) return;
+    const newId = String(input).trim();
+    if (!newId) return toast('触发器 id 不能为空', 'error');
+    if (newId.length > 64) return toast('触发器 id 不能超过 64 个字符', 'error');
+    if (newId === 'any') return toast('「any」是保留字，不能作为触发器 id', 'error');
+    if (newId === oldId) return;
+    if ((map.triggers || []).some((t) => t.id === newId)) {
+      return toast(`触发器 id「${newId}」已存在`, 'error');
+    }
+    if (state.editing?.isNew && state.editing.id === newId) {
+      return toast(`「${newId}」正被当前新建触发器使用`, 'error');
+    }
+
+    // 已打开编辑区里的引用先同步，避免提交时把旧 id 写回去
+    [...state.cond, ...state.eff, ...state.free].forEach((n) =>
+      renameNodeRefs(n, oldId, newId),
+    );
+    if (state.editing?.id === oldId) {
+      state.editing.id = newId;
+      if (state.editing.src) state.editing.src.id = newId;
+    }
+
+    Editor.commit((m) => {
+      const triggers = m.triggers || [];
+      const target = triggers.find((t) => t.id === oldId);
+      if (target) target.id = newId;
+      for (const t of triggers) {
+        renameConditionRefs(t.when, oldId, newId);
+        for (const e of t.effects || []) renameEffectRefs(e, oldId, newId);
+      }
+    });
+    renderManager();
+    renderEditor();
+    toast(`已把触发器「${oldId}」改名为「${newId}」，并同步更新引用`);
   }
 
   // ==================== 渲染：脚本编辑区 ====================
@@ -863,6 +1109,9 @@ const ScriptEditor = (() => {
     input.addEventListener('input', () => {
       node.params[param.key] = input.value;
       fitWidth(input, input.value);
+      if (node.op === 'show_text' && param.key === 'text_id') {
+        syncAllShowTextReuse();
+      }
       cancelPick();
     });
     input.addEventListener('focus', () => {
@@ -966,18 +1215,20 @@ const ScriptEditor = (() => {
       total: map ? map.row * map.column : 0,
       seats: map ? [...map.player_list].sort((a, b) => a.seat - b.seat) : [],
       ids: map ? (map.triggers || []).map((t) => t.id) : [],
+      texts: [...collectTextIds()],
     };
   }
 
   function defaultPathArg(kind, ctx) {
     if (kind === 'seat') return ctx.seats.length ? String(ctx.seats[0].seat) : 'player';
     if (kind === 'tile') return '0';
+    if (kind === 'text') return ctx.texts[0] ?? '';
     return ctx.ids[0] ?? '';
   }
 
   function renderStatePathControl(node, param) {
     const ctx = mapStateCtx();
-    const parsed = StatePaths.parse(node.params.path || '');
+    const parsed = StatePaths.parse(node.params[param.key] || '');
     const def = parsed ? parsed.def : StatePaths.DEFS[0];
     const args = {};
     for (const p of def.params) {
@@ -1009,7 +1260,7 @@ const ScriptEditor = (() => {
     fitWidth(defSel, def.label);
 
     const apply = () => {
-      node.params.path = StatePaths.fill(defSel.value, args);
+      node.params[param.key] = StatePaths.fill(defSel.value, args);
       renderEditor();
     };
     defSel.addEventListener('change', () => {
@@ -1019,7 +1270,8 @@ const ScriptEditor = (() => {
         nextArgs[p] = args[p] !== undefined ? args[p] : defaultPathArg(p, ctx);
       }
       if (next.params.some((p) => String(nextArgs[p] ?? '') === '')) {
-        toast('没有可用的触发器', 'error');
+        const missing = next.params.find((p) => String(nextArgs[p] ?? '') === '');
+        toast(missing === 'text' ? '没有可用的文本' : '没有可用的触发器', 'error');
         defSel.value = def.template;
         return;
       }
@@ -1043,6 +1295,13 @@ const ScriptEditor = (() => {
         el.max = String(Math.max(0, ctx.total - 1));
         el.step = '1';
         el.value = args.tile;
+      } else if (p === 'text') {
+        el = document.createElement('select');
+        el.innerHTML = ctx.texts.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+        // 旧数据可能把 {text} 原样写进路径；回落到第一个可用文本 id
+        const selected = ctx.texts.includes(args.text) ? args.text : (ctx.texts[0] ?? '');
+        el.value = selected;
+        args.text = selected;
       } else {
         el = document.createElement('select');
         el.innerHTML = ctx.ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
@@ -1054,11 +1313,15 @@ const ScriptEditor = (() => {
       el.dataset.uid = String(node.uid);
       el.dataset.key = `${param.key}.${p}`;
       el.dataset.type = 'statePathArg';
-      el.title = p === 'seat' ? '座次' : p === 'tile' ? '地块序号' : '触发器';
+      el.title = p === 'seat' ? '座次' : p === 'tile' ? '地块序号' : p === 'text' ? '文本' : '触发器';
       el.addEventListener('change', () => {
         args[p] = el.value;
         apply();
       });
+      if (p === 'text') {
+        wrap.append(el);
+        continue;
+      }
       const pickBtn = document.createElement('button');
       pickBtn.type = 'button';
       pickBtn.className = 'trg-param trg-pick-btn';
@@ -1073,7 +1336,7 @@ const ScriptEditor = (() => {
           label: el.title || p,
           onValue: (v) => {
             args[p] = String(v);
-            node.params.path = StatePaths.fill(defSel.value, args);
+            node.params[param.key] = StatePaths.fill(defSel.value, args);
             renderEditor();
           },
         });
@@ -1081,13 +1344,17 @@ const ScriptEditor = (() => {
       wrap.append(el, pickBtn);
     }
 
-    if (!node.params.path) node.params.path = StatePaths.fill(def.template, args);
+    const filled = StatePaths.fill(def.template, args);
+    const repairText = def.params.includes('text') && ctx.texts.length > 0 && filled !== node.params[param.key];
+    if (!node.params[param.key] || repairText) node.params[param.key] = filled;
     return wrap;
   }
 
   function renderStateValueControl(node, param) {
     const wrap = document.createElement('span');
     wrap.className = 'trg-value-wrap';
+    // “改变”谓词不需要预期值
+    if (String(node.params.cmp) === 'changed') return wrap;
     const parsed = StatePaths.parse(node.params.path || '');
     if (!parsed) {
       const hint = document.createElement('span');
@@ -1164,6 +1431,17 @@ const ScriptEditor = (() => {
         const opts = ctx.seats.map((s) => [String(s.seat), `P${s.seat}`]);
         opts.push(['player', '玩家'], ['0', '野生'], ['255', '阻挡'], ['null', '无兵']);
         wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, opts[0] ? opts[0][0] : 'null')));
+        break;
+      }
+      case 'intent': {
+        const opts = StatePaths.INTENTS.map((v) => [v, StatePaths.INTENT_LABELS[v] || v]);
+        if (nullable) opts.push(['null', '无']);
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, 'null')));
+        break;
+      }
+      case 'textVisible': {
+        const opts = [['true', '展示'], ['false', '隐藏']];
+        wrap.appendChild(makeSelect(opts, ensureEnumValue(opts, 'false')));
         break;
       }
       case 'text': {
@@ -1342,12 +1620,28 @@ const ScriptEditor = (() => {
     return btn;
   }
 
+  /** 输入的 text_id 已有定义时，隐藏内容与位置控件 */
+  function syncShowTextReuse(comp, node) {
+    if (!comp || !node || node.op !== 'show_text') return;
+    const detail = comp.querySelector('.trg-showtext-detail');
+    if (detail) detail.hidden = !!findTextDefinition(node.params?.text_id, node);
+  }
+
+  /** 任一文本身份变化后，刷新所有显示文本组件的复用状态 */
+  function syncAllShowTextReuse() {
+    document.querySelectorAll('#trg-editor .trg-comp').forEach((comp) => {
+      const entry = findEntry(Number(comp.dataset.uid));
+      if (entry && entry.node.op === 'show_text') syncShowTextReuse(comp, entry.node);
+    });
+  }
+
   function stateCtxForValidation() {
     const map = Editor.getState().map;
     return {
       total: map.row * map.column,
       seats: new Set(map.player_list.map((p) => p.seat)),
       ids: new Set((map.triggers || []).map((t) => t.id)),
+      texts: collectTextIds(),
     };
   }
 
@@ -1415,6 +1709,7 @@ const ScriptEditor = (() => {
     if (!map) return;
     const seats = [...map.player_list].sort((a, b) => a.seat - b.seat);
     const ids = (map.triggers || []).map((t) => t.id);
+    const texts = [...collectTextIds()];
     const total = map.row * map.column;
     for (const [g, label] of Object.entries(StatePaths.GROUPS)) {
       const defs = StatePaths.DEFS.filter((d) => d.group === g);
@@ -1455,7 +1750,7 @@ const ScriptEditor = (() => {
           paramRow.hidden = true;
           for (const p of def.params) {
             const tag = document.createElement('span');
-            tag.textContent = p === 'seat' ? '座次' : p === 'tile' ? '地块' : '触发器';
+            tag.textContent = p === 'seat' ? '座次' : p === 'tile' ? '地块' : p === 'text' ? '文本' : '触发器';
             let el;
             if (p === 'seat') {
               el = document.createElement('select');
@@ -1469,6 +1764,9 @@ const ScriptEditor = (() => {
               el.max = String(Math.max(0, total - 1));
               el.step = '1';
               el.value = '0';
+            } else if (p === 'text') {
+              el = document.createElement('select');
+              el.innerHTML = texts.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
             } else {
               el = document.createElement('select');
               el.innerHTML = ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
@@ -1480,6 +1778,10 @@ const ScriptEditor = (() => {
               args[p] = el.value;
               fitWidth(el, el.selectedOptions?.[0]?.textContent || el.value || '');
             });
+            if (p === 'text') {
+              paramRow.append(tag, el);
+              continue;
+            }
             const pickBtn = document.createElement('button');
             pickBtn.type = 'button';
             pickBtn.className = 'te-pick-btn';
@@ -1602,7 +1904,9 @@ const ScriptEditor = (() => {
       case 'difficulty':
         return MapConst.AI_LABELS[Number(v)] ?? v;
       case 'compare':
-        return { '=': '等于', '>': '>', '<': '<', '>=': '≥', '<=': '≤' }[v] ?? v;
+        return { '=': '等于', '>': '>', '<': '<', '>=': '≥', '<=': '≤', changed: '改变' }[v] ?? v;
+      case 'valueMode':
+        return v === 'gamestate' ? '变量' : '具体值';
       case 'bool':
         return v === 'true' ? '是' : v === 'false' ? '否' : v;
       case 'position':
@@ -1670,6 +1974,12 @@ const ScriptEditor = (() => {
           { value: '<', label: '<' },
           { value: '>=', label: '≥' },
           { value: '<=', label: '≤' },
+          { value: 'changed', label: '改变' },
+        ];
+      case 'valueMode':
+        return [
+          { value: 'literal', label: '具体值' },
+          { value: 'gamestate', label: '变量' },
         ];
       case 'position':
         return Object.keys(POSITION_LABELS).map((v) => ({ value: v, label: POSITION_LABELS[v] }));
@@ -1765,6 +2075,10 @@ const ScriptEditor = (() => {
           updateControlLabel(control, param, opt.value);
           cancelPick();
           closeParamPop();
+          // 断言的“改变”谓词 / 预期值来源会改变后续控件，切换后重绘
+          if (node.op === 'state_assert' && (param.key === 'cmp' || param.key === 'value_mode')) {
+            renderEditor();
+          }
         }
       });
       pop.appendChild(label);
@@ -1799,6 +2113,28 @@ const ScriptEditor = (() => {
       node.children.forEach((child) => children.appendChild(renderNode(child)));
       el.appendChild(head);
       el.appendChild(children);
+    } else if (node.op === 'show_text') {
+      const grip = document.createElement('span');
+      grip.className = 'trg-grip';
+      grip.draggable = true;
+      grip.title = '拖动以移动/嵌套';
+      grip.textContent = '⠿';
+      el.appendChild(grip);
+
+      const pId = def.params.find((p) => p.key === 'text_id');
+      const pText = def.params.find((p) => p.key === 'text');
+      const pPlacement = def.params.find((p) => p.key === 'placement');
+      el.appendChild(document.createTextNode('文本ID：'));
+      el.appendChild(renderParamField(node, pId));
+      const detail = document.createElement('span');
+      detail.className = 'trg-showtext-detail';
+      detail.appendChild(document.createTextNode('，内容：'));
+      detail.appendChild(renderParamField(node, pText));
+      detail.appendChild(document.createTextNode('（位置 '));
+      detail.appendChild(renderParamField(node, pPlacement));
+      detail.appendChild(document.createTextNode('）'));
+      el.appendChild(detail);
+      syncShowTextReuse(el, node);
     } else {
       const grip = document.createElement('span');
       grip.className = 'trg-grip';
@@ -1811,6 +2147,14 @@ const ScriptEditor = (() => {
         if (i % 2 === 0) {
           if (part) el.appendChild(document.createTextNode(part));
         } else {
+          // 断言的“改变”谓词不需要预期值；预期值来源按具体值 / gamestate 变量二选一
+          if (node.op === 'state_assert') {
+            const changed = String(node.params.cmp) === 'changed';
+            const byRef = String(node.params.value_mode) === 'gamestate';
+            if (part === 'value_mode' && changed) return;
+            if (part === 'value' && (changed || byRef)) return;
+            if (part === 'value_ref' && (changed || !byRef)) return;
+          }
           const param = def.params.find((p) => p.key === part);
           if (param) el.appendChild(renderParamField(node, param));
         }
@@ -2133,6 +2477,7 @@ const ScriptEditor = (() => {
       else updateControlLabel(pick.anchor, pick.param, str);
       pick.anchor.classList.add('picking');
     }
+    if (pick.node.op === 'show_text' && pick.key === 'text_id') syncAllShowTextReuse();
     // 拾取状态保留：继续点击合法目标可反复修改，点其他位置才取消
     setHint(`已填入「${pick.label}」：${displayValue(pick.param, str)}；可继续点击修改，点其他位置取消。`);
   }
@@ -2242,6 +2587,7 @@ const ScriptEditor = (() => {
       toast(e.message, 'error');
       return;
     }
+    const textRenames = collectTextIdRenames();
     const editing = state.editing;
     const map = Editor.getState().map;
     if (editing.isNew && (map.triggers || []).some((t) => t.id === editing.id)) {
@@ -2251,6 +2597,9 @@ const ScriptEditor = (() => {
     }
     closeEditor();
     Editor.commit((m) => {
+      // 文本 id 改名：同步其他触发器里的 show_text / hide_text / 断言与文本占位符
+      for (const t of m.triggers || []) applyTextIdRenamesToTrigger(t, textRenames);
+      applyTextIdRenamesToTrigger(trigger, textRenames);
       m.triggers = Array.isArray(m.triggers) ? m.triggers.slice() : [];
       if (editing.isNew) m.triggers.push(trigger);
       else {
@@ -2260,7 +2609,11 @@ const ScriptEditor = (() => {
       }
       m.trigger_schema_version = 2;
     });
-    toast(`已提交触发器「${editing.id}」`);
+    toast(
+      textRenames.size
+        ? `已提交触发器「${editing.id}」，并同步 ${textRenames.size} 个文本 id 的引用`
+        : `已提交触发器「${editing.id}」`,
+    );
   }
 
   // ==================== 事件绑定 ====================
@@ -2363,7 +2716,8 @@ const ScriptEditor = (() => {
         // 草稿尚未写入地图：再次点“编辑”直接回到当前编辑区
         if (state.editing?.isNew && state.editing.id === item.dataset.triggerId) renderEditor();
         else editTrigger(item.dataset.triggerId);
-      } else if (act === 'del') deleteTrigger(item.dataset.triggerId);
+      } else if (act === 'rename') renameTrigger(item.dataset.triggerId);
+      else if (act === 'del') deleteTrigger(item.dataset.triggerId);
     });
 
     // 触发器列表：优先级编辑（越大越先执行；默认新建时为当前数量）
