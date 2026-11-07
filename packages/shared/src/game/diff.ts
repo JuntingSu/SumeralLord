@@ -38,7 +38,20 @@ function cloneRuntime(r: TriggerRuntime | null): TriggerRuntime | null {
         ...(r.numberVars ? { numberVars: { ...r.numberVars } } : {}),
         ...(r.choiceValues ? { choiceValues: { ...r.choiceValues } } : {}),
         ...(r.pendingChoices ? { pendingChoices: { ...r.pendingChoices } } : {}),
-        pending: r.pending.map((p) => ({ ...p })),
+        pending: r.pending.map((p) => ({
+          ...p,
+          ...(p.filterBindings
+            ? {
+                filterBindings: Object.fromEntries(
+                  Object.entries(p.filterBindings).map(([key, list]) => [
+                    key,
+                    { type: list.type, values: [...list.values] },
+                  ]),
+                ),
+              }
+            : {}),
+          ...(p.preStateValues ? { preStateValues: { ...p.preStateValues } } : {}),
+        })),
       }
     : null;
 }

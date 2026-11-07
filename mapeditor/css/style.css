@@ -332,6 +332,58 @@ body:not(.mobile) #left.mode-script.collapsed { width: 24px; }
 .trg-statepath input.trg-param[type="number"] { min-width: 58px; }
 .trg-state-value { width: calc(var(--pw, 2) * 1em + 38px); }
 
+/* 组件编号与参数引用 */
+.trg-cid {
+  margin-left: 4px;
+  padding: 0 3px;
+  font-size: 10px;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  user-select: none;
+}
+.trg-ref-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.trg-ref-wrap.is-ref .trg-ref-target { opacity: 0.45; }
+.trg-ref-mode,
+.trg-path-arg-mode {
+  font-size: 10px;
+  padding: 0 1px;
+  background: #1b1e26;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+}
+.trg-ref-cid,
+.trg-path-arg-ref {
+  font-size: 10px;
+  max-width: 96px;
+  padding: 0 1px;
+  background: #1b1e26;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--ok);
+}
+.trg-state-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.trg-state-ref select,
+.trg-state-ref input {
+  font-size: 10px;
+  max-width: 120px;
+  padding: 0 1px;
+  background: #1b1e26;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+}
+.trg-statepath-filter { flex-wrap: wrap; }
+
 /* 文本编辑器：任意文本 + gamestate 变量 */
 .te-dlg {
   position: fixed;

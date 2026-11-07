@@ -27,13 +27,25 @@ import {
 import type { BoardGeometry } from './coord.js';
 import { neighborsOf, areAdjacent } from './coord.js';
 import { hexDistance } from './distance.js';
-import type { TriggerDef, TriggerEffect, TriggerDelta, TriggerIntentType } from './trigger/types.js';
+import type {
+  PendingTrigger,
+  TriggerDef,
+  TriggerEffect,
+  TriggerDelta,
+  TriggerIntentType,
+} from './trigger/types.js';
+import type { TriggerBindings } from './trigger/engine.js';
 import type { StepDirty } from './trigger/delta.js';
 import { createStepDirty, resetStepDirty, takeDelta, trackForce, trackTile } from './trigger/delta.js';
 import { runTriggerTransaction } from './trigger/engine.js';
 import type { TriggerExecutor } from './trigger/engine.js';
 import { resolveForceRef, resolveSpawnForceRef } from './trigger/resolve.js';
 import { resolveStatePath } from './trigger/state.js';
+import {
+  EFFECT_PARAM_SPECS,
+  filterTypeOfKind,
+  isListParamKind,
+} from './trigger/params.js';
 
 // ---------- 内部上下文 ----------
 
@@ -48,6 +60,29 @@ interface Ctx {
   triggers: TriggerDef[];
   /** 触发器效果内插入的意图各自产生的增量（供引擎驱动动作类触发器） */
   intentDeltas: TriggerDelta[];
+  /** 事务开始前（最近意图执行前）的完整状态，供前态引用 */
+  beforeState: GameState | null;
+  /** 当前执行触发器的筛选列表绑定 */
+  filterBindings: TriggerBindings;
+  /** 延时触发器排期时保存的前态值 */
+  preStateValues: Record<string, unknown> | null;
+}
+
+function clonePending(p: PendingTrigger): PendingTrigger {
+  return {
+    ...p,
+    ...(p.filterBindings
+      ? {
+          filterBindings: Object.fromEntries(
+            Object.entries(p.filterBindings).map(([key, list]) => [
+              key,
+              { type: list.type, values: [...list.values] },
+            ]),
+          ),
+        }
+      : {}),
+    ...(p.preStateValues ? { preStateValues: { ...p.preStateValues } } : {}),
+  };
 }
 
 function cloneState(s: GameState): GameState {
@@ -77,7 +112,7 @@ function cloneState(s: GameState): GameState {
           ...(s.triggerRuntime.pendingChoices
             ? { pendingChoices: { ...s.triggerRuntime.pendingChoices } }
             : {}),
-          pending: s.triggerRuntime.pending.map((p) => ({ ...p })),
+          pending: s.triggerRuntime.pending.map(clonePending),
         }
       : null,
     triggers: [...s.triggers],
@@ -659,6 +694,88 @@ function runInsertedIntent(ctx: Ctx, effect: InsertIntentEffect): TriggerDelta |
   return delta.tiles.length > 0 || delta.forces.length > 0 ? delta : null;
 }
 
+function cloneEffect(effect: TriggerEffect): TriggerEffect {
+  const base = { ...effect } as TriggerEffect;
+  if ('patch' in effect && effect.patch) {
+    (base as { patch?: Record<string, unknown> }).patch = { ...effect.patch };
+  }
+  delete (base as { refs?: unknown }).refs;
+  return base;
+}
+
+function setEffectParam(
+  effect: TriggerEffect,
+  key: string,
+  value: unknown,
+  inPatch: boolean,
+): void {
+  const record = effect as unknown as Record<string, unknown>;
+  if (inPatch && record.patch && typeof record.patch === 'object') {
+    record.patch = { ...(record.patch as Record<string, unknown>), [key]: value };
+  } else {
+    record[key] = value;
+  }
+}
+
+function resolveEffectStateRef(
+  ctx: Ctx,
+  ref: { gamestate: string; at?: 'current' | 'before' },
+): unknown {
+  if (ref.at === 'before') {
+    if (
+      ctx.preStateValues &&
+      Object.prototype.hasOwnProperty.call(ctx.preStateValues, ref.gamestate)
+    ) {
+      return ctx.preStateValues[ref.gamestate];
+    }
+    return ctx.beforeState ? resolveStatePath(ctx.beforeState, ref.gamestate) : undefined;
+  }
+  return resolveStatePath(ctx.state, ref.gamestate);
+}
+
+/** 展开效果上的参数引用：state ref 取标量；condition ref 列表逐项执行或整表赋值 */
+function expandEffectRefs(ctx: Ctx, effect: TriggerEffect): TriggerEffect[] {
+  const refs = effect.refs;
+  if (!refs || Object.keys(refs).length === 0) return [effect];
+  const listRefs: Array<{ key: string; ref: string }> = [];
+  const base = cloneEffect(effect);
+  for (const [key, ref] of Object.entries(refs)) {
+    if ('ref' in ref) {
+      listRefs.push({ key, ref: ref.ref });
+      continue;
+    }
+    const value = resolveEffectStateRef(ctx, ref);
+    if (value === undefined) return [];
+    const spec = EFFECT_PARAM_SPECS[effect.op]?.[key];
+    if (!spec) return [];
+    setEffectParam(base, key, value, !!spec.inPatch);
+  }
+  if (listRefs.length === 0) return [base];
+  if (listRefs.length > 1) return [];
+  const { key, ref } = listRefs[0];
+  const list = ctx.filterBindings[ref];
+  if (!list) return [];
+  const spec = EFFECT_PARAM_SPECS[effect.op]?.[key];
+  if (!spec) return [];
+  const expected = filterTypeOfKind(spec.kind);
+  if (expected && expected !== list.type) return [];
+  if (isListParamKind(spec.kind)) {
+    const values =
+      list.type === 'tile' || list.type === 'seat'
+        ? list.values.map((v) => Number(v))
+        : [...list.values];
+    setEffectParam(base, key, values, !!spec.inPatch);
+    return [base];
+  }
+  const out: TriggerEffect[] = [];
+  for (const value of list.values) {
+    const item = cloneEffect(base);
+    setEffectParam(item, key, value, !!spec.inPatch);
+    out.push(item);
+  }
+  return out;
+}
+
 function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
   switch (effect.op) {
     case 'spawn_soldier': {
@@ -902,11 +1019,17 @@ function applyTriggerEffect(ctx: Ctx, effect: TriggerEffect): void {
 
 function makeTriggerExecutor(ctx: Ctx): TriggerExecutor {
   return {
-    execute(trigger) {
+    execute(trigger, bindings, preStateValues) {
       const before = cloneState(ctx.state);
       resetStepDirty(ctx.stepDirty);
       ctx.intentDeltas = [];
-      for (const effect of trigger.effects) applyTriggerEffect(ctx, effect);
+      ctx.filterBindings = bindings ?? {};
+      ctx.preStateValues = preStateValues ?? null;
+      for (const effect of trigger.effects) {
+        for (const expanded of expandEffectRefs(ctx, effect)) applyTriggerEffect(ctx, expanded);
+      }
+      ctx.filterBindings = {};
+      ctx.preStateValues = null;
       return takeDelta(ctx.stepDirty, ctx.state, before);
     },
     takeIntentDeltas() {
@@ -935,6 +1058,7 @@ function finishIntent(
       human: actor.kind === 'PLAYER',
       transitionCursor: { turn: beforeState.turn, seat: beforeState.currentSeat, phase: beforeState.phase },
       executor: makeTriggerExecutor(ctx),
+      beforeState,
     });
     // 触发器可能已完成控制转移或改写队伍：事务末尾统一判定胜负
     victoryJudgeEvent(ctx);
@@ -963,6 +1087,9 @@ export function applyIntent(state: GameState, envelope: IntentEnvelope): ApplyRe
     stepDirty: createStepDirty(state.triggerMode),
     triggers: state.triggers,
     intentDeltas: [],
+    beforeState: state,
+    filterBindings: {},
+    preStateValues: null,
   };
   const { actor, intent } = envelope;
   const s = ctx.state;
@@ -1153,6 +1280,9 @@ export function initState(input: InitStateInput): InitStateResult {
     stepDirty: createStepDirty(triggerMode),
     triggers: state.triggers,
     intentDeltas: [],
+    beforeState: null,
+    filterBindings: {},
+    preStateValues: null,
   };
   ctx.chain.push({ level: 1, kind: 'INIT' });
 
@@ -1191,6 +1321,9 @@ export function initState(input: InitStateInput): InitStateResult {
   state.currentSeat = startSeat;
   runPreparePhaseContent(ctx);
   if (state.triggerMode && state.triggerRuntime && state.triggers.length > 0 && !state.finished) {
+    // 初始化事务的前态：开局初始化结算完毕、触发器开始执行前的快照
+    const beforeState = cloneState(state);
+    ctx.beforeState = beforeState;
     runTriggerTransaction({
       state,
       chain: ctx.chain,
@@ -1199,6 +1332,7 @@ export function initState(input: InitStateInput): InitStateResult {
       init: true,
       transitionCursor: { turn: 1, seat: startSeat, phase: 'PREPARE' },
       executor: makeTriggerExecutor(ctx),
+      beforeState,
     });
     victoryJudgeEvent(ctx);
   }

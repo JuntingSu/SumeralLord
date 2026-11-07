@@ -292,6 +292,35 @@ const ScriptEditor = (() => {
   let uidSeq = 1;
   const nextUid = () => uidSeq++;
 
+  /** 组件编号（cid）：同一触发器内唯一，供条件/效果参数引用 */
+  let cidSeq = 1;
+  let usedCids = new Set();
+  function resetCidSeq() {
+    cidSeq = 1;
+    usedCids = new Set();
+  }
+  function registerCid(cid) {
+    if (typeof cid === 'string' && cid) usedCids.add(cid);
+  }
+  function nextCid() {
+    let cid = '';
+    do {
+      cid = `c${cidSeq}`;
+      cidSeq++;
+    } while (usedCids.has(cid));
+    usedCids.add(cid);
+    return cid;
+  }
+  function collectRawCids(raw) {
+    if (!raw || typeof raw !== 'object') return;
+    registerCid(raw.cid);
+    if (raw.op === 'and' || raw.op === 'or') {
+      (raw.items || []).forEach(collectRawCids);
+    } else if (raw.op === 'not') {
+      collectRawCids(raw.item);
+    }
+  }
+
   function defOf(kind, op) {
     return (CATALOG[kind] || []).find((d) => d.op === op) || null;
   }
@@ -323,7 +352,7 @@ const ScriptEditor = (() => {
   /** 新建节点：所有参数按声明预填默认值（没有默认值的保持空，提交时拦截） */
   function newNode(op, kind) {
     const def = defOf(kind, op);
-    const node = { uid: nextUid(), kind, op, params: {}, children: [] };
+    const node = { uid: nextUid(), cid: nextCid(), kind, op, params: {}, children: [] };
     if (def) {
       for (const p of def.params || []) node.params[p.key] = p.def ?? '';
     }
@@ -516,7 +545,14 @@ const ScriptEditor = (() => {
     const def = defOfOp(obj.op);
     if (!def) return newNode('and', 'condition');
     if (def.group) {
-      const node = { uid: nextUid(), kind: 'condition', op: obj.op, params: {}, children: [] };
+      const node = {
+        uid: nextUid(),
+        cid: obj.cid || nextCid(),
+        kind: 'condition',
+        op: obj.op,
+        params: {},
+        children: [],
+      };
       if (obj.op === 'not') {
         if (obj.item) node.children = [dslToNode(obj.item)];
       } else {
@@ -525,6 +561,10 @@ const ScriptEditor = (() => {
       return node;
     }
     const node = newNode(obj.op, def.kind);
+    if (obj.cid) {
+      node.cid = obj.cid;
+      registerCid(obj.cid);
+    }
     for (const p of def.params) {
       let v;
       if (p.patch) v = obj.patch ? obj.patch[p.key] : undefined;
@@ -547,6 +587,61 @@ const ScriptEditor = (() => {
     if (obj.op === 'show_choice_text') {
       node.choiceOptions =
         Array.isArray(obj.options) && obj.options.length ? obj.options.map((o) => String(o)) : [''];
+    }
+    // 断言路径模板的筛选参数：任意 / 条件列表引用 / 前态值（args）
+    if (obj.op === 'state_assert' && obj.args && typeof obj.args === 'object') {
+      const templateDef = StatePaths.DEFS.find(
+        (d) => d.template === obj.path && d.params.length > 0,
+      );
+      node.filterArgs = {};
+      for (const p of templateDef?.params || []) {
+        const arg = obj.args[p];
+        if (!arg) continue;
+        if (typeof arg === 'object' && arg.any === true) {
+          node.filterArgs[p] = { mode: 'any' };
+        } else if (typeof arg === 'object' && typeof arg.ref === 'string') {
+          node.filterArgs[p] = { mode: 'condition', cid: arg.ref };
+        } else if (typeof arg === 'object' && typeof arg.gamestate === 'string') {
+          node.filterArgs[p] = {
+            mode: 'state',
+            path: arg.gamestate,
+            at: arg.at === 'before' ? 'before' : 'current',
+          };
+        } else {
+          node.filterArgs[p] = { mode: 'literal', value: String(arg) };
+        }
+      }
+    }
+    // 参数引用：条件列表引用 / gamestate 当前值或前态值
+    if (obj.refs && typeof obj.refs === 'object') {
+      node.refs = {};
+      for (const [key, ref] of Object.entries(obj.refs)) {
+        if (!ref || typeof ref !== 'object') continue;
+        if (obj.op === 'state_assert') {
+          const tdef = StatePaths.DEFS.find(
+            (d) => d.template === obj.path && d.params.length > 0,
+          );
+          if (tdef && tdef.params.includes(key)) {
+            node.filterArgs = node.filterArgs || {};
+            if (typeof ref.gamestate === 'string') {
+              node.filterArgs[key] = {
+                mode: 'state',
+                path: ref.gamestate,
+                at: ref.at === 'before' ? 'before' : 'current',
+              };
+            }
+            continue;
+          }
+        }
+        if (typeof ref.ref === 'string') {
+          node.refs[key] = { mode: 'condition', cid: ref.ref };
+        } else if (typeof ref.gamestate === 'string') {
+          node.refs[key] = {
+            mode: ref.at === 'before' ? 'before' : 'state',
+            path: ref.gamestate,
+          };
+        }
+      }
     }
     return node;
   }
@@ -682,7 +777,7 @@ const ScriptEditor = (() => {
         return n;
       }
       case 'compare':
-        if (!['=', '>', '<', '>=', '<=', 'changed'].includes(v)) throw new Error('「比较」需为 = / > / < / >= / <= / changed');
+        if (!['=', '!=', '>', '<', '>=', '<=', 'changed'].includes(v)) throw new Error('「比较」需为 = / != / > / < / >= / <= / changed');
         return v;
       case 'position':
         if (!SCREEN_POSITIONS.includes(v)) throw new Error(`「${param.label}」需为 ${SCREEN_POSITIONS.join('/')}`);
@@ -727,18 +822,262 @@ const ScriptEditor = (() => {
     }
   }
 
+  // ---------- 参数引用：条件筛选列表 / gamestate 当前值·前态值 ----------
+  const PARAM_REF_KIND = {
+    tile: 'tile',
+    force: 'seat',
+    owner: 'seat',
+    trigger: 'trigger',
+    phase: 'phase',
+    int: 'int',
+    flag: 'int',
+    bool: 'bool',
+    terrain: 'terrain',
+    difficulty: 'difficulty',
+    textId: 'text',
+    varId: 'var',
+    tileList: 'tileList',
+    seatList: 'seatList',
+    orderEditor: 'seatList',
+  };
+
+  function refKindOf(node, param) {
+    if (!param) return null;
+    if (param.type === 'text') {
+      if (node.op === 'update_force' && param.key === 'name') return 'textValue';
+      if (param.key === 'var_id') return 'var';
+      return null;
+    }
+    if (
+      param.type === 'statePath' ||
+      param.type === 'stateValue' ||
+      param.type === 'textEditor' ||
+      param.type === 'placement' ||
+      param.type === 'position' ||
+      param.type === 'compare' ||
+      param.type === 'valueMode' ||
+      param.type === 'varValueMode' ||
+      param.type === 'operator'
+    ) {
+      return null;
+    }
+    return PARAM_REF_KIND[param.type] || null;
+  }
+
+  function refFilterType(kind) {
+    if (kind === 'tile' || kind === 'tileList') return 'tile';
+    if (kind === 'seat' || kind === 'owner' || kind === 'seatList') return 'seat';
+    if (kind === 'trigger') return 'trigger';
+    if (kind === 'text') return 'text';
+    if (kind === 'var') return 'var';
+    return null;
+  }
+
+  function isListRefKind(kind) {
+    return kind === 'tileList' || kind === 'seatList';
+  }
+
+  /** 状态路径类型能否作为该参数的值（与 shared params.ts 保持一致） */
+  function refStateKindOk(stateKind, kind) {
+    if (kind === 'int') return ['int', 'terrain', 'difficulty', 'seat', 'owner'].includes(stateKind);
+    if (kind === 'tile') return stateKind === 'int';
+    if (kind === 'terrain') return stateKind === 'terrain' || stateKind === 'int';
+    if (kind === 'difficulty') return stateKind === 'difficulty' || stateKind === 'int';
+    if (kind === 'seat' || kind === 'owner') {
+      return ['seat', 'owner', 'int'].includes(stateKind);
+    }
+    if (kind === 'bool') return stateKind === 'bool' || stateKind === 'textVisible';
+    if (kind === 'text' || kind === 'textValue') {
+      return ['text', 'phase', 'intent'].includes(stateKind);
+    }
+    if (kind === 'phase') return stateKind === 'phase' || stateKind === 'text';
+    if (kind === 'trigger') return stateKind === 'text';
+    if (kind === 'var') return stateKind === 'int' || stateKind === 'text';
+    return false;
+  }
+
+  function pathArgFilterType(key) {
+    if (key === 'seat') return 'seat';
+    if (key === 'tile') return 'tile';
+    if (key === 'trigger') return 'trigger';
+    if (key === 'text') return 'text';
+    if (key === 'var') return 'var';
+    return null;
+  }
+
+  function pathArgStateKindOk(stateKind, key) {
+    if (key === 'seat') return ['seat', 'owner', 'int'].includes(stateKind);
+    if (key === 'tile') return stateKind === 'int';
+    return stateKind === 'text';
+  }
+
+  function collectEditorConditions() {
+    const out = [];
+    walk(state.cond, (n) => {
+      if (n && n.kind === 'condition') out.push(n);
+      return false;
+    });
+    return out;
+  }
+
+  /** 编辑器模型下条件会产生哪种筛选列表（不产生/混合类型返回 null） */
+  function editorConditionFilterType(node, seen = new Set()) {
+    if (!node) return null;
+    if (node.uid && seen.has(node.uid)) return null;
+    if (node.uid) seen.add(node.uid);
+    if (node.op === 'not') return null;
+    if (node.op === 'and' || node.op === 'or') {
+      const types = [];
+      for (const child of node.children || []) {
+        const t = editorConditionFilterType(child, seen);
+        if (t) types.push(t);
+      }
+      if (!types.length) return null;
+      return types.every((t) => t === types[0]) ? types[0] : null;
+    }
+    if (node.op === 'state_assert') {
+      for (const [key, arg] of Object.entries(node.filterArgs || {})) {
+        if (arg.mode === 'any' || arg.mode === 'condition') return pathArgFilterType(key);
+      }
+      return null;
+    }
+    const def = defOfOp(node.op);
+    for (const [key, ref] of Object.entries(node.refs || {})) {
+      if (ref.mode !== 'condition') continue;
+      const param = def?.params?.find((p) => p.key === key);
+      const kind = refKindOf(node, param);
+      return refFilterType(kind);
+    }
+    return null;
+  }
+
+  function conditionCandidates(type) {
+    return collectEditorConditions().filter(
+      (n) => n.cid && editorConditionFilterType(n) === type,
+    );
+  }
+
+  /** 把编辑器里的参数引用校验并转成 DSL refs */
+  function buildNodeRefs(node, def, ctx) {
+    const out = {};
+    let listRefs = 0;
+    for (const [key, ref] of Object.entries(node.refs || {})) {
+      const param = def.params.find((p) => p.key === key);
+      const kind = refKindOf(node, param);
+      if (!param || !kind) throw new Error(`参数「${key}」不支持引用`);
+      if (ref.mode === 'condition') {
+        listRefs += 1;
+        if (listRefs > 1) throw new Error('每个组件最多引用一个筛选列表');
+        const type = refFilterType(kind);
+        if (!type) throw new Error(`参数「${param.label}」不能接收筛选列表`);
+        const target = conditionCandidates(type).find((n) => n.cid === ref.cid);
+        if (!target) {
+          throw new Error(`「${param.label}」引用的条件「${ref.cid}」不存在或筛选类型不匹配`);
+        }
+        out[key] = { ref: ref.cid };
+      } else if (ref.mode === 'state' || ref.mode === 'before') {
+        if (isListRefKind(kind)) throw new Error(`「${param.label}」需要筛选列表，不能引用单个值`);
+        const path = String(ref.path || '').trim();
+        const parsed = StatePaths.parse(path);
+        if (!path || !parsed || !StatePaths.validatePath(path, ctx)) {
+          throw new Error(`「${param.label}」引用的 gamestate 变量非法`);
+        }
+        if (!refStateKindOk(parsed.def.kind, kind)) {
+          throw new Error(`「${param.label}」与 gamestate 变量类型不匹配`);
+        }
+        out[key] =
+          ref.mode === 'before' ? { gamestate: path, at: 'before' } : { gamestate: path };
+      }
+    }
+    return out;
+  }
+
   function buildLeaf(node, ctx) {
     const def = defOfOp(node.op);
     if (!def || def.group) throw new Error('组件不存在');
+    const meta = {};
+    if (node.cid) meta.cid = String(node.cid);
+    const refs = node.op === 'state_assert' ? {} : buildNodeRefs(node, def, ctx);
+    if (Object.keys(refs).length) meta.refs = refs;
+    const hasRef = (key) => Object.prototype.hasOwnProperty.call(refs, key);
     if (node.op === 'state_assert') {
       const path = String(node.params.path || '').trim();
-      const parsed = StatePaths.parse(path);
-      if (!parsed) throw new Error('请选择「变量」');
-      const kind = parsed.def.kind;
+      const templateDef =
+        StatePaths.DEFS.find((d) => d.template === path && d.params.length > 0) || null;
+      const parsed = templateDef ? null : StatePaths.parse(path);
+      if (!templateDef && !parsed) throw new Error('请选择「变量」');
+      const kind = templateDef ? templateDef.kind : parsed.def.kind;
+      const nullable = templateDef ? !!templateDef.nullable : !!parsed.def.nullable;
+      let args;
+      if (templateDef) {
+        args = {};
+        let filterCount = 0;
+        for (const p of templateDef.params) {
+          const flow = node.filterArgs?.[p] || {
+            mode: 'literal',
+            value: defaultPathArg(p, mapStateCtx()),
+          };
+          if (flow.mode === 'any') {
+            filterCount += 1;
+            args[p] = { any: true };
+            continue;
+          }
+          if (flow.mode === 'condition') {
+            filterCount += 1;
+            const type = pathArgFilterType(p);
+            const target = conditionCandidates(type).find((n) => n.cid === flow.cid);
+            if (!target) throw new Error(`筛选参数「${p}」引用的条件不存在或类型不匹配`);
+            args[p] = { ref: flow.cid };
+            continue;
+          }
+          if (flow.mode === 'state') {
+            const statePath = String(flow.path || '').trim();
+            const stateParsed = statePath ? StatePaths.parse(statePath) : null;
+            if (!stateParsed || !StatePaths.validatePath(statePath, ctx)) {
+              throw new Error(`筛选参数「${p}」引用的 gamestate 变量非法`);
+            }
+            if (!pathArgStateKindOk(stateParsed.def.kind, p)) {
+              throw new Error(`筛选参数「${p}」与 gamestate 变量类型不匹配`);
+            }
+            args[p] = {
+              gamestate: statePath,
+              at: flow.at === 'before' ? 'before' : 'current',
+            };
+            continue;
+          }
+          const v = String(flow.value ?? '').trim();
+          if (!v) throw new Error(`请填写「${p}」参数`);
+          if (p === 'seat') {
+            if (v === 'player') args.seat = 'player';
+            else {
+              const n = Number(v);
+              if (!Number.isInteger(n) || !ctx.seats.has(n)) throw new Error('筛选座次非法');
+              args.seat = n;
+            }
+          } else if (p === 'tile') {
+            const n = Number(v);
+            if (!Number.isInteger(n) || n < 0 || n >= ctx.total) throw new Error('筛选地块非法');
+            args.tile = n;
+          } else if (p === 'trigger') {
+            if (!ctx.ids.has(v)) throw new Error('筛选触发器非法');
+            args.trigger = v;
+          } else if (p === 'text') {
+            if (!(ctx.texts ?? new Set()).has(v)) throw new Error('筛选文本非法');
+            args.text = v;
+          } else if (p === 'var') {
+            if (!(ctx.vars ?? new Set()).has(v)) throw new Error('筛选数字变量非法');
+            args.var = v;
+          } else {
+            args[p] = v;
+          }
+        }
+        if (filterCount > 1) throw new Error('每个断言最多设置一个筛选参数');
+      }
+      const base = { op: 'state_assert', ...meta, path, ...(args ? { args } : {}) };
       const cmp = String(node.params.cmp || '=').trim() || '=';
-      if (!['=', '>', '<', '>=', '<=', 'changed'].includes(cmp)) throw new Error('「比较」非法');
+      if (!['=', '!=', '>', '<', '>=', '<=', 'changed'].includes(cmp)) throw new Error('「比较」非法');
       // “改变”比较本步骤前后值，不需要预期值
-      if (cmp === 'changed') return { op: 'state_assert', path, cmp };
+      if (cmp === 'changed') return { ...base, cmp };
       const mode = String(node.params.value_mode || 'literal');
       if (mode === 'gamestate') {
         const ref = String(node.params.value_ref ?? '').trim();
@@ -753,26 +1092,26 @@ const ScriptEditor = (() => {
         ) {
           throw new Error('「预期值变量」非法');
         }
-        if (cmp !== '=') {
+        if (cmp !== '=' && cmp !== '!=') {
           const parsedRef = StatePaths.parse(ref);
           if (kind !== 'int' || !parsedRef || parsedRef.def.kind !== 'int') {
             throw new Error('只有整数变量支持大小比较');
           }
         }
-        return { op: 'state_assert', path, cmp, value_ref: ref };
+        return { ...base, cmp, value_ref: ref };
       }
       const raw = String(node.params.value ?? '').trim();
       if (raw === '') throw new Error('请填写「预期值」');
       if (raw === 'player' && (kind === 'seat' || kind === 'owner')) {
-        if (cmp !== '=') throw new Error('只有整数变量支持大小比较');
-        return { op: 'state_assert', path, cmp, value: 'player' };
+        if (cmp !== '=' && cmp !== '!=') throw new Error('只有整数变量支持大小比较');
+        return { ...base, cmp, value: 'player' };
       }
       if (raw === 'null') {
-        if (!(parsed.def.nullable || kind === 'owner')) throw new Error('「预期值」不能为无');
-        if (cmp !== '=') throw new Error('只有整数变量支持大小比较');
-        return { op: 'state_assert', path, cmp, value: null };
+        if (!(nullable || kind === 'owner')) throw new Error('「预期值」不能为无');
+        if (cmp !== '=' && cmp !== '!=') throw new Error('只有整数变量支持大小比较');
+        return { ...base, cmp, value: null };
       }
-      if (cmp !== '=' && kind !== 'int') throw new Error('只有整数变量支持大小比较');
+      if (cmp !== '=' && cmp !== '!=' && kind !== 'int') throw new Error('只有整数变量支持大小比较');
       let value;
       switch (kind) {
         case 'int': {
@@ -826,12 +1165,14 @@ const ScriptEditor = (() => {
         default:
           value = raw;
       }
-      return { op: 'state_assert', path, cmp, value };
+      return { ...base, cmp, value };
     }
     if (node.op === 'declare' || node.op === 'change') {
       const varId = String(node.params.var_id || '').trim();
-      if (!varId) throw new Error('请填写「ID」');
-      if (varId.length > 64) throw new Error('变量 id 不能超过 64 个字符');
+      if (!hasRef('var_id')) {
+        if (!varId) throw new Error('请填写「ID」');
+        if (varId.length > 64) throw new Error('变量 id 不能超过 64 个字符');
+      }
       const pathCtx = {
         total: ctx.total,
         seats: ctx.seats,
@@ -839,36 +1180,48 @@ const ScriptEditor = (() => {
         texts: ctx.texts ?? new Set(),
         vars: ctx.vars ?? new Set(),
       };
+      const varOut = hasRef('var_id') ? {} : { var_id: varId };
       const modeKey = node.op === 'declare' ? 'init_mode' : 'param_mode';
       const refKey = node.op === 'declare' ? 'init_ref' : 'param_ref';
       const valueKey = node.op === 'declare' ? 'init' : 'param';
+      // 新引用机制优先：refs 已提供值时不再写具体值
+      if (hasRef(valueKey)) {
+        if (node.op === 'declare') return { op: 'declare', ...meta, ...varOut };
+        const operator = String(node.params.operator || '+');
+        if (!['+', '-', '*', '/', '='].includes(operator)) throw new Error('「运算符」非法');
+        if (!hasRef('var_id') && !pathCtx.vars.has(varId)) {
+          throw new Error(`数字变量「${varId}」尚未设置`);
+        }
+        return { op: 'change', ...meta, ...varOut, operator };
+      }
       const mode = String(node.params[modeKey] || 'literal');
       if (mode === 'gamestate') {
         const ref = String(node.params[refKey] || '').trim();
         if (!ref) throw new Error('请选择「变量」');
         if (!StatePaths.validatePath(ref, pathCtx)) throw new Error('「变量」非法');
-        if (node.op === 'declare') return { op: 'declare', var_id: varId, init_ref: ref };
+        if (node.op === 'declare') return { op: 'declare', ...meta, ...varOut, init_ref: ref };
         const operator = String(node.params.operator || '+');
         if (!['+', '-', '*', '/', '='].includes(operator)) throw new Error('「运算符」非法');
-        if (!pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
-        return { op: 'change', var_id: varId, operator, param_ref: ref };
+        if (!hasRef('var_id') && !pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
+        return { op: 'change', ...meta, ...varOut, operator, param_ref: ref };
       }
       const raw = String(node.params[valueKey] ?? '').trim();
       if (raw === '') throw new Error('请填写「值」');
       const n = Number(raw);
       if (!Number.isInteger(n)) throw new Error('「值」需为整数');
-      if (node.op === 'declare') return { op: 'declare', var_id: varId, init: n };
+      if (node.op === 'declare') return { op: 'declare', ...meta, ...varOut, init: n };
       const operator = String(node.params.operator || '+');
       if (!['+', '-', '*', '/', '='].includes(operator)) throw new Error('「运算符」非法');
-      if (!pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
-      return { op: 'change', var_id: varId, operator, param: n };
+      if (!hasRef('var_id') && !pathCtx.vars.has(varId)) throw new Error(`数字变量「${varId}」尚未设置`);
+      return { op: 'change', ...meta, ...varOut, operator, param: n };
     }
     if (node.op === 'show_text' || node.op === 'show_choice_text') {
       const textId = String(node.params.text_id || '').trim();
-      if (!textId) throw new Error('请填写「文本ID」');
+      if (!hasRef('text_id') && !textId) throw new Error('请填写「文本ID」');
       const pPlacement = def.params.find((p) => p.key === 'placement');
+      const hasNodeRefs = Object.keys(refs).length > 0;
       // 引用已有选项文本：两种显示文本都统一按“再次显示选项文本”处理
-      const choiceRef = findChoiceTextDefinition(textId, node);
+      const choiceRef = hasNodeRefs ? null : findChoiceTextDefinition(textId, node);
       if (choiceRef) {
         if (
           !choiceRef.options.length ||
@@ -880,6 +1233,7 @@ const ScriptEditor = (() => {
           choiceRef.placement || String(node.params.placement || '') || 'screen:top-right';
         return {
           op: 'show_choice_text',
+          ...meta,
           text_id: textId,
           text: choiceRef.text,
           placement: convertParam(pPlacement, placementRaw, ctx),
@@ -887,13 +1241,14 @@ const ScriptEditor = (() => {
         };
       }
       // 普通显示文本引用已有普通文本
-      if (node.op === 'show_text') {
+      if (node.op === 'show_text' && !hasNodeRefs) {
         const textRef = findTextDefinition(textId, node);
         if (textRef) {
           const placementRaw =
             textRef.placement || String(node.params.placement || '') || 'screen:top-right';
           return {
             op: 'show_text',
+            ...meta,
             text_id: textId,
             text: textRef.text,
             placement: convertParam(pPlacement, placementRaw, ctx),
@@ -901,11 +1256,16 @@ const ScriptEditor = (() => {
         }
       }
     }
-    const out = { op: node.op };
+    const out = { op: node.op, ...meta };
     const patch = {};
     let patchCount = 0;
     for (const p of def.params) {
       const raw = String(node.params[p.key] ?? '').trim();
+      // 该参数由引用提供：不写具体值；patch 项保留 unchanged 占位
+      if (hasRef(p.key)) {
+        if (p.patch) patch[p.key] = 'unchanged';
+        continue;
+      }
       // 列表参数允许空（空数组 = 不包含任何项）
       if (p.type === 'tileList') {
         out[p.key] = convertParam(p, raw, ctx);
@@ -921,7 +1281,8 @@ const ScriptEditor = (() => {
       }
     }
     if (def.params.some((p) => p.patch)) {
-      if (patchCount === 0) throw new Error('「修改」类效果至少填写一个修改项');
+      const refPatch = def.params.some((p) => p.patch && hasRef(p.key));
+      if (patchCount === 0 && !refPatch) throw new Error('「修改」类效果至少填写一个修改项');
       out.patch = patch;
     }
     if (node.op === 'show_choice_text') {
@@ -938,13 +1299,14 @@ const ScriptEditor = (() => {
     if (node.kind !== 'condition') throw new Error('条件区只能放条件组件');
     const def = defOfOp(node.op);
     if (!def) throw new Error('未知条件组件');
+    const meta = node.cid ? { cid: String(node.cid) } : {};
     if (def.group) {
       if (node.op === 'not') {
         if (node.children.length !== 1) throw new Error('「不满足」需要且只能包含 1 个条件');
-        return { op: 'not', item: buildCondition(node.children[0], ctx) };
+        return { op: 'not', ...meta, item: buildCondition(node.children[0], ctx) };
       }
       if (!node.children.length) throw new Error(`「${def.label}」至少需要 1 个条件`);
-      return { op: node.op, items: node.children.map((c) => buildCondition(c, ctx)) };
+      return { op: node.op, ...meta, items: node.children.map((c) => buildCondition(c, ctx)) };
     }
     return buildLeaf(node, ctx);
   }
@@ -1804,14 +2166,166 @@ const ScriptEditor = (() => {
 
   // ---------- 参数控件 ----------
   function renderParamField(node, param) {
-    if (param.type === 'placement') return renderPlacementControl(node, param);
-    if (param.type === 'statePath') return renderStatePathControl(node, param);
-    if (param.type === 'stateValue') return renderStateValueControl(node, param);
-    if (param.type === 'textEditor') return renderTextEditorControl(node, param);
-    if (param.type === 'orderEditor') return renderOrderEditorControl(node, param);
-    if (ENUM_TYPES.has(param.type)) return renderEnumControl(node, param);
-    if (param.type === 'int' || param.type === 'flag') return withSentinels(node, param, renderNumberInput);
-    return withSentinels(node, param, renderTextInput);
+    let control;
+    if (param.type === 'placement') control = renderPlacementControl(node, param);
+    else if (param.type === 'statePath') control = renderStatePathControl(node, param);
+    else if (param.type === 'stateValue') control = renderStateValueControl(node, param);
+    else if (param.type === 'textEditor') control = renderTextEditorControl(node, param);
+    else if (param.type === 'orderEditor') control = renderOrderEditorControl(node, param);
+    else if (ENUM_TYPES.has(param.type)) control = renderEnumControl(node, param);
+    else if (param.type === 'int' || param.type === 'flag') control = withSentinels(node, param, renderNumberInput);
+    else control = withSentinels(node, param, renderTextInput);
+    return withParamRef(node, param, control);
+  }
+
+  /**
+   * 参数引用开关：值 / 条件筛选列表 / 当前值 / 前态值。
+   * 只对可引用的参数显示；引用存在时原输入仍保留但禁用。
+   */
+  function withParamRef(node, param, control) {
+    const kind = refKindOf(node, param);
+    if (!kind) return control;
+    const listType = refFilterType(kind);
+    const wrap = document.createElement('span');
+    wrap.className = 'trg-ref-wrap';
+    const target = document.createElement('span');
+    target.className = 'trg-ref-target';
+    target.appendChild(control);
+    wrap.appendChild(target);
+
+    const current = node.refs?.[param.key];
+    const modeSel = document.createElement('select');
+    modeSel.className = 'trg-ref-mode';
+    modeSel.title = '参数来源';
+    modeSel.innerHTML =
+      '<option value="">值</option>' +
+      (listType ? '<option value="condition">来自</option>' : '') +
+      '<option value="state">当前值</option>' +
+      '<option value="before">前态值</option>';
+    modeSel.value = current ? current.mode : '';
+    modeSel.addEventListener('change', () => {
+      if (!modeSel.value) {
+        if (node.refs) delete node.refs[param.key];
+      } else if (modeSel.value === 'condition') {
+        const candidates = conditionCandidates(listType);
+        node.refs = node.refs || {};
+        node.refs[param.key] = { mode: 'condition', cid: candidates[0]?.cid ?? '' };
+      } else {
+        node.refs = node.refs || {};
+        node.refs[param.key] = { mode: modeSel.value, path: 'gamestate.turn' };
+      }
+      renderEditor();
+    });
+    wrap.appendChild(modeSel);
+
+    if (current && current.mode === 'condition') {
+      const refSel = document.createElement('select');
+      refSel.className = 'trg-ref-cid';
+      const candidates = conditionCandidates(listType);
+      refSel.innerHTML = candidates
+        .map((n) => `<option value="${esc(n.cid)}">${esc(n.cid)} ${esc(defOfOp(n.op)?.label || n.op)}</option>`)
+        .join('');
+      if (!candidates.length) {
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = '没有匹配的筛选条件';
+        refSel.appendChild(none);
+      }
+      refSel.value = current.cid;
+      refSel.addEventListener('change', () => {
+        current.cid = refSel.value;
+      });
+      wrap.appendChild(refSel);
+    } else if (current && (current.mode === 'state' || current.mode === 'before')) {
+      wrap.appendChild(renderStateRefEditor(node, param, kind, current));
+    }
+
+    if (current) {
+      wrap.classList.add('is-ref');
+      target
+        .querySelectorAll('input, select, textarea, button')
+        .forEach((el) => { el.disabled = true; });
+      target.title = '该参数由引用提供';
+    }
+    return wrap;
+  }
+
+  /** 单个值引用：选择 gamestate 路径（当前值/前态值由 mode 决定） */
+  function renderStateRefEditor(node, param, kind, ref) {
+    const box = document.createElement('span');
+    box.className = 'trg-state-ref';
+    const ctx = mapStateCtx();
+    const parsed = StatePaths.parse(ref.path || '');
+    const def = parsed ? parsed.def : StatePaths.DEFS[0];
+    const args = {};
+    for (const p of def.params) {
+      args[p] = parsed && parsed.args[p] !== undefined ? parsed.args[p] : defaultPathArg(p, ctx);
+    }
+    const defSel = document.createElement('select');
+    defSel.className = 'trg-ref-path-def';
+    for (const [g, label] of Object.entries(StatePaths.GROUPS)) {
+      const defs = StatePaths.DEFS.filter((d) => d.group === g);
+      if (!defs.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = label;
+      for (const d of defs) {
+        const o = document.createElement('option');
+        o.value = d.template;
+        o.textContent = d.label;
+        og.appendChild(o);
+      }
+      defSel.appendChild(og);
+    }
+    defSel.value = def.template;
+    const sync = () => {
+      ref.path = StatePaths.fill(defSel.value, args);
+    };
+    defSel.addEventListener('change', () => {
+      const next = StatePaths.DEFS.find((d) => d.template === defSel.value);
+      for (const p of next.params) {
+        if (args[p] === undefined) args[p] = defaultPathArg(p, ctx);
+      }
+      sync();
+      renderEditor();
+    });
+    box.appendChild(defSel);
+    for (const p of def.params) {
+      let el;
+      if (p === 'seat') {
+        el = document.createElement('select');
+        el.innerHTML =
+          ctx.seats.map((s) => `<option value="${s.seat}">P${s.seat}</option>`).join('') +
+          '<option value="player">玩家</option>';
+      } else if (p === 'tile') {
+        el = document.createElement('input');
+        el.type = 'number';
+        el.min = '0';
+        el.step = '1';
+      } else if (p === 'text') {
+        el = document.createElement('select');
+        el.innerHTML = ctx.texts.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      } else if (p === 'var') {
+        el = document.createElement('select');
+        el.innerHTML = ctx.vars.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      } else {
+        el = document.createElement('select');
+        el.innerHTML = ctx.ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      }
+      el.className = 'trg-ref-path-arg';
+      el.value = args[p] ?? '';
+      el.addEventListener('change', () => {
+        args[p] = el.value;
+        sync();
+      });
+      if (el.tagName === 'INPUT') {
+        el.addEventListener('input', () => {
+          args[p] = el.value;
+          sync();
+        });
+      }
+      box.appendChild(el);
+    }
+    return box;
   }
 
   /** 自由输入 + 特殊值（any / unchanged / auto / flipped）的下拉 */
@@ -2005,7 +2519,20 @@ const ScriptEditor = (() => {
     return ctx.ids[0] ?? '';
   }
 
+  /**
+   * 状态路径控件：
+   *   - 具体路径 → 原有选择器
+   *   - 模板路径（{tile} 等）→ 每个动态参数可单独设为 具体值 / 任意（筛选）/ 来自
+   */
   function renderStatePathControl(node, param) {
+    const raw = String(node.params[param.key] || '');
+    const templateDef =
+      StatePaths.DEFS.find((d) => d.template === raw && d.params.length > 0) || null;
+    if (templateDef) return renderTemplateStatePathControl(node, param, templateDef);
+    return renderConcreteStatePathControl(node, param);
+  }
+
+  function renderConcreteStatePathControl(node, param) {
     const ctx = mapStateCtx();
     const parsed = StatePaths.parse(node.params[param.key] || '');
     const def = parsed ? parsed.def : StatePaths.DEFS[0];
@@ -2067,6 +2594,28 @@ const ScriptEditor = (() => {
     wrap.appendChild(defSel);
 
     for (const p of def.params) {
+      const modeSel = document.createElement('select');
+      modeSel.className = 'trg-path-arg-mode';
+      modeSel.title = '该参数的筛选方式';
+      modeSel.innerHTML =
+        '<option value="literal">具体值</option>' +
+        '<option value="any">任意</option>' +
+        '<option value="condition">来自</option>';
+      modeSel.addEventListener('change', () => {
+        node.filterArgs = node.filterArgs || {};
+        if (modeSel.value === 'any') {
+          node.filterArgs[p] = { mode: 'any' };
+        } else if (modeSel.value === 'condition') {
+          const type = pathArgFilterType(p);
+          const candidates = conditionCandidates(type);
+          node.filterArgs[p] = { mode: 'condition', cid: candidates[0]?.cid ?? '' };
+        } else {
+          node.filterArgs[p] = { mode: 'literal', value: args[p] };
+        }
+        node.params[param.key] = def.template;
+        renderEditor();
+      });
+      wrap.appendChild(modeSel);
       let el;
       if (p === 'seat') {
         el = document.createElement('select');
@@ -2140,6 +2689,132 @@ const ScriptEditor = (() => {
     const repairText = def.params.includes('text') && ctx.texts.length > 0 && filled !== node.params[param.key];
     const repairVar = def.params.includes('var') && ctx.vars.length > 0 && filled !== node.params[param.key];
     if (!node.params[param.key] || repairText || repairVar) node.params[param.key] = filled;
+    return wrap;
+  }
+
+  /** 模板路径：每个动态参数单独选择 具体值 / 任意（筛选）/ 来自 */
+  function renderTemplateStatePathControl(node, param, templateDef) {
+    const ctx = mapStateCtx();
+    node.filterArgs = node.filterArgs || {};
+    for (const p of templateDef.params) {
+      if (!node.filterArgs[p]) {
+        node.filterArgs[p] = { mode: 'literal', value: defaultPathArg(p, ctx) };
+      }
+    }
+    const wrap = document.createElement('span');
+    wrap.className = 'trg-value-wrap trg-statepath trg-statepath-filter';
+
+    const defSel = document.createElement('select');
+    defSel.className = 'trg-param trg-path-def';
+    defSel.dataset.uid = String(node.uid);
+    defSel.dataset.key = param.key;
+    defSel.dataset.type = param.type;
+    for (const [g, label] of Object.entries(StatePaths.GROUPS)) {
+      const defs = StatePaths.DEFS.filter((d) => d.group === g);
+      if (!defs.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = label;
+      for (const d of defs) {
+        const o = document.createElement('option');
+        o.value = d.template;
+        o.textContent = d.label;
+        og.appendChild(o);
+      }
+      defSel.appendChild(og);
+    }
+    defSel.value = templateDef.template;
+    fitWidth(defSel, templateDef.label);
+    defSel.addEventListener('change', () => {
+      const next = StatePaths.DEFS.find((d) => d.template === defSel.value);
+      node.params[param.key] = next.template;
+      node.filterArgs = {};
+      for (const p of next.params) {
+        node.filterArgs[p] = { mode: 'literal', value: defaultPathArg(p, ctx) };
+      }
+      renderEditor();
+    });
+    wrap.appendChild(defSel);
+
+    for (const p of templateDef.params) {
+      const flow = node.filterArgs[p];
+      const modeSel = document.createElement('select');
+      modeSel.className = 'trg-path-arg-mode';
+      modeSel.title = '该参数的筛选方式';
+      modeSel.innerHTML =
+        '<option value="literal">具体值</option>' +
+        '<option value="any">任意</option>' +
+        '<option value="condition">来自</option>';
+      modeSel.value = flow.mode === 'any' || flow.mode === 'condition' ? flow.mode : 'literal';
+      modeSel.addEventListener('change', () => {
+        if (modeSel.value === 'any') {
+          node.filterArgs[p] = { mode: 'any' };
+        } else if (modeSel.value === 'condition') {
+          const type = pathArgFilterType(p);
+          const candidates = conditionCandidates(type);
+          node.filterArgs[p] = { mode: 'condition', cid: candidates[0]?.cid ?? '' };
+        } else {
+          node.filterArgs[p] = { mode: 'literal', value: defaultPathArg(p, ctx) };
+        }
+        renderEditor();
+      });
+      wrap.appendChild(modeSel);
+
+      if (flow.mode === 'condition') {
+        const candidates = conditionCandidates(pathArgFilterType(p));
+        const refSel = document.createElement('select');
+        refSel.className = 'trg-path-arg-ref';
+        refSel.innerHTML = candidates
+          .map((n) => `<option value="${esc(n.cid)}">${esc(n.cid)} ${esc(defOfOp(n.op)?.label || n.op)}</option>`)
+          .join('');
+        if (!candidates.length) {
+          refSel.innerHTML = '<option value="">没有匹配的筛选条件</option>';
+        }
+        refSel.value = flow.cid || '';
+        refSel.addEventListener('change', () => {
+          flow.cid = refSel.value;
+        });
+        wrap.appendChild(refSel);
+        continue;
+      }
+      if (flow.mode === 'any') {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = '任意';
+        wrap.appendChild(hint);
+        continue;
+      }
+
+      let el;
+      if (p === 'seat') {
+        el = document.createElement('select');
+        el.innerHTML =
+          ctx.seats.map((s) => `<option value="${s.seat}">P${s.seat} ${esc(s.name || '')}</option>`).join('') +
+          '<option value="player">玩家</option>';
+      } else if (p === 'tile') {
+        el = document.createElement('input');
+        el.type = 'number';
+        el.min = '0';
+        el.max = String(Math.max(0, ctx.total - 1));
+        el.step = '1';
+      } else if (p === 'text') {
+        el = document.createElement('select');
+        el.innerHTML = ctx.texts.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      } else if (p === 'var') {
+        el = document.createElement('select');
+        el.innerHTML = ctx.vars.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      } else {
+        el = document.createElement('select');
+        el.innerHTML = ctx.ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      }
+      el.className = 'trg-param trg-path-arg';
+      el.value = String(flow.value ?? '');
+      const onChange = () => {
+        flow.value = el.value;
+      };
+      el.addEventListener('change', onChange);
+      if (el.tagName === 'INPUT') el.addEventListener('input', onChange);
+      wrap.appendChild(el);
+    }
     return wrap;
   }
 
@@ -2781,7 +3456,7 @@ const ScriptEditor = (() => {
       case 'difficulty':
         return MapConst.AI_LABELS[Number(v)] ?? v;
       case 'compare':
-        return { '=': '等于', '>': '>', '<': '<', '>=': '≥', '<=': '≤', changed: '改变' }[v] ?? v;
+        return { '=': '等于', '!=': '≠', '>': '>', '<': '<', '>=': '≥', '<=': '≤', changed: '改变' }[v] ?? v;
       case 'valueMode':
         return v === 'gamestate' ? '变量' : '具体值';
       case 'varValueMode':
@@ -2851,6 +3526,7 @@ const ScriptEditor = (() => {
       case 'compare':
         return [
           { value: '=', label: '等于' },
+          { value: '!=', label: '≠' },
           { value: '>', label: '>' },
           { value: '<', label: '<' },
           { value: '>=', label: '≥' },
@@ -3002,6 +3678,13 @@ const ScriptEditor = (() => {
       head.draggable = true;
       head.title = '拖动以移动/嵌套';
       head.textContent = `⠿ ${def.label}`;
+      if (node.cid) {
+        const badge = document.createElement('span');
+        badge.className = 'trg-cid';
+        badge.textContent = node.cid;
+        badge.title = '组件编号（可被同触发器的参数引用）';
+        head.appendChild(badge);
+      }
       const children = document.createElement('div');
       children.className = 'trg-children' + (node.children.length ? '' : ' empty');
       children.dataset.drop = 'group';
@@ -3063,6 +3746,14 @@ const ScriptEditor = (() => {
           if (param) el.appendChild(renderParamField(node, param));
         }
       });
+    }
+
+    if (!def.group && node.cid) {
+      const badge = document.createElement('span');
+      badge.className = 'trg-cid';
+      badge.textContent = node.cid;
+      badge.title = '组件编号（可被同触发器的参数引用）';
+      el.appendChild(badge);
     }
 
     el.addEventListener('contextmenu', (e) => {
@@ -3167,6 +3858,9 @@ const ScriptEditor = (() => {
       delay: trigger.delay ? { amount: trigger.delay.amount, unit: trigger.delay.unit } : null,
       onceMode: isNew ? 'once' : (trigger.once === true ? 'once' : 'repeat'),
     };
+    resetCidSeq();
+    collectRawCids(trigger.when);
+    (trigger.effects || []).forEach(collectRawCids);
     state.cond = trigger.when ? [dslToNode(trigger.when)] : [];
     state.eff = (trigger.effects || []).map(dslToNode);
     state.free = [];
@@ -3261,19 +3955,41 @@ const ScriptEditor = (() => {
         if (typeof p[key] === 'string' && p[key]) p[key] = bumpPathId(p[key]);
       }
     }
+    for (const [key, arg] of Object.entries(node.filterArgs || {})) {
+      if (arg.mode === 'literal' && ['trigger', 'text', 'var'].includes(key)) {
+        arg.value = bumpIdSuffix(arg.value);
+      } else if (arg.mode === 'state' && arg.path) {
+        arg.path = bumpPathId(arg.path);
+      }
+    }
+    for (const ref of Object.values(node.refs || {})) {
+      if (ref.mode !== 'condition' && ref.path) ref.path = bumpPathId(ref.path);
+    }
     for (const child of node.children || []) bumpNodeIds(child);
   }
 
-  function cloneNodeDeep(node) {
+  function cloneNodeDeep(node, cidRemap) {
     const copy = {
       uid: nextUid(),
+      cid: nextCid(),
       kind: node.kind,
       op: node.op,
       params: { ...(node.params || {}) },
       children: [],
     };
+    if (node.cid) cidRemap.set(node.cid, copy.cid);
+    if (node.refs) {
+      copy.refs = Object.fromEntries(
+        Object.entries(node.refs).map(([key, ref]) => [key, { ...ref }]),
+      );
+    }
+    if (node.filterArgs) {
+      copy.filterArgs = Object.fromEntries(
+        Object.entries(node.filterArgs).map(([key, arg]) => [key, { ...arg }]),
+      );
+    }
     if (Array.isArray(node.choiceOptions)) copy.choiceOptions = node.choiceOptions.map(String);
-    copy.children = (node.children || []).map(cloneNodeDeep);
+    copy.children = (node.children || []).map((child) => cloneNodeDeep(child, cidRemap));
     bumpNodeIds(copy);
     if (copy.op === 'show_text' || copy.op === 'show_choice_text') {
       copy.textIdOrigin = String(copy.params.text_id ?? '');
@@ -3281,10 +3997,23 @@ const ScriptEditor = (() => {
     return copy;
   }
 
+  /** 复制子树内部的引用改指向复制出来的新编号 */
+  function remapNodeCidRefs(node, cidRemap) {
+    for (const ref of Object.values(node.refs || {})) {
+      if (ref.mode === 'condition' && cidRemap.has(ref.cid)) ref.cid = cidRemap.get(ref.cid);
+    }
+    for (const arg of Object.values(node.filterArgs || {})) {
+      if (arg.mode === 'condition' && cidRemap.has(arg.cid)) arg.cid = cidRemap.get(arg.cid);
+    }
+    (node.children || []).forEach((child) => remapNodeCidRefs(child, cidRemap));
+  }
+
   function copyNode(uid) {
     const entry = findEntry(uid);
     if (!entry) return;
-    const copy = cloneNodeDeep(entry.node);
+    const cidRemap = new Map();
+    const copy = cloneNodeDeep(entry.node, cidRemap);
+    remapNodeCidRefs(copy, cidRemap);
     entry.list.splice(entry.index + 1, 0, copy);
     cancelPick();
     renderEditor();

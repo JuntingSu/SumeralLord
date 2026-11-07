@@ -132,12 +132,9 @@ const StatePaths = (() => {
     CHOOSE_TEXT: '选择选项',
   };
 
-  function validateValue(path, value, ctx) {
-    const parsed = parse(path);
-    if (!parsed) return false;
-    const def = parsed.def;
-    if (value === null) return !!def.nullable || def.kind === 'owner';
-    switch (def.kind) {
+  function validateKindValue(kind, value, ctx, nullable = false) {
+    if (value === null) return !!nullable || kind === 'owner';
+    switch (kind) {
       case 'int':
         return typeof value === 'number' && Number.isInteger(value);
       case 'bool':
@@ -166,5 +163,24 @@ const StatePaths = (() => {
     }
   }
 
-  return { GROUPS, DEFS, INTENTS, INTENT_LABELS, parse, fill, validatePath, validateValue, tokens, validateText };
+  function validateValue(path, value, ctx) {
+    const parsed = parse(path);
+    if (!parsed) return false;
+    const def = parsed.def;
+    return validateKindValue(def.kind, value, ctx, !!def.nullable);
+  }
+
+  return {
+    GROUPS,
+    DEFS,
+    INTENTS,
+    INTENT_LABELS,
+    parse,
+    fill,
+    validatePath,
+    validateValue,
+    validateKindValue,
+    tokens,
+    validateText,
+  };
 })();

@@ -52,7 +52,37 @@ export const TRIGGER_INTENT_TYPES = [
 export type TriggerIntentType = (typeof TRIGGER_INTENT_TYPES)[number];
 
 /** 断言比较方式；changed = 本步骤前后该 gamestate 值发生变化（不需要预期值） */
-export type TriggerCompare = '=' | '>' | '<' | '>=' | '<=' | 'changed';
+export type TriggerCompare = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'changed';
+
+/** 可被条件筛选/效果遍历的列表元素类型 */
+export type TriggerValueType = 'tile' | 'seat' | 'trigger' | 'text' | 'var';
+
+/** 条件产出的筛选列表 */
+export interface TriggerFilterList {
+  type: TriggerValueType;
+  values: Array<number | string>;
+}
+
+/** 参数引用：条件列表，或当前/前态 gamestate 标量 */
+export type TriggerParamRef =
+  | { ref: string }
+  | { gamestate: string; at?: 'current' | 'before' };
+
+/** 断言动态参数：具体值 / 任意（筛选）/ 条件列表引用 / gamestate 标量 */
+export type TriggerPathArg =
+  | string
+  | number
+  | { any: true }
+  | { ref: string }
+  | { gamestate: string; at?: 'current' | 'before' };
+
+/** 所有脚本组件的公共字段 */
+export interface TriggerComponentBase {
+  /** 持久化组件编号（同触发器内唯一），供其他组件引用 */
+  cid?: string;
+  /** 参数引用；patch 参数使用 "patch.<key>" */
+  refs?: Record<string, TriggerParamRef>;
+}
 
 /** 触发器里的 AI 难度取值 */
 export type TriggerDifficulty = 1 | 2 | 3 | 255;
@@ -90,7 +120,8 @@ export interface TriggerDef {
   effects: TriggerEffect[];
 }
 
-export type TriggerCondition =
+export type TriggerCondition = TriggerComponentBase &
+  (
   | { op: 'and'; items: TriggerCondition[] }
   | { op: 'or'; items: TriggerCondition[] }
   | { op: 'not'; item: TriggerCondition }
@@ -101,21 +132,25 @@ export type TriggerCondition =
   // 断言：读取白名单 gamestate 路径并与预期值比较（状态叶子；纯状态触发器走状态监听）
   // 预期值二选一：value = 具体值；value_ref = 另一个 gamestate 路径（引用的变量）
   // cmp = changed 时两者都不需要：只判定本步骤前后该路径的值是否变化
+  // args：路径模板的动态参数；允许 any（筛选通配）、条件列表引用、具体值
   | {
       op: 'state_assert';
       path: string;
       cmp: TriggerCompare;
       value?: number | string | boolean | null;
       value_ref?: string;
+      args?: Record<string, TriggerPathArg>;
     }
   // 回合类叶子：判定事件链里的阶段/回合转换
   | { op: 'phase_start'; force: TriggerAnyForceRef; phase: TriggerPhaseRef; turn: TriggerTurnRef }
   | { op: 'phase_end'; force: TriggerAnyForceRef; phase: TriggerPhaseRef; turn: TriggerTurnRef }
   | { op: 'turn_start'; turn: TriggerTurnRef }
   // 连锁/历史叶子：两类事务都可使用
-  | { op: 'trigger_fired'; trigger_id: TriggerTriggerRef };
+  | { op: 'trigger_fired'; trigger_id: TriggerTriggerRef }
+  );
 
-export type TriggerEffect =
+export type TriggerEffect = TriggerComponentBase &
+  (
   | {
       op: 'spawn_soldier';
       tile: number;
@@ -172,7 +207,8 @@ export type TriggerEffect =
   // MOVE/ATTACK 忽略移动力与连断兵移动限制，ADD_POINT 忽略回合/阶段，其余规则照常检查。
   | { op: 'insert_move_intent'; force: TriggerForceRef; from: number; to: number }
   | { op: 'insert_attack_intent'; force: TriggerForceRef; from: number; to: number }
-  | { op: 'insert_add_point_intent'; force: TriggerForceRef; coordinate: number; amount: number };
+  | { op: 'insert_add_point_intent'; force: TriggerForceRef; coordinate: number; amount: number }
+  );
 
 /** 延时触发器排期项（随 GameState 存档/悔棋） */
 export interface PendingTrigger {
@@ -182,6 +218,10 @@ export interface PendingTrigger {
   dueIntentSeq?: number;
   dueTurnSeq?: number;
   dueRound?: number;
+  /** 排期时求值得到的筛选列表（供延时执行时效果引用） */
+  filterBindings?: Record<string, TriggerFilterList>;
+  /** 排期时解析好的前态标量值（path → value） */
+  preStateValues?: Record<string, unknown>;
 }
 
 /** 触发器运行时状态（仅 triggerMode 下非空） */

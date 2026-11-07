@@ -167,20 +167,40 @@ const MapValidate = (() => {
       return;
     }
     if (c.op === 'state_assert') {
-      if (typeof c.path !== 'string' || !StatePaths.validatePath(c.path, ctx)) {
+      const templateDef =
+        typeof c.path === 'string' ? StatePaths.DEFS.find((d) => d.template === c.path) : null;
+      if (templateDef) {
+        const args = c.args && typeof c.args === 'object' ? c.args : {};
+        for (const p of templateDef.params) {
+          const arg = args[p];
+          if (arg === undefined) {
+            issues.push({ level: 'error', text: `${label}：筛选参数 ${p} 缺少取值` });
+          } else if (arg && typeof arg === 'object' && typeof arg.gamestate === 'string') {
+            if (!StatePaths.validatePath(arg.gamestate, ctx)) {
+              issues.push({ level: 'error', text: `${label}：筛选参数 ${p} 引用的 gamestate 变量非法` });
+            }
+          } else if (arg && typeof arg === 'object' && (arg.any === true || typeof arg.ref === 'string')) {
+            // 任意 / 条件引用由 shared 校验完整语义
+          }
+        }
+      } else if (typeof c.path !== 'string' || !StatePaths.validatePath(c.path, ctx)) {
         issues.push({ level: 'error', text: `${label}：未知的 gamestate 变量 ${c.path}` });
-      } else if (c.cmp !== 'changed') {
+      }
+      if (c.cmp !== 'changed') {
+        const kind = templateDef ? templateDef.kind : StatePaths.parse(c.path)?.def.kind;
         if (c.value_ref !== undefined) {
           if (typeof c.value_ref !== 'string' || !StatePaths.validatePath(c.value_ref, ctx)) {
             issues.push({ level: 'error', text: `${label}：预期值引用的 gamestate 变量非法` });
-          } else if (c.cmp !== '=') {
-            const actual = StatePaths.parse(c.path);
+          } else if (c.cmp !== '=' && c.cmp !== '!=') {
             const ref = StatePaths.parse(c.value_ref);
-            if (!actual || actual.def.kind !== 'int' || !ref || ref.def.kind !== 'int') {
+            if (kind !== 'int' || !ref || ref.def.kind !== 'int') {
               issues.push({ level: 'error', text: `${label}：只有整数变量支持大小比较` });
             }
           }
-        } else if (!StatePaths.validateValue(c.path, c.value, ctx)) {
+        } else if (
+          kind &&
+          !StatePaths.validateKindValue(kind, c.value, ctx, !!templateDef?.nullable)
+        ) {
           issues.push({ level: 'error', text: `${label}：预期值与 gamestate 变量类型不匹配` });
         }
       }

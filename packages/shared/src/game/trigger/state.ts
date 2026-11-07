@@ -390,6 +390,20 @@ export function parseStatePath(path: string): ParsedStatePath | null {
   return null;
 }
 
+/** 解析带占位符的路径模板（如 gamestate.tiles.{tile}.terrain）；具体路径也接受 */
+export function parseStatePathTemplate(path: string): StatePathDef | null {
+  const parsed = parseStatePath(path);
+  if (parsed) return parsed.def;
+  return STATE_PATH_DEFS.find((def) => def.template === path) ?? null;
+}
+
+const TEMPLATE_TOKEN_RE = /\{(seat|tile|trigger|text|var)\}/g;
+
+/** 用参数填充路径模板 */
+export function fillStatePath(template: string, args: Record<string, string>): string {
+  return template.replace(TEMPLATE_TOKEN_RE, (_, key) => String(args[key] ?? ''));
+}
+
 /** 可用路径上下文（校验动态段） */
 export interface StatePathContext {
   total: number;

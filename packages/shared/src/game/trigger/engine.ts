@@ -3,17 +3,30 @@
 // 同一触发器可同时包含两类条件（回合 pass 会把本事务的动作增量一并作为上下文）。
 // 确定性顺序：转换 eventIndex 升序 → priority 降序 → 定义序 → id；单事务总触发上限。
 import type { GameEvent, GameState } from '../types.js';
-import type { PendingTrigger, TriggerDef, TriggerDelta } from './types.js';
+import type {
+  PendingTrigger,
+  TriggerCondition,
+  TriggerDef,
+  TriggerDelta,
+  TriggerFilterList,
+} from './types.js';
 import type { WorldTransition } from './types.js';
 import type { TransitionCursor } from './delta.js';
 import { collectTransitions } from './delta.js';
-import { hasEventCondition, hasWorldCondition, matchCondition } from './conditions.js';
+import { evaluateTriggerCondition, hasEventCondition, hasWorldCondition } from './conditions.js';
+import { resolveStatePath } from './state.js';
 
 export const MAX_TRIGGER_FIRINGS = 512;
 
+export type TriggerBindings = Record<string, TriggerFilterList>;
+
 export interface TriggerExecutor {
   /** 执行单个触发器的全部效果，返回该触发器造成的增量 diff */
-  execute(trigger: TriggerDef): TriggerDelta;
+  execute(
+    trigger: TriggerDef,
+    bindings?: TriggerBindings,
+    preStateValues?: Record<string, unknown>,
+  ): TriggerDelta;
   /** 取出该触发器效果内“插入意图”各自造成的增量（已并入 execute 的返回值） */
   takeIntentDeltas(): TriggerDelta[];
 }
@@ -23,12 +36,47 @@ export interface TriggerTransactionInput {
   chain: GameEvent[];
   /** 本意图（已结算）造成的增量 diff */
   intentDelta: TriggerDelta;
+  /** 事务开始前（最近意图执行前）的完整状态，供前态引用 */
+  beforeState: GameState;
   human: boolean;
   executor: TriggerExecutor;
   /** 事务开始前的阶段/回合游标（用于扫描本链转换） */
   transitionCursor: TransitionCursor;
   /** initState 的初始回合 pass：额外注入 TURN_START(1) */
   init?: boolean;
+}
+
+/** 收集触发器里所有前态 gamestate 引用路径，并在排期时解析成值 */
+function collectPreStateValues(
+  trigger: TriggerDef,
+  beforeState: GameState,
+): Record<string, unknown> | undefined {
+  const paths = new Set<string>();
+  const addRef = (ref: unknown) => {
+    if (ref && typeof ref === 'object' && 'gamestate' in ref) {
+      const obj = ref as { gamestate?: unknown; at?: unknown };
+      if (typeof obj.gamestate === 'string' && obj.at === 'before') paths.add(obj.gamestate);
+    }
+  };
+  const walkCondition = (cond: TriggerCondition) => {
+    if (cond.refs) for (const ref of Object.values(cond.refs)) addRef(ref);
+    if (cond.op === 'state_assert' && cond.args) {
+      for (const arg of Object.values(cond.args)) addRef(arg);
+    }
+    if (cond.op === 'and' || cond.op === 'or') cond.items.forEach(walkCondition);
+    else if (cond.op === 'not') walkCondition(cond.item);
+  };
+  walkCondition(trigger.when);
+  for (const effect of trigger.effects) {
+    if (effect.refs) for (const ref of Object.values(effect.refs)) addRef(ref);
+  }
+  if (!paths.size) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const path of paths) {
+    const value = resolveStatePath(beforeState, path);
+    if (value !== undefined) out[path] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 interface WorldPassState {
@@ -67,7 +115,12 @@ function isEligible(def: TriggerDef, state: GameState, firedThisTx: ReadonlySet<
   return true;
 }
 
-function scheduleDelay(def: TriggerDef, state: GameState): void {
+function scheduleDelay(
+  def: TriggerDef,
+  state: GameState,
+  bindings?: TriggerBindings,
+  beforeState?: GameState,
+): void {
   const runtime = state.triggerRuntime;
   if (!runtime || !def.delay) return;
   if (def.once && (runtime.firedCounts[def.id] ?? 0) > 0) return;
@@ -76,6 +129,9 @@ function scheduleDelay(def: TriggerDef, state: GameState): void {
   if (def.delay.unit === 'intent') pending.dueIntentSeq = runtime.intentSeq + def.delay.amount;
   else if (def.delay.unit === 'turn') pending.dueTurnSeq = runtime.turnSeq + def.delay.amount;
   else pending.dueRound = state.turn + def.delay.amount;
+  if (bindings && Object.keys(bindings).length > 0) pending.filterBindings = bindings;
+  const preStateValues = beforeState ? collectPreStateValues(def, beforeState) : undefined;
+  if (preStateValues) pending.preStateValues = preStateValues;
   runtime.pending.push(pending);
 }
 
@@ -93,19 +149,19 @@ function runActionPass(
   const order = triggerOrder(state);
   // 纯状态触发器（无事件叶子）只在状态监听 pass 求值，避免随每个 delta 重复触发
   const defs = sortDefs(state.triggers.filter((t) => hasEventCondition(t.when)), order);
-  const queue: TriggerDef[] = [];
+  const queue: Array<{ def: TriggerDef; bindings: TriggerBindings }> = [];
   const queued = new Set<string>();
   const scheduled = new Set<string>();
 
   const sortQueue = (): void => {
     queue.sort((a, b) => {
-      const pa = a.priority ?? 0;
-      const pb = b.priority ?? 0;
+      const pa = a.def.priority ?? 0;
+      const pb = b.def.priority ?? 0;
       if (pa !== pb) return pb - pa;
-      const oa = order.get(a.id) ?? 0;
-      const ob = order.get(b.id) ?? 0;
+      const oa = order.get(a.def.id) ?? 0;
+      const ob = order.get(b.def.id) ?? 0;
       if (oa !== ob) return oa - ob;
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      return a.def.id < b.def.id ? -1 : a.def.id > b.def.id ? 1 : 0;
     });
   };
 
@@ -113,14 +169,20 @@ function runActionPass(
     for (const def of defs) {
       if (queued.has(def.id)) continue;
       if (!isEligible(def, state, firedThisTx)) continue;
-      if (!matchCondition(def.when, { delta }, firedThisTx, state)) continue;
+      const result = evaluateTriggerCondition(
+        def.when,
+        { delta, beforeState: input.beforeState },
+        firedThisTx,
+        state,
+      );
+      if (!result.pass) continue;
       if (def.delay) {
         if (scheduled.has(def.id)) continue;
-        scheduleDelay(def, state);
+        scheduleDelay(def, state, result.bindings, input.beforeState);
         scheduled.add(def.id);
         continue;
       }
-      queue.push(def);
+      queue.push({ def, bindings: result.bindings });
       queued.add(def.id);
     }
     sortQueue();
@@ -133,7 +195,8 @@ function runActionPass(
       chain.push({ level: 5, kind: 'TRIGGER_OVERFLOW', transactionSeq: runtime.transactionSeq });
       break;
     }
-    const def = queue.shift()!;
+    const work = queue.shift()!;
+    const def = work.def;
     queued.delete(def.id);
     if (!isEligible(def, state, firedThisTx)) continue;
 
@@ -142,7 +205,7 @@ function runActionPass(
     counter.value += 1;
     chain.push({ level: 5, kind: 'TRIGGER_FIRE', triggerId: def.id });
 
-    const delta = executor.execute(def);
+    const delta = executor.execute(def, work.bindings);
     enqueueMatching(delta);
     if (state.finished) break;
   }
@@ -153,6 +216,7 @@ function runActionPass(
 interface WorldWork {
   def: TriggerDef;
   transition: WorldTransition;
+  bindings: TriggerBindings;
 }
 
 function createWorldPassState(input: TriggerTransactionInput): WorldPassState {
@@ -206,14 +270,20 @@ function runWorldPass(
         const key = workKey(def, tx);
         if (world.seen.has(key)) continue;
         if (!isEligible(def, state, firedThisTx)) continue;
-        if (!matchCondition(def.when, { transition: tx, delta: actionDelta }, firedThisTx, state)) continue;
+        const result = evaluateTriggerCondition(
+          def.when,
+          { transition: tx, delta: actionDelta, beforeState: input.beforeState },
+          firedThisTx,
+          state,
+        );
+        if (!result.pass) continue;
         if (def.delay) {
           if (world.scheduled.has(def.id)) continue;
-          scheduleDelay(def, state);
+          scheduleDelay(def, state, result.bindings, input.beforeState);
           world.scheduled.add(def.id);
           continue;
         }
-        queue.push({ def, transition: tx });
+        queue.push({ def, transition: tx, bindings: result.bindings });
         world.seen.add(key);
       }
     }
@@ -255,7 +325,7 @@ function runWorldPass(
     counter.value += 1;
     chain.push({ level: 5, kind: 'TRIGGER_FIRE', triggerId: work.def.id });
 
-    executor.execute(work.def);
+    executor.execute(work.def, work.bindings);
 
     // 回合类触发器内插入的意图也应正常驱动动作类触发器（增量已并入全量 delta，需单独入队）
     const intentDeltas = executor.takeIntentDeltas();
@@ -293,20 +363,27 @@ function runStateWatchPass(
   const defs = sortDefs(state.triggers.filter((t) => !hasEventCondition(t.when)), order);
   if (defs.length === 0) return;
   const watch = (runtime.stateWatch ??= {});
-  const toFire: TriggerDef[] = [];
+  const toFire: Array<{ def: TriggerDef; bindings: TriggerBindings }> = [];
   for (const def of defs) {
     const prev = watch[def.id] ?? false;
-    const now = matchCondition(def.when, {}, firedThisTx, state);
+    const result = evaluateTriggerCondition(
+      def.when,
+      { beforeState: input.beforeState },
+      firedThisTx,
+      state,
+    );
+    const now = result.pass;
     watch[def.id] = now;
     if (!now || prev) continue;
     if (!isEligible(def, state, firedThisTx)) continue;
     if (def.delay) {
-      scheduleDelay(def, state);
+      scheduleDelay(def, state, result.bindings, input.beforeState);
       continue;
     }
-    toFire.push(def);
+    toFire.push({ def, bindings: result.bindings });
   }
-  for (const def of toFire) {
+  for (const work of toFire) {
+    const def = work.def;
     if (counter.value >= MAX_TRIGGER_FIRINGS) {
       chain.push({ level: 5, kind: 'TRIGGER_OVERFLOW', transactionSeq: runtime.transactionSeq });
       break;
@@ -317,7 +394,7 @@ function runStateWatchPass(
     runtime.firedCounts[def.id] = (runtime.firedCounts[def.id] ?? 0) + 1;
     counter.value += 1;
     chain.push({ level: 5, kind: 'TRIGGER_FIRE', triggerId: def.id });
-    const delta = executor.execute(def);
+    const delta = executor.execute(def, work.bindings);
     // 效果内插入的意图仍按现有规则驱动动作类触发器（不属于状态监听的级联）
     const intentDeltas = executor.takeIntentDeltas();
     if (intentDeltas.length > 0) {
@@ -373,7 +450,7 @@ function runDueDelays(
     executed = true;
     chain.push({ level: 5, kind: 'TRIGGER_FIRE', triggerId: def.id });
 
-    const delta = executor.execute(def);
+    const delta = executor.execute(def, pending.filterBindings, pending.preStateValues);
     const intentDeltas = executor.takeIntentDeltas();
     // 玩家事务内，延时效果可继续触发动作类；AI 事务内只有“插入意图”会驱动动作类
     if (input.human) {

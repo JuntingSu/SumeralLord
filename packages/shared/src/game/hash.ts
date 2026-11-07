@@ -53,7 +53,15 @@ export function hashGameState(state: GameState): string {
           pendingChoices: state.triggerRuntime.pendingChoices ?? {},
           pending: [...state.triggerRuntime.pending]
             .sort((a, b) => a.serial - b.serial)
-            .map((p) => [p.triggerId, p.serial, p.dueIntentSeq ?? -1, p.dueTurnSeq ?? -1, p.dueRound ?? -1]),
+            .map((p) => [
+              p.triggerId,
+              p.serial,
+              p.dueIntentSeq ?? -1,
+              p.dueTurnSeq ?? -1,
+              p.dueRound ?? -1,
+              p.filterBindings ?? null,
+              p.preStateValues ?? null,
+            ]),
         }
       : null,
     fogOverrides: state.fogOverrides

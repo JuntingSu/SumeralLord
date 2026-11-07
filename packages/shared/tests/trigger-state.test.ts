@@ -112,6 +112,21 @@ describe('state_assert', () => {
     ).toBe(false);
   });
 
+  it('cmp=!= 判定不相等', () => {
+    const state = start([]);
+    const fired = new Set<string>();
+    expect(
+      matchCondition({ op: 'state_assert', path: 'gamestate.turn', cmp: '!=', value: 2 }, {}, fired, state),
+    ).toBe(true);
+    expect(
+      matchCondition({ op: 'state_assert', path: 'gamestate.turn', cmp: '!=', value: 1 }, {}, fired, state),
+    ).toBe(false);
+    // ≠ 不要求整数类型
+    expect(
+      matchCondition({ op: 'state_assert', path: 'gamestate.phase', cmp: '!=', value: 'END' }, {}, fired, state),
+    ).toBe(true);
+  });
+
   it('cmp=changed 比较本步骤前后的值', () => {
     const before = start([]);
     const after = start([]);
@@ -576,6 +591,11 @@ describe('状态路径与文本校验', () => {
       { id: 'ok', when: { op: 'state_assert', path: 'gamestate.turn', cmp: '>=', value: 1 }, effects: text('x') },
     ]);
     expect(validateMapData(okCompare)).toBe(true);
+
+    const notEqualCompare = map([
+      { id: 'ok', when: { op: 'state_assert', path: 'gamestate.phase', cmp: '!=', value: 'END' }, effects: text('x') },
+    ]);
+    expect(validateMapData(notEqualCompare)).toBe(true);
 
     const changedWithoutValue = map([
       {
