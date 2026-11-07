@@ -41,7 +41,12 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <header className="flex items-center justify-between border-b border-slate-700 px-6 py-3">
-        <h1 className="text-lg font-bold">个人中心</h1>
+        <div className="flex items-center gap-3">
+          <Link to="/modes" className="text-sm text-emerald-400 hover:underline">
+            ← 模式选择
+          </Link>
+          <h1 className="text-lg font-bold">个人中心</h1>
+        </div>
         <Link to="/lobby" className="rounded bg-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-600">
           ← 返回大厅
         </Link>
