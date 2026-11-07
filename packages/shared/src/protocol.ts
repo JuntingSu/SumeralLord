@@ -68,6 +68,8 @@ export const CreateRoomBodySchema = z.object({
   aiTakeover: z.boolean().optional(),
   usePersonalSkin: z.boolean().optional(),
   mapId: z.string().min(1),
+  /** 地图来源；缺省官方多人库 */
+  mapSource: z.enum(['official', 'community']).optional(),
   timeSettings: TimeSettingsSchema,
 });
 export type CreateRoomBody = z.infer<typeof CreateRoomBodySchema>;
@@ -98,7 +100,10 @@ export type KickBody = z.infer<typeof KickBodySchema>;
 export const TransferHostBodySchema = z.object({ toPlayerId: z.number().int().positive() });
 export type TransferHostBody = z.infer<typeof TransferHostBodySchema>;
 
-export const ChangeMapBodySchema = z.object({ mapId: z.string().min(1) });
+export const ChangeMapBodySchema = z.object({
+  mapId: z.string().min(1),
+  mapSource: z.enum(['official', 'community']).optional(),
+});
 export type ChangeMapBody = z.infer<typeof ChangeMapBodySchema>;
 
 export const ReadyBodySchema = z.object({ ready: z.boolean() });

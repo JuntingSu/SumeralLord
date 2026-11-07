@@ -75,6 +75,13 @@ export default function Profile() {
             <span className="text-slate-500">›</span>
           </Link>
           <Link
+            to="/profile/works"
+            className="flex items-center justify-between rounded-lg bg-slate-800 px-5 py-4 hover:bg-slate-700"
+          >
+            <span className="text-sm font-medium">🗺 我的作品</span>
+            <span className="text-slate-500">›</span>
+          </Link>
+          <Link
             to="/profile/settings"
             className="flex items-center justify-between rounded-lg bg-slate-800 px-5 py-4 hover:bg-slate-700"
           >

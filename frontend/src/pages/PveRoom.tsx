@@ -15,6 +15,7 @@ import { useAuth } from '../stores/auth';
 import { usePve } from '../stores/pve';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
+import { CommunityMapBrowser } from '../components/CommunityMapBrowser';
 import { flagImgUrl } from '../lib/flags';
 import { decodeMapCode } from '../lib/mapcode';
 import { normalizeImportedMap, readMapFile } from '../lib/mapJson';
@@ -60,6 +61,7 @@ export default function PveRoom() {
   const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
   const [codeBusy, setCodeBusy] = useState(false);
+  const [communityOpen, setCommunityOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // 从地图编辑器「测试」进入：返回时带当前地图回到编辑器
@@ -73,9 +75,12 @@ export default function PveRoom() {
   })();
 
   const backToMapEditor = () => {
+    let workId: string | null = null;
     try {
+      const originId = sessionStorage.getItem('dl_pve_test_origin');
+      // 测试期间若在 PVE 房间换了图，返回的已不是原个人作品，不能继续关联覆盖它
+      const sameMap = !room.mapId || room.mapId === originId;
       if (room.map) {
-        const originId = sessionStorage.getItem('dl_pve_test_origin');
         sessionStorage.setItem(
           'dl_editor_map_v1',
           JSON.stringify({ id: room.mapId || originId || room.map.id, map: room.map }),
@@ -83,12 +88,16 @@ export default function PveRoom() {
       } else {
         sessionStorage.removeItem('dl_editor_map_v1');
       }
+      workId = sameMap ? sessionStorage.getItem('dl_pve_work_v1') : null;
       sessionStorage.removeItem('dl_pve_test_mode');
       sessionStorage.removeItem('dl_pve_test_origin');
+      sessionStorage.removeItem('dl_pve_work_v1');
     } catch {
       // 本地存储不可用时仍返回编辑器（编辑器会加载服务器默认地图）
     }
-    window.location.href = '/mapeditor/?embed=1';
+    window.location.href = workId
+      ? `/mapeditor/?embed=1&work=${encodeURIComponent(workId)}`
+      : '/mapeditor/?embed=1';
   };
 
   const loadSaveMeta = useCallback(async () => {
@@ -121,7 +130,7 @@ export default function PveRoom() {
         const parsed = JSON.parse(raw) as { map?: unknown };
         const res = normalizeImportedMap(parsed.map ?? parsed, 'mapeditor');
         if (res.ok) {
-          setMap(res.map, null);
+          setMap(res.map, null, 'local');
           setNotice(`已从地图编辑器导入「${res.map.title}」`);
         } else {
           setError(res.error);
@@ -145,7 +154,7 @@ export default function PveRoom() {
     setNotice(null);
     try {
       const map = await getPveMap(id);
-      setMap(map, id);
+      setMap(map, id, 'pve');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '地图加载失败');
     } finally {
@@ -159,7 +168,7 @@ export default function PveRoom() {
     setNotice(null);
     try {
       const map = await randomPveMap(room.mapId ?? undefined);
-      setMap(map, map.id);
+      setMap(map, map.id, 'pve');
       setNotice(`随机到「${map.title}」`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '随机地图失败，请确认地图库里有可玩地图');
@@ -186,7 +195,7 @@ export default function PveRoom() {
         setCodeError(res.error);
         return;
       }
-      setMap(res.map, null);
+      setMap(res.map, null, 'local');
       setCodeOpen(false);
       setCodeInput('');
       setError(null);
@@ -207,7 +216,7 @@ export default function PveRoom() {
         setError(res.error);
         return;
       }
-      setMap(res.map, null);
+      setMap(res.map, null, 'local');
       setNotice(`已导入「${res.map.title}」`);
     } catch {
       setError('读取地图文件失败');
@@ -244,6 +253,7 @@ export default function PveRoom() {
       gameId: `pve-${randomToken(8)}`,
       map,
       mapTitle: map.title,
+      mapSource: room.mapSource,
       seatAssignments,
       seed: randomToken(16),
       timeSettings: { ...TIME_DEFAULTS },
@@ -507,6 +517,13 @@ export default function PveRoom() {
               >
                 📂 JSON 导入
               </button>
+              <button
+                type="button"
+                onClick={() => setCommunityOpen(true)}
+                className="rounded bg-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-600"
+              >
+                🌐 查看社区地图
+              </button>
               <input
                 ref={fileRef}
                 type="file"
@@ -600,6 +617,25 @@ export default function PveRoom() {
             </div>
           </div>
         </div>
+      )}
+
+      {communityOpen && (
+        <CommunityMapBrowser
+          onClose={() => setCommunityOpen(false)}
+          onPick={(map) => {
+            if (map.player_num < 2) {
+              setError('社区地图至少需要 2 个势力才能进行 PVE 对局');
+              return;
+            }
+            if (map.row > 255 || map.column > 255) {
+              setError('该地图尺寸超过 PVE 上限（255×255）');
+              return;
+            }
+            setError(null);
+            setMap(map, map.id, 'community');
+            setNotice(`已导入社区地图「${map.title}」`);
+          }}
+        />
       )}
     </div>
   );

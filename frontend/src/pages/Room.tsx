@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { MapFullData, MapMeta, RoomPlayer, RoomSettingsPatch } from '@dl/shared';
 import { TIME_OPTIONS, AI_LEVEL, AI_LEVEL_LABEL } from '@dl/shared';
 import { getMap, listMaps } from '../api/map';
+import { getCommunityMap, listAllCommunityMaps } from '../api/userMaps';
 import {
   changeRoomMap,
   disbandRoom,
@@ -25,6 +26,7 @@ import { WsClient } from '../ws/client';
 import { avatarUrl, flagImgUrl } from '../lib/flags';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
+import MapSourceTabs, { type MapSourceTab } from '../components/MapSourceTabs';
 import Chat from '../components/Chat';
 import GameChat from '../components/GameChat';
 
@@ -75,6 +77,7 @@ export default function Room() {
 
   const [mapFull, setMapFull] = useState<MapFullData | null>(null);
   const [maps, setMaps] = useState<MapMeta[]>([]);
+  const [pickerSource, setPickerSource] = useState<MapSourceTab>('official');
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WsClient | null>(null);
   const mapPreviewRef = useRef<HTMLDivElement>(null);
@@ -155,10 +158,11 @@ export default function Room() {
     }
     if (mapFull?.id === room.mapId) return;
     setMapFull(null);
-    getMap(room.mapId)
+    const loader = room.mapSource === 'community' ? getCommunityMap : getMap;
+    loader(room.mapId)
       .then(setMapFull)
       .catch(() => setMapFull(null));
-  }, [room?.mapId, room?.random1v1Map, room, mapFull?.id]);
+  }, [room?.mapId, room?.mapSource, room?.random1v1Map, room, mapFull?.id]);
 
   // 地图预览完整可见性（移动端单列布局：整幅预览未完整进入视口时，左下角浮动小预览）
   useEffect(() => {
@@ -178,12 +182,20 @@ export default function Room() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // 换图候选
+  // 换图候选：跟随当前地图来源
   useEffect(() => {
-    listMaps()
+    const loader =
+      pickerSource === 'community'
+        ? listAllCommunityMaps()
+        : listMaps();
+    loader
       .then(setMaps)
       .catch(() => undefined);
-  }, []);
+  }, [pickerSource]);
+
+  useEffect(() => {
+    if (room) setPickerSource(room.mapSource ?? 'official');
+  }, [room?.mapSource]);
 
   // 解散/被踢通知 → 回大厅
   useEffect(() => {
@@ -594,12 +606,17 @@ export default function Room() {
               </label>
               {isHost && !room.random1v1Map && (
                 <div>
-                  <span className="mb-1 block text-slate-300">更换地图（将清空势力分配）</span>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-slate-300">更换地图（将清空势力分配）</span>
+                    <MapSourceTabs value={pickerSource} onChange={setPickerSource} />
+                  </div>
                   <MapPicker
                     maps={maps}
                     value={room.mapId}
                     onChange={(id) => {
-                      if (id && id !== room.mapId) guard(() => changeRoomMap(room.id, id));
+                      if (id && (id !== room.mapId || pickerSource !== room.mapSource)) {
+                        guard(() => changeRoomMap(room.id, id, pickerSource));
+                      }
                     }}
                   />
                 </div>

@@ -64,6 +64,21 @@ body {
 #status.status { flex: 1; min-width: 180px; text-align: right; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #status.status.ok { color: var(--ok); }
 #status.status.error { color: var(--err); font-weight: 700; }
+.work-status { font-size: 11px; color: var(--dim); white-space: nowrap; }
+.work-status.dirty { color: var(--warn); }
+.tag-suggest { display: flex; flex-wrap: wrap; gap: 4px; margin: -2px 0 6px 84px; }
+.tag-suggest button {
+  font-size: 11px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #1b1e26;
+  color: var(--dim);
+  cursor: pointer;
+}
+.tag-suggest button:hover { border-color: var(--accent); color: var(--text); }
+.tag-suggest button.active { border-color: var(--ok); color: var(--ok); background: rgba(87, 199, 133, 0.08); }
+.unsynced-time { font-size: 12px; color: var(--dim); margin-top: 6px; }
 
 /* ---------- 主体三栏 ---------- */
 main { flex: 1; display: flex; min-height: 0; }
@@ -1057,7 +1072,7 @@ body.mobile #dlg-serverimport .dlg-body { padding: 12px 14px; }
 .si-results .none { color: var(--dim); padding: 8px; font-size: 12px; }
 
 /* 窄屏：上传免审核资格提示弹窗 */
-body.mobile #dlg-upload-warn .dlg-body { padding: 14px; }
+body.mobile #dlg-unsynced .dlg-body { padding: 14px; }
 .uw-text { font-size: 13px; line-height: 1.65; }
 
 /* 窄屏：涂刷底栏最左的效果预览（把兵虚拟放在地形上） */

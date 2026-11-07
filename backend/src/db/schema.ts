@@ -51,3 +51,37 @@ export const pveSaves = sqliteTable('pve_saves', {
 
 export type PveSaveRow = typeof pveSaves.$inferSelect;
 export type NewPveSaveRow = typeof pveSaves.$inferInsert;
+
+/** 个人作品 / 社区地图索引（文件存 static/user-maps/<id>.json） */
+export const userMaps = sqliteTable('user_maps', {
+  id: text('id').primaryKey(),
+  userId: integer('user_id').notNull(),
+  fileName: text('file_name').notNull(),
+  title: text('title').notNull(),
+  author: text('author').notNull(),
+  description: text('description').notNull().default(''),
+  /** JSON 字符串数组 */
+  tags: text('tags').notNull().default('[]'),
+  playerNum: integer('player_num').notNull(),
+  row: integer('row').notNull(),
+  column: integer('column').notNull(),
+  hasTriggers: integer('has_triggers').notNull().default(0),
+  published: integer('published').notNull().default(0),
+  publishedAt: integer('published_at'),
+  likes: integer('likes').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type UserMapRow = typeof userMaps.$inferSelect;
+export type NewUserMapRow = typeof userMaps.$inferInsert;
+
+/** 社区地图点赞（同一用户对同一地图只能点一次） */
+export const userMapLikes = sqliteTable('user_map_likes', {
+  mapId: text('map_id').notNull(),
+  userId: integer('user_id').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type UserMapLikeRow = typeof userMapLikes.$inferSelect;
+export type NewUserMapLikeRow = typeof userMapLikes.$inferInsert;

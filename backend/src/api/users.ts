@@ -5,7 +5,7 @@ import { AUTH, ERROR_CODES, SkinUploadBodySchema, UpdateProfileBodySchema } from
 import type { MatchRecord, ScoreChangeEntry } from '@dl/shared';
 import { authPreHandler } from '../auth/guard.js';
 import { signAuthToken } from '../auth/jwt.js';
-import { matchHistory, users } from '../db/schema.js';
+import { matchHistory, users, userMaps } from '../db/schema.js';
 import { toUserPublic } from './auth.js';
 import { hasSkin, decodePngDataUrl, writeSkin } from '../skin.js';
 import { writeRandomSkin, rgbToHex } from '../skinGen.js';
@@ -53,6 +53,14 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
       usernameChanged = true;
     }
     app.db.update(users).set(updates).where(eq(users.id, userId)).run();
+    // 个人作品索引里的作者名跟随账号改名
+    if (usernameChanged && updates.username) {
+      app.db
+        .update(userMaps)
+        .set({ author: updates.username })
+        .where(eq(userMaps.userId, userId))
+        .run();
+    }
     const fresh = app.db.select().from(users).where(eq(users.id, userId)).get()!;
     // 用户名变化 → 重签 token（JWT 内嵌 username，房间/WS 展示用）
     const token = usernameChanged ? signAuthToken({ userId: fresh.id, username: fresh.username }) : undefined;

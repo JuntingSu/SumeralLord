@@ -1,13 +1,15 @@
 // PVE 协议与默认设置（前后端共用）：PVE 对局不经过服务器，仅存档/权重走后端。
 import { AI_LEVEL } from './constants.js';
 import type { GameState, Phase, SeatAssignment } from './game/types.js';
-import type { MapFullData, RoomTimeSettings } from './types.js';
+import type { MapFullData, MapSource, RoomTimeSettings } from './types.js';
 
 /** 新建一局 PVE 所需的完整配置（仅在内存中传递；存档时固化到 PveSavePayload.config） */
 export interface PveGameConfig {
   gameId: string;
   map: MapFullData;
   mapTitle: string;
+  /** 地图来源：官方 PVE 库 / 社区 / 编辑器测试 / 本地导入 */
+  mapSource?: MapSource;
   seatAssignments: SeatAssignment[];
   seed: string;
   timeSettings: RoomTimeSettings;
@@ -39,6 +41,7 @@ export interface PveSavePayload {
   state: GameState;
   config: {
     map: MapFullData;
+    mapSource?: MapSource;
     seatAssignments: SeatAssignment[];
     fogMode: boolean;
     usePersonalSkin: boolean;

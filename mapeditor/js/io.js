@@ -115,5 +115,63 @@ const IO = (() => {
     return { username: u.username ?? '', score: Number(u.score) || 0, matches: Number(u.matches) || 0 };
   }
 
-  return { stripJsonComments, parseMapJson, downloadMap, saveToServer, loadServerMapList, loadServerMap, loadMyStats };
+  // ---------- 个人作品 ----------
+  function authHeaders(json = false) {
+    const token = authToken();
+    return {
+      ...(json ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }
+
+  async function userMapRequest(baseUrl, path, init = {}) {
+    const resp = await fetch(`${base(baseUrl)}${path}`, {
+      method: init.method || 'GET',
+      headers: authHeaders(!!init.body),
+      body: init.body,
+    });
+    const result = await resp.json().catch(() => ({}));
+    if (!resp.ok || !result.success) {
+      const err = new Error(result.message || `请求失败（${resp.status}）`);
+      err.status = resp.status;
+      throw err;
+    }
+    return result.data;
+  }
+
+  function loadUserMap(baseUrl, id) {
+    return userMapRequest(baseUrl, `/api/user-maps/${encodeURIComponent(id)}`);
+  }
+
+  function loadUserMapMeta(baseUrl, id) {
+    return userMapRequest(baseUrl, `/api/user-maps/${encodeURIComponent(id)}/meta`);
+  }
+
+  function createUserMap(baseUrl, map) {
+    return userMapRequest(baseUrl, '/api/user-maps', {
+      method: 'POST',
+      body: JSON.stringify({ map: MapData.serialize(map) }),
+    });
+  }
+
+  function updateUserMap(baseUrl, id, map) {
+    return userMapRequest(baseUrl, `/api/user-maps/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ map: MapData.serialize(map) }),
+    });
+  }
+
+  return {
+    stripJsonComments,
+    parseMapJson,
+    downloadMap,
+    saveToServer,
+    loadServerMapList,
+    loadServerMap,
+    loadMyStats,
+    loadUserMap,
+    loadUserMapMeta,
+    createUserMap,
+    updateUserMap,
+  };
 })();

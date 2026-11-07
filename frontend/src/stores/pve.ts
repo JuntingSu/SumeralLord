@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { defaultPveSetup, normalizeAiLevel } from '@dl/shared';
-import type { MapFullData, PveGameConfig, PveSavePayload, SeatAssignment } from '@dl/shared';
+import type { MapFullData, MapSource, PveGameConfig, PveSavePayload, SeatAssignment } from '@dl/shared';
 
 export interface PveRoomState {
   map: MapFullData | null;
+  /** 地图来源：官方 PVE / 社区 / 本地导入 / 编辑器测试 */
+  mapSource: MapSource;
   /** 来自 PVE 地图库的 id；本地导入/随机（也来自库但可留 id）为 null 表示不在选择器里 */
   mapId: string | null;
   playerSeat: number | null;
@@ -15,11 +17,12 @@ export interface PveRoomState {
 
 type RoomConfigSource = Pick<
   PveGameConfig,
-  'map' | 'seatAssignments' | 'fogMode' | 'usePersonalSkin' | 'playerSeat'
+  'map' | 'mapSource' | 'seatAssignments' | 'fogMode' | 'usePersonalSkin' | 'playerSeat'
 >;
 
 const emptyRoom = (): PveRoomState => ({
   map: null,
+  mapSource: 'local',
   mapId: null,
   playerSeat: null,
   aiLevels: {},
@@ -43,7 +46,7 @@ interface PveStore {
   /** 从服务端读出的存档：游戏页 load=1 时消费 */
   loadSave: PveSavePayload | null;
 
-  setMap: (map: MapFullData, mapId: string | null) => void;
+  setMap: (map: MapFullData, mapId: string | null, mapSource?: MapSource) => void;
   clearMap: () => void;
   setPlayerSeat: (seat: number) => void;
   setAiLevel: (seat: number, level: number) => void;
@@ -62,12 +65,13 @@ export const usePve = create<PveStore>((set, get) => ({
   lastGame: null,
   loadSave: null,
 
-  setMap: (map, mapId) => {
+  setMap: (map, mapId, mapSource) => {
     const setup = defaultPveSetup(map);
     set({
       room: {
         ...get().room,
         map,
+        mapSource: mapSource ?? (mapId ? 'pve' : 'local'),
         mapId,
         playerSeat: setup.playerSeat,
         aiLevels: setup.aiLevels,
@@ -75,7 +79,17 @@ export const usePve = create<PveStore>((set, get) => ({
     });
   },
 
-  clearMap: () => set({ room: { ...get().room, map: null, mapId: null, playerSeat: null, aiLevels: {} } }),
+  clearMap: () =>
+    set({
+      room: {
+        ...get().room,
+        map: null,
+        mapSource: 'local',
+        mapId: null,
+        playerSeat: null,
+        aiLevels: {},
+      },
+    }),
 
   setPlayerSeat: (seat) => {
     const room = get().room;
@@ -100,6 +114,7 @@ export const usePve = create<PveStore>((set, get) => ({
     set({
       room: {
         map: config.map,
+        mapSource: config.mapSource ?? 'local',
         mapId: null,
         playerSeat: config.playerSeat,
         aiLevels: aiLevelsOf(config.seatAssignments, config.playerSeat),

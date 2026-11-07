@@ -25,7 +25,8 @@
     <label class="server" id="server-field">服务器
       <input id="server-url" size="22" placeholder="http://127.0.0.1:3000">
     </label>
-    <button id="btn-save" title="保存到服务器（对局数>15 或积分>150 时直存正式地图，否则进审查队列）">💾 保存到服务器</button>
+    <button id="btn-save-work" title="保存到我的作品（从个人作品进入时立即同步当前地图）">💾 保存为我的作品</button>
+    <span id="work-status" class="work-status" hidden></span>
     <button id="btn-export" title="导出为 JSON 文件下载">📥 导出 JSON</button>
     <button id="btn-pve-play" title="把当前地图带到 PVE 房间（不保存到服务器）">🎮 PVE游玩</button>
     <button id="btn-pve-test" title="把当前地图带到 PVE 房间测试；返回时把当前 PVE 地图带回编辑器">🧪 测试</button>
@@ -214,7 +215,7 @@
       <button id="btn-upload-m" title="导出 JSON / 导出到服务器 / PVE游玩 / 测试">📤</button>
       <div id="upload-menu" hidden>
         <button type="button" data-act="json">📥 导出 JSON</button>
-        <button type="button" data-act="server">📤 导出到服务器</button>
+        <button type="button" data-act="save-work">💾 保存为我的作品</button>
         <button type="button" data-act="pve">🎮 PVE游玩</button>
         <button type="button" data-act="pve-test">🧪 测试</button>
       </div>
@@ -273,6 +274,7 @@
       <div class="frow"><label>作者</label><input id="f-author" readonly class="ro" title="作者取自当前登录账号，不可修改"></div>
       <div class="frow"><label>描述</label><textarea id="f-desc" rows="3"></textarea></div>
       <div class="frow"><label>标签（逗号分隔）</label><input id="f-tags" placeholder="2人, 1v1"></div>
+      <div class="tag-suggest" id="tag-suggest"></div>
       <div class="frow"><label>总时长(秒)</label><input id="f-total" type="number" min="0"></div>
       <div class="frow"><label>回合时长(秒)</label><input id="f-round" type="number" min="0"></div>
       <div class="frow"><label>加时(秒)</label><input id="f-bonus" type="number" min="0"></div>
@@ -370,17 +372,18 @@
   </div>
 </dialog>
 
-<!-- ==================== 移动端：上传免审核资格提示 ==================== -->
-<dialog id="dlg-upload-warn" class="m-dlg">
+<!-- ==================== 退出编辑：未同步更改提示 ==================== -->
+<dialog id="dlg-unsynced" class="m-dlg">
   <div class="dlg-head">
-    <h3>上传提示</h3>
-    <button id="dlg-upload-warn-close" class="dlg-close" title="关闭">✕</button>
+    <h3>有未同步的更改</h3>
+    <button id="dlg-unsynced-close" class="dlg-close" title="关闭">✕</button>
   </div>
   <div class="dlg-body">
-    <p class="uw-text">当前账号未获得免审核上传资格，地图会进入审核队列，是否继续上传？</p>
+    <p class="uw-text" id="unsynced-text">当前地图还有未同步的更改，退出后这些更改将丢失。</p>
+    <p class="unsynced-time" id="unsynced-time"></p>
     <div class="dlg-btns">
-      <button id="uw-cancel" type="button">取消</button>
-      <button id="uw-ok" type="button" class="primary">继续上传</button>
+      <button id="unsynced-cancel" type="button">继续编辑</button>
+      <button id="unsynced-discard" type="button" class="primary">放弃更改并退出</button>
     </div>
   </div>
 </dialog>

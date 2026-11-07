@@ -9,6 +9,7 @@ import { TicketService } from './auth/ticket.js';
 import { BotSessionService } from './ws/botSession.js';
 import { AiBotManager } from './ai-bot/manager.js';
 import { MapCatalog } from './maps/catalog.js';
+import { UserMapStore } from './maps/userMaps.js';
 import { config } from './config.js';
 import { RoomManager } from './room/manager.js';
 import { GameManager } from './game/manager.js';
@@ -23,6 +24,7 @@ import { gameRoutes } from './api/game.js';
 import { userRoutes } from './api/users.js';
 import { leaderboardRoutes } from './api/leaderboard.js';
 import { demoRoutes } from './api/demo.js';
+import { userMapRoutes } from './api/userMaps.js';
 import { ok } from './utils/respond.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +36,10 @@ export interface BuildAppOptions {
   staticRoot?: string;
   /** 个人皮肤目录（默认 staticRoot/skin）；测试可指向临时目录，避免并发写同一路径 */
   skinDir?: string;
+  /** 个人作品地图目录（默认 staticRoot/user-maps） */
+  userMapsDir?: string;
+  /** 个人作品数量上限（默认 200；测试可注入小值） */
+  userMapMaxPerUser?: number;
   authRate?: { registerPerMin?: number; loginPerMin?: number };
   roomOpts?: { idleMs?: number; sweepIntervalMs?: number; gameHardCapMs?: number; gameOverRetainMs?: number };
   mapsReloadMs?: number;
@@ -90,6 +96,20 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.decorate('pveWeightsPath', opts.pveWeightsPath ?? config.aiWeightsPath);
   app.decorate('pveSaveMaxBytes', opts.pveSaveMaxBytes ?? config.pveSaveMaxBytes);
   app.decorate('pveMapsReloadMs', opts.pveMapsReloadMs ?? config.pveMapsReloadMs);
+  // 个人作品：文件与索引分离；草稿不允许通过 /static 直接访问，只能走鉴权 API。
+  const userMapsDir = opts.userMapsDir ?? path.join(staticRoot, 'user-maps');
+  const userMaps = new UserMapStore({
+    db,
+    dir: userMapsDir,
+    maxPerUser: opts.userMapMaxPerUser,
+  });
+  app.decorate('userMapsDir', userMapsDir);
+  app.decorate('userMaps', userMaps);
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.url.startsWith('/static/user-maps/')) {
+      return reply.status(404).send({ success: false, code: 'MAP_NOT_FOUND', message: '地图不存在' });
+    }
+  });
   // PVE 地图目录懒加载：首次 /api/pve/maps 或 /random 时才扫描（避免 buildApp/测试解析上千张图）
   pveMaps.setDir(path.join(staticRoot, 'pve_maps'));
   if (existsSync(staticRoot)) {
@@ -119,6 +139,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(userRoutes);
   await app.register(leaderboardRoutes);
   await app.register(demoRoutes);
+  await app.register(userMapRoutes);
 
   gatewayRef = new WsGateway(app, rooms, games, tickets, botSessions, aiBots, app.log, opts.gatewayOpts);
 

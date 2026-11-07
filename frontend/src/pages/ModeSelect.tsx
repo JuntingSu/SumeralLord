@@ -33,13 +33,21 @@ export default function ModeSelect() {
             {user && <p className="text-sm text-slate-400">{user.username}</p>}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
-        >
-          退出登录
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/profile"
+            className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
+          >
+            个人中心
+          </Link>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
+          >
+            退出登录
+          </button>
+        </div>
       </header>
 
       <main className="mx-auto w-full max-w-5xl px-6 py-10">

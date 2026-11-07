@@ -168,6 +168,46 @@ export interface MapMeta {
   hasTriggers?: boolean;
 }
 
+/** 地图来源：官方多人库 / 官方 PVE 库 / 社区（个人作品发布）/ 本地临时地图 */
+export type MapSource = 'official' | 'pve' | 'community' | 'local';
+
+/** 个人作品/社区地图元数据（文件内容仍按 id 读取） */
+export interface UserMapMeta extends MapMeta {
+  /** 最近编辑时间（epoch ms） */
+  updatedAt: number;
+  /** 创建时间（epoch ms） */
+  createdAt: number;
+  /** 是否已发布到社区索引 */
+  published: boolean;
+  /** 点赞数（仅社区地图有意义） */
+  likes: number;
+  /** 发布时间（epoch ms；未发布为 null） */
+  publishedAt: number | null;
+}
+
+export interface UserMapListResult {
+  mapList: UserMapMeta[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type UserMapSort =
+  | 'recent'
+  | 'oldest'
+  | 'title_asc'
+  | 'title_desc'
+  | 'author_asc'
+  | 'author_desc'
+  | 'popular';
+
+export interface MapLikeResult {
+  likes: number;
+  liked: boolean;
+}
+
+export interface MapLikeStatus extends MapLikeResult {}
+
 export interface MapPreview {
   row: number;
   column: number;
@@ -231,6 +271,8 @@ export interface RoomData {
   random1v1Map: boolean;
   mapId: string;
   mapTitle: string;
+  /** 地图来源：官方多人库或社区已发布地图 */
+  mapSource: 'official' | 'community';
   playerNum: number; // maxPlayers，来自地图
   timeSettings: RoomTimeSettings;
   /** game_over：对局已结束，结算展示保留期（超时由 idleSweeper 回落 waiting） */

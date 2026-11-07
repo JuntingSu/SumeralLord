@@ -1,25 +1,66 @@
-import type { GameOverMsg, GameState } from '@dl/shared';
+import { useEffect, useState } from 'react';
+import type { GameOverMsg, GameState, MapSource } from '@dl/shared';
 import { AI_LEVEL_LABEL } from '@dl/shared';
 import { flagImgUrl } from '../lib/flags';
+import { getCommunityLike, likeCommunityMap } from '../api/userMaps';
 
 interface PveResultModalProps {
   gameOver: GameOverMsg;
   board: GameState;
   humanUserId: number;
+  mapId?: string;
+  mapSource?: MapSource;
   onNewGame: () => void;
   onBackRoom: () => void;
   onBackModes: () => void;
 }
 
-/** PVE 结算：胜负 + 势力列表；无积分、无回放 */
+/** PVE 结算：胜负 + 势力列表；社区地图可点赞 */
 export default function PveResultModal({
   gameOver,
   board,
   humanUserId,
+  mapId,
+  mapSource,
   onNewGame,
   onBackRoom,
   onBackModes,
 }: PveResultModalProps) {
+  const [likes, setLikes] = useState(0);
+  const [liked, setLiked] = useState(false);
+  const [liking, setLiking] = useState(false);
+  const [likeError, setLikeError] = useState('');
+  const likeable = mapSource === 'community' && !!mapId;
+
+  useEffect(() => {
+    if (!likeable || !mapId) return;
+    let alive = true;
+    getCommunityLike(mapId)
+      .then((r) => {
+        if (!alive) return;
+        setLikes(r.likes);
+        setLiked(r.liked);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [likeable, mapId]);
+
+  const handleLike = async () => {
+    if (!mapId || liked || liking) return;
+    setLiking(true);
+    setLikeError('');
+    try {
+      const r = await likeCommunityMap(mapId);
+      setLikes(r.likes);
+      setLiked(r.liked);
+    } catch {
+      setLikeError('点赞失败，请稍后再试');
+    } finally {
+      setLiking(false);
+    }
+  };
   const winners = gameOver.winners ?? [];
   const humanWon = winners.includes(String(humanUserId));
   const aiWon = (gameOver.winningTeam ?? 0) > 0 && winners.length === 0;
@@ -74,6 +115,24 @@ export default function PveResultModal({
             })}
           </ul>
         </div>
+
+        {likeable && (
+          <div className="mt-4 flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={() => void handleLike()}
+              disabled={liked || liking}
+              className={`rounded-full border px-4 py-1.5 text-sm transition-colors ${
+                liked
+                  ? 'border-rose-500/50 bg-rose-900/30 text-rose-300'
+                  : 'border-slate-600 text-slate-300 hover:border-rose-400 hover:text-rose-300'
+              } disabled:cursor-default`}
+            >
+              {liked ? '♥ 已点赞' : liking ? '点赞中…' : '♡ 点赞'} · {likes}
+            </button>
+            {likeError ? <span className="text-xs text-red-400">{likeError}</span> : null}
+          </div>
+        )}
 
         <div className="mt-5 space-y-2">
           <button

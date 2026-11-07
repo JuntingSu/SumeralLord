@@ -47,6 +47,7 @@ interface Room {
   random1v1Map: boolean;
   mapId: string;
   mapTitle: string;
+  mapSource: 'official' | 'community';
   mapPlayerNum: number;
   timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
   status: 'ROOM_OPEN' | 'IN_GAME' | 'GAME_OVER';
@@ -138,6 +139,7 @@ export class RoomManager {
       aiTakeover?: boolean;
       usePersonalSkin?: boolean;
       timeSettings: { stepTime: number; gameTime: number; additionalTime: number };
+      mapSource?: 'official' | 'community';
     },
     map: MapFullData,
   ): RoomData {
@@ -156,6 +158,7 @@ export class RoomManager {
       random1v1Map: false,
       mapId: map.id,
       mapTitle: map.title,
+      mapSource: body.mapSource ?? 'official',
       mapPlayerNum: map.player_num,
       timeSettings: body.timeSettings,
       status: 'ROOM_OPEN',
@@ -392,7 +395,12 @@ export class RoomManager {
     return this.toRoomData(room);
   }
 
-  changeMap(hostUserId: number, roomId: string, map: MapFullData): RoomData {
+  changeMap(
+    hostUserId: number,
+    roomId: string,
+    map: MapFullData,
+    mapSource: 'official' | 'community' = 'official',
+  ): RoomData {
     const room = this.mustGet(roomId);
     this.touch(room);
     if (room.hostId !== hostUserId) throw new RoomError('NOT_HOST', '仅房主可执行此操作');
@@ -400,6 +408,7 @@ export class RoomManager {
     if (room.random1v1Map) throw new RoomError('INVALID_PARAMS', '随机 1v1 地图模式下不能更换地图');
     room.mapId = map.id;
     room.mapTitle = map.title;
+    room.mapSource = mapSource;
     room.mapPlayerNum = map.player_num;
     room.forces = toRoomForces(map);
     // 换图视为房间配置变更：已准备玩家回落未准备（观战不变）
@@ -605,6 +614,7 @@ export class RoomManager {
       random1v1Map: room.random1v1Map,
       mapId: room.mapId,
       mapTitle: room.mapTitle,
+      mapSource: room.mapSource,
       playerNum: room.mapPlayerNum,
       timeSettings: room.timeSettings,
       status: room.status === 'ROOM_OPEN' ? 'waiting' : room.status === 'GAME_OVER' ? 'game_over' : 'in_game',

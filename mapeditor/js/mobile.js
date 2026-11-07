@@ -178,20 +178,6 @@
     syncMobileUI();
   }
 
-  // 免审核资格提示弹窗：确定/取消/关闭/ESC 各自回落到 Promise 结果
-  const uwDlg = $('dlg-upload-warn');
-  let uwResolve = null;
-  function uwFinish(v) {
-    const resolve = uwResolve;
-    uwResolve = null;
-    if (uwDlg.open) uwDlg.close();
-    if (resolve) resolve(v);
-  }
-  $('uw-ok').addEventListener('click', () => uwFinish(true));
-  $('uw-cancel').addEventListener('click', () => uwFinish(false));
-  $('dlg-upload-warn-close').addEventListener('click', () => uwFinish(false));
-  uwDlg.addEventListener('cancel', (e) => { e.preventDefault(); uwFinish(false); });
-
   // ---- 事件绑定 ----
   document.querySelectorAll('#mobile-toolbar [data-tool]').forEach((btn) => {
     btn.addEventListener('click', () => Editor.setTool(btn.dataset.tool));
@@ -237,9 +223,9 @@
     btn.addEventListener('click', () => {
       uploadMenu.hidden = true;
       if (btn.dataset.act === 'json') $('btn-export').click();
+      else if (btn.dataset.act === 'save-work') window.MapEditorActions?.saveAsWork?.();
       else if (btn.dataset.act === 'pve') window.MapEditorActions?.playPve?.();
       else if (btn.dataset.act === 'pve-test') window.MapEditorActions?.playPveTest?.();
-      else exportToServerFlow();
     });
   });
   // 点击菜单外任意处收起
@@ -247,30 +233,6 @@
     if (e.target.closest('#mobile-actions')) return;
     uploadMenu.hidden = true;
   });
-
-  // 免审核上传资格：积分 < 150 且对局数 < 10 → 先弹提示确认，仍要继续才上传
-  function confirmUploadWarn() {
-    return new Promise((resolve) => {
-      uwResolve = resolve;
-      uwDlg.showModal();
-    });
-  }
-  async function exportToServerFlow() {
-    const s = Editor.getState();
-    if (!s.map) {
-      if (act.statusMsg) act.statusMsg('没有地图可上传', 'error');
-      return;
-    }
-    let qualified = false;
-    try {
-      const stats = await IO.loadMyStats(act.serverUrl ? act.serverUrl() : '');
-      qualified = stats.score >= 150 || stats.matches >= 10;
-    } catch {
-      qualified = false; // 未登录 / 取不到统计 → 按未获得免审核资格处理
-    }
-    if (!qualified && !(await confirmUploadWarn())) return;
-    $('btn-save').click(); // 复用「保存到服务器」流程（id 白名单 + 结构校验 + 结果提示）
-  }
 
   // 模式复选框：互斥，始终恰好勾选一个；选定后收起面板
   function setMode(mode, self) {

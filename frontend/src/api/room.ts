@@ -90,10 +90,14 @@ export function updateRoomSettings(id: string, patch: RoomSettingsPatch): Promis
   });
 }
 
-export function changeRoomMap(id: string, mapId: string): Promise<RoomData> {
+export function changeRoomMap(
+  id: string,
+  mapId: string,
+  mapSource: 'official' | 'community' = 'official',
+): Promise<RoomData> {
   return api<RoomData>(`/api/rooms/${id}/change-map`, {
     method: 'POST',
-    body: JSON.stringify({ mapId }),
+    body: JSON.stringify({ mapId, mapSource }),
   });
 }
 

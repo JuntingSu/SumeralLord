@@ -92,7 +92,10 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
     try {
       const body = parseBody(CreateRoomBodySchema, request.body);
       const user = roomUserOf(request);
-      const map = app.maps.get(body.mapId);
+      const map =
+        body.mapSource === 'community'
+          ? app.userMaps.get(body.mapId, { publishedOnly: true })
+          : app.maps.get(body.mapId);
       if (!map) return fail(reply, 400, ERROR_CODES.MAP_NOT_FOUND, '地图不存在');
       if (app.rooms.findRoomOfPlayer(user.id)) {
         return fail(reply, 409, ERROR_CODES.ALREADY_IN_ROOM, '你已在其他房间中，请先退出');
@@ -182,7 +185,9 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
       // （种子/尺寸/对称方案每局随机；先手 seat1 / 后手 seat2 由房间势力与生成地图 player_list 共同保证）
       const map = roomData.random1v1Map
         ? randomSym1v1Map(`sym1v1-${randomUUID().replace(/-/g, '').slice(0, 8)}`)
-        : app.maps.get(roomData.mapId);
+        : roomData.mapSource === 'community'
+          ? app.userMaps.get(roomData.mapId, { publishedOnly: true })
+          : app.maps.get(roomData.mapId);
       if (!map) return fail(reply, 400, ERROR_CODES.MAP_NOT_FOUND, '地图不存在');
 
       // isAI = 房主指定 AI 难度（AI 专属）或开启 AI 接管且无玩家扮演；未接管且无玩家的势力开局时由前端删兵。
@@ -294,9 +299,17 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
     try {
       const { id } = request.params as { id: string };
       const body = parseBody(ChangeMapBodySchema, request.body);
-      const map = app.maps.get(body.mapId);
+      const map =
+        body.mapSource === 'community'
+          ? app.userMaps.get(body.mapId, { publishedOnly: true })
+          : app.maps.get(body.mapId);
       if (!map) return fail(reply, 400, ERROR_CODES.MAP_NOT_FOUND, '地图不存在');
-      const room = app.rooms.changeMap(roomUserOf(request).id, id, map);
+      const room = app.rooms.changeMap(
+        roomUserOf(request).id,
+        id,
+        map,
+        body.mapSource === 'community' ? 'community' : 'official',
+      );
       return ok(reply, room);
     } catch (err) {
       return sendRoomError(reply, err);
@@ -308,7 +321,13 @@ export const roomRoutes: FastifyPluginAsync = async (app) => {
       const { id } = request.params as { id: string };
       const body = parseBody(RoomSettingsPatchSchema, request.body);
       // 关闭随机 1v1 模式时需按原地图重建势力列表；开启时无需地图
-      const map = body.random1v1Map === false ? (app.maps.get(app.rooms.mustGet(id).mapId) ?? undefined) : undefined;
+      const current = app.rooms.mustGet(id);
+      const map =
+        body.random1v1Map === false
+          ? (current.mapSource === 'community'
+              ? app.userMaps.get(current.mapId, { publishedOnly: true })
+              : app.maps.get(current.mapId)) ?? undefined
+          : undefined;
       const room = app.rooms.updateSettings(roomUserOf(request).id, id, body, map);
       return ok(reply, room);
     } catch (err) {

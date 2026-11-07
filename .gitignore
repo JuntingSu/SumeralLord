@@ -18,3 +18,5 @@ pack.txt
 backend/static/demo/*.json
 # 演示制作器（本地独立前端工具，不入库）
 demo-maker/
+# 个人作品地图文件（运行时生成，不入库）
+backend/static/user-maps/*.json

@@ -2,33 +2,44 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { MapFullData, MapMeta } from '@dl/shared';
 import { getMap, listMaps } from '../api/map';
+import { getCommunityMap, listCommunityMaps } from '../api/userMaps';
 import HexMapPreview from '../components/HexMapPreview';
+import MapSourceTabs, { type MapSourceTab } from '../components/MapSourceTabs';
 
 export default function Maps() {
   const [search, setSearch] = useState('');
+  const [source, setSource] = useState<MapSourceTab>('official');
   const [maps, setMaps] = useState<MapMeta[]>([]);
   const [selected, setSelected] = useState<MapFullData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(keyword: string) {
+  async function load(keyword: string, src: MapSourceTab) {
     try {
-      const list = await listMaps(keyword || undefined);
+      const list =
+        src === 'community'
+          ? (await listCommunityMaps({ search: keyword || undefined, pageSize: 60 })).mapList
+          : await listMaps(keyword || undefined);
       setMaps(list);
-      setSelected(list.length > 0 ? await getMap(list[0].id) : null);
+      if (list.length > 0) {
+        const first = src === 'community' ? await getCommunityMap(list[0].id) : await getMap(list[0].id);
+        setSelected(first);
+      } else {
+        setSelected(null);
+      }
     } catch {
       setError('地图列表加载失败');
     }
   }
 
   useEffect(() => {
-    load('');
+    void load('', 'official');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSelect(meta: MapMeta) {
     setError(null);
     try {
-      setSelected(await getMap(meta.id));
+      setSelected(source === 'community' ? await getCommunityMap(meta.id) : await getMap(meta.id));
     } catch {
       setError('地图加载失败');
     }
@@ -42,13 +53,26 @@ export default function Maps() {
         </Link>
       </header>
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-bold">地图库</h1>
+          <MapSourceTabs
+            value={source}
+            onChange={(next) => {
+              setSource(next);
+              setSearch('');
+              void load('', next);
+            }}
+          />
+        </div>
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <span className="text-xs text-slate-500">
+            {source === 'community' ? '社区地图来自玩家发布的作品' : '官方地图库'}
+          </span>
           <form
             className="flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              load(search.trim());
+              void load(search.trim(), source);
             }}
           >
             <input
@@ -74,7 +98,7 @@ export default function Maps() {
             {maps.map((m) => (
               <li key={m.id}>
                 <button
-                  onClick={() => handleSelect(m)}
+                  onClick={() => void handleSelect(m)}
                   className={`w-full rounded-lg px-4 py-3 text-left hover:bg-slate-700 ${
                     selected?.id === m.id ? 'bg-slate-700' : 'bg-slate-800'
                   }`}

@@ -3,12 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { CreateRoomBody, MapMeta, MapPreview } from '@dl/shared';
 import { TIME_DEFAULTS, TIME_OPTIONS } from '@dl/shared';
 import { getMapPreview, listMaps } from '../api/map';
+import { getCommunityMapPreview, listAllCommunityMaps } from '../api/userMaps';
 import { createRoom } from '../api/room';
 import { ApiError } from '../api/client';
 import { useAuth } from '../stores/auth';
 import { useLobby } from '../stores/lobby';
 import HexMapPreview from '../components/HexMapPreview';
 import MapPicker from '../components/MapPicker';
+import MapSourceTabs, { type MapSourceTab } from '../components/MapSourceTabs';
 
 export default function CreateRoom() {
   const navigate = useNavigate();
@@ -16,6 +18,7 @@ export default function CreateRoom() {
   const setJoined = useLobby((s) => s.setJoined);
 
   const [maps, setMaps] = useState<MapMeta[]>([]);
+  const [mapSource, setMapSource] = useState<MapSourceTab>('official');
   const [mapId, setMapId] = useState('');
   const [preview, setPreview] = useState<MapPreview | null>(null);
   const [name, setName] = useState(`${user?.username ?? '玩家'}的房间`);
@@ -31,21 +34,28 @@ export default function CreateRoom() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listMaps()
+    setMapId('');
+    setPreview(null);
+    const loader =
+      mapSource === 'community'
+        ? listAllCommunityMaps()
+        : listMaps();
+    loader
       .then((list) => {
         setMaps(list);
         // 初始不预选任何地图，由用户自行搜索选择
       })
       .catch(() => setError('地图列表加载失败'));
-  }, []);
+  }, [mapSource]);
 
   useEffect(() => {
     if (!mapId) return;
     setPreview(null);
-    getMapPreview(mapId)
+    const loader = mapSource === 'community' ? getCommunityMapPreview : getMapPreview;
+    loader(mapId)
       .then(setPreview)
       .catch(() => setPreview(null));
-  }, [mapId]);
+  }, [mapId, mapSource]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -64,6 +74,7 @@ export default function CreateRoom() {
         randomSpawn,
         usePersonalSkin,
         mapId,
+        mapSource,
         timeSettings: { stepTime, gameTime, additionalTime },
       };
       const result = await createRoom(body);
@@ -107,8 +118,14 @@ export default function CreateRoom() {
                 <input id="room-password" className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={32} />
               </div>
               <div>
-                <label className={labelCls} htmlFor="map-select">地图</label>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className={labelCls} htmlFor="map-select">地图</label>
+                  <MapSourceTabs value={mapSource} onChange={setMapSource} />
+                </div>
                 <MapPicker id="map-select" maps={maps} value={mapId} onChange={setMapId} />
+                {mapSource === 'community' ? (
+                  <p className="mt-1 text-xs text-slate-500">社区地图仅显示已发布作品</p>
+                ) : null}
               </div>
 
               {/* 允许观战/战争迷雾/随机出生点/使用个人皮肤：宽屏在左列一行四列；窄屏移入右列预览图下方 */}

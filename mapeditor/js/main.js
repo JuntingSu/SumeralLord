@@ -379,6 +379,213 @@
     localStorage.setItem('dl-mapeditor-server', e.target.value.trim());
   });
 
+  // ==================== 个人作品：关联 / 自动同步 / 退出保护 ====================
+  const WORK_SYNC_MS = 60 * 1000;
+  let work = null; // { id, hash, lastSyncedAt }
+  let dirtyCache = false;
+  let dirtyCheckedAt = 0;
+  let syncingWork = false;
+  let allowUnload = false;
+  let pendingExit = null;
+
+  function hashText(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  function mapHash() {
+    const s = Editor.getState();
+    return s.map ? hashText(JSON.stringify(MapData.serialize(s.map))) : '';
+  }
+
+  function formatTime(ts) {
+    if (!ts) return '尚未自动同步';
+    const d = new Date(ts);
+    return d.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function workDirty(force = false) {
+    if (!work || !Editor.getState().map) {
+      dirtyCache = false;
+      return false;
+    }
+    const now = Date.now();
+    if (!force && now - dirtyCheckedAt < 500) return dirtyCache;
+    dirtyCheckedAt = now;
+    dirtyCache = mapHash() !== work.hash;
+    return dirtyCache;
+  }
+
+  function syncWorkUrl() {
+    const url = new URL(window.location.href);
+    if (work) url.searchParams.set('work', work.id);
+    else url.searchParams.delete('work');
+    window.history.replaceState(null, '', url.toString());
+  }
+
+  function updateWorkStatus() {
+    const el = $('work-status');
+    if (!el) return;
+    if (!work) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    const dirty = workDirty();
+    el.hidden = false;
+    el.classList.toggle('dirty', dirty);
+    el.textContent = dirty ? '有未同步更改' : `已同步 ${formatTime(work.lastSyncedAt)}`;
+  }
+
+  function attachWork(meta, baseMap) {
+    const hash = baseMap
+      ? hashText(JSON.stringify(MapData.serialize(baseMap)))
+      : mapHash();
+    work = { id: meta.id, hash, lastSyncedAt: meta.updatedAt || Date.now() };
+    dirtyCache = false;
+    dirtyCheckedAt = 0;
+    syncWorkUrl();
+    updateWorkStatus();
+  }
+
+  /** 新建 / 导入 / 随机地图后断开与个人作品的关联 */
+  function unlinkWork() {
+    if (!work) return;
+    work = null;
+    dirtyCache = false;
+    dirtyCheckedAt = 0;
+    syncWorkUrl();
+    updateWorkStatus();
+  }
+
+  async function syncWork(manual = false) {
+    if (!work || syncingWork) return false;
+    const s = Editor.getState();
+    if (!s.map) return false;
+    if (!manual && !workDirty()) return true;
+    const errors = MapValidate.validate(s.map).filter((i) => i.level === 'error');
+    if (errors.length) {
+      if (manual) statusMsg(`校验未通过（${errors.length} 处错误），请先修复`, 'error');
+      return false;
+    }
+    syncingWork = true;
+    const hash = mapHash();
+    try {
+      const meta = await IO.updateUserMap(serverUrl(), work.id, s.map);
+      work.hash = hash;
+      work.lastSyncedAt = meta.updatedAt || Date.now();
+      dirtyCache = false;
+      dirtyCheckedAt = 0;
+      if (meta.author) s.map.author = meta.author;
+      updateWorkStatus();
+      if (manual) statusMsg('已同步到我的作品');
+      return true;
+    } catch (e) {
+      statusMsg(`同步失败：${e.message}`, 'error');
+      return false;
+    } finally {
+      syncingWork = false;
+    }
+  }
+
+  async function saveAsWork() {
+    const s = Editor.getState();
+    if (!s.map) {
+      statusMsg('没有地图可保存', 'error');
+      return;
+    }
+    if (s.map.player_num < 1) {
+      statusMsg('地图没有势力，无法保存', 'error');
+      return;
+    }
+    if (work) {
+      await syncWork(true);
+      return;
+    }
+    const errors = MapValidate.validate(s.map).filter((i) => i.level === 'error');
+    if (errors.length) {
+      statusMsg(`校验未通过（${errors.length} 处错误），请先修复`, 'error');
+      return;
+    }
+    statusMsg('保存到我的作品…');
+    try {
+      const meta = await IO.createUserMap(serverUrl(), s.map);
+      attachWork(meta);
+      statusMsg(`已保存为我的作品「${meta.title}」`);
+    } catch (e) {
+      statusMsg(`保存失败：${e.message}`, 'error');
+    }
+  }
+
+  function closeUnsyncedDialog() {
+    const dlg = $('dlg-unsynced');
+    if (dlg && dlg.open) dlg.close();
+  }
+
+  function requestLeave(action) {
+    if (!workDirty(true)) {
+      action();
+      return;
+    }
+    pendingExit = action;
+    const timeEl = $('unsynced-time');
+    if (timeEl) {
+      timeEl.textContent = work.lastSyncedAt
+        ? `上次自动同步：${formatTime(work.lastSyncedAt)}`
+        : '尚未自动同步';
+    }
+    const dlg = $('dlg-unsynced');
+    if (dlg && !dlg.open) dlg.showModal();
+    else actionIfNoDialog(action);
+  }
+
+  function actionIfNoDialog(action) {
+    // 不支持 dialog 的环境直接放弃未同步更改并离开
+    if (typeof HTMLDialogElement === 'undefined') {
+      allowUnload = true;
+      action();
+    }
+  }
+
+  $('btn-back-lobby')?.addEventListener('click', (e) => {
+    if (!workDirty(true)) return;
+    e.preventDefault();
+    const href = $('btn-back-lobby').getAttribute('href') || '/modes';
+    requestLeave(() => {
+      allowUnload = true;
+      window.location.href = href;
+    });
+  });
+
+  $('btn-save-work')?.addEventListener('click', () => void saveAsWork());
+  $('dlg-unsynced-close')?.addEventListener('click', closeUnsyncedDialog);
+  $('unsynced-cancel')?.addEventListener('click', closeUnsyncedDialog);
+  $('unsynced-discard')?.addEventListener('click', () => {
+    const action = pendingExit;
+    pendingExit = null;
+    closeUnsyncedDialog();
+    if (action) action();
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    if (allowUnload || !workDirty(true)) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  window.setInterval(() => {
+    if (work && Editor.getState().map) void syncWork(false);
+  }, WORK_SYNC_MS);
+
   $('btn-new').addEventListener('click', () => $('dlg-new').showModal());
   $('dlg-new-cancel').addEventListener('click', () => $('dlg-new').close());
   $('dlg-new-ok').addEventListener('click', () => {
@@ -388,6 +595,7 @@
     $('dlg-new').close();
     const m = MapData.createDefaultMap(row, column, players);
     m.author = MapData.defaultAuthor();
+    unlinkWork();
     Editor.setMap(m, MapData.randomId());
     statusMsg(`已新建 ${row}×${column}、${players} 势力地图`);
   });
@@ -409,6 +617,7 @@
     const res = await MapCode.decodeMapCode(code);
     if (!res.ok) { statusMsg(res.error, 'error'); return; }
     const errors = MapValidate.validate(res.map).filter((i) => i.level === 'error');
+    unlinkWork();
     Editor.setMap(res.map, MapData.randomId());
     $('dlg-mapcode').close();
     $('mapcode-input').value = '';
@@ -424,6 +633,7 @@
         statusMsg(`打开失败：${res.error}`, 'error');
         return;
       }
+      unlinkWork();
       Editor.setMap(res.map, MapData.randomId());
       statusMsg(`已导入 ${file.name}`);
     };
@@ -475,46 +685,24 @@
       if (test) {
         sessionStorage.setItem('dl_pve_test_mode', '1');
         sessionStorage.setItem('dl_pve_test_origin', s.id);
+        if (work) sessionStorage.setItem('dl_pve_work_v1', work.id);
+        else sessionStorage.removeItem('dl_pve_work_v1');
       } else {
         sessionStorage.removeItem('dl_pve_test_mode');
         sessionStorage.removeItem('dl_pve_test_origin');
+        sessionStorage.removeItem('dl_pve_work_v1');
       }
     } catch {
       statusMsg('浏览器本地存储不可用，无法带入 PVE', 'error');
       return;
     }
+    allowUnload = true;
     window.location.href = test ? '/pve?from=mapeditor&test=1' : '/pve?from=mapeditor';
   }
-  function playPve() { openPve(false); }
+  function playPve() { requestLeave(() => openPve(false)); }
   function playPveTest() { openPve(true); }
   $('btn-pve-play').addEventListener('click', playPve);
   $('btn-pve-test').addEventListener('click', playPveTest);
-
-  $('btn-save').addEventListener('click', async () => {
-    const s = Editor.getState();
-    if (!s.map) { statusMsg('没有地图可保存', 'error'); return; }
-    const id = (s.id || '').trim() || 'map_new';
-    if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
-      statusMsg('id 仅允许字母/数字/下划线/连字符', 'error');
-      return;
-    }
-    const errors = MapValidate.validate(s.map).filter((i) => i.level === 'error');
-    if (errors.length) {
-      statusMsg(`校验未通过（${errors.length} 处错误），请先修复`, 'error');
-      return;
-    }
-    statusMsg('保存中…');
-    try {
-      const res = await IO.saveToServer(serverUrl(), id, s.map);
-      if (res.ok) {
-        const savedTo = res.result?.data?.savedTo || 'maps-uncensored';
-        const reason = res.result?.data?.reason;
-        statusMsg(reason ? `已保存到服务器 ${savedTo}/${id}.json（${reason}）` : `已保存到服务器 ${savedTo}/${id}.json`);
-      } else statusMsg(`保存失败：${res.result.message || 'HTTP ' + res.status}`, 'error');
-    } catch (e) {
-      statusMsg(`保存失败：${e.message}（请检查服务器地址）`, 'error');
-    }
-  });
 
   /**
    * 服务器地图搜索：顶栏下拉（宽屏）与「服务器导入」弹窗（窄屏）共用同一套渲染逻辑。
@@ -551,6 +739,7 @@
   async function loadServerMapById(id) {
     try {
       const map = await IO.loadServerMap(serverUrl(), id);
+      unlinkWork();
       Editor.setMap(map, map.id);
       statusMsg(`已加载服务器地图 ${id}`);
       return true;
@@ -737,6 +926,7 @@
         return;
       }
       res.map.author = MapData.defaultAuthor();
+      unlinkWork();
       Editor.setMap(res.map, res.id);
       statusMsg(`已生成${symmetry === 'axis' ? '轴对称' : '中心对称'} 1v1 地图（${row}×${column}，出生点距离 ${res.spawnDistance}）`);
       return;
@@ -747,6 +937,7 @@
       playerNum: Math.max(1, Math.min(8, Math.round(Number($('gen-players').value) || 2))),
       mode: $('gen-mode').value,
     };
+    unlinkWork();
     Editor.generateMap(opts);
     statusMsg(`已生成随机地图（${opts.row}×${opts.column}，${opts.playerNum} 势力）`);
   });
@@ -786,6 +977,53 @@
     if ($('f-cyl') !== focused) $('f-cyl').checked = !!s.map.cylindrical_map;
     if ($('f-fog') !== focused) $('f-fog').checked = !!s.map.fog_mode;
     $('f-size').textContent = `${s.map.row} × ${s.map.column}`;
+  }
+
+  /** 系统推荐 tag：根据地图内容自动判断推荐项，点击后加入/移除 */
+  function syncTagSuggestions() {
+    const box = $('tag-suggest');
+    if (!box) return;
+    const s = Editor.getState();
+    if (!s.map) {
+      box.innerHTML = '';
+      return;
+    }
+    const map = s.map;
+    const triggers = Array.isArray(map.triggers) ? map.triggers : [];
+    const hasStory = triggers.some(
+      (t) =>
+        Array.isArray(t.effects) &&
+        t.effects.some((e) => e && (e.op === 'show_text' || e.op === 'show_choice_text')),
+    );
+    const area = (Number(map.row) || 0) * (Number(map.column) || 0);
+    const recommended = new Set();
+    if (triggers.length > 0) recommended.add('含触发器');
+    recommended.add((Number(map.player_num) || 1) >= 2 ? '多人' : '单人');
+    recommended.add(triggers.length > 0 ? 'PVE' : 'PVP');
+    recommended.add(area >= 900 ? '大图' : '小图');
+    recommended.add(hasStory ? '有剧情' : '无剧情');
+
+    const current = new Set((map.tags || []).map((t) => String(t)));
+    const all = ['含触发器', '多人', '单人', 'PVE', 'PVP', '大图', '小图', '有剧情', '无剧情'];
+    box.innerHTML = '';
+    for (const tag of all) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = tag;
+      btn.title = recommended.has(tag) ? '系统推荐' : '可选标签';
+      if (current.has(tag)) btn.classList.add('active');
+      if (recommended.has(tag) && !current.has(tag)) btn.style.borderStyle = 'dashed';
+      btn.addEventListener('click', () => {
+        Editor.commit((m) => {
+          const tags = Array.isArray(m.tags) ? [...m.tags] : [];
+          const i = tags.indexOf(tag);
+          if (i >= 0) tags.splice(i, 1);
+          else tags.push(tag);
+          m.tags = tags;
+        });
+      });
+      box.appendChild(btn);
+    }
   }
 
   // ==================== 势力面板 ====================
@@ -846,6 +1084,8 @@
     syncToolUI();
     syncBrushUI();
     syncTopbar();
+    updateWorkStatus();
+    syncTagSuggestions();
   }
   Editor.onUI(refreshUI);
 
@@ -887,8 +1127,43 @@
   });
   HexRender.preloadAllFlags();
 
-  // 起始画布：优先导入 PVE「测试」返回的地图；否则从服务器地图库（backend/static/maps）加载
+  // 起始画布：优先打开个人作品；否则导入 PVE「测试」返回的地图；否则加载服务器地图库
   (async () => {
+    const startupWorkId = new URLSearchParams(window.location.search).get('work');
+    if (startupWorkId) {
+      try {
+        const meta = await IO.loadUserMapMeta(serverUrl(), startupWorkId);
+        const serverMap = await IO.loadUserMap(serverUrl(), startupWorkId);
+        let map = serverMap;
+        let fromPve = false;
+        // PVE 测试返回：带可能尚未同步的本地改动，但同步基准仍是服务器版本
+        const raw = sessionStorage.getItem('dl_editor_map_v1');
+        if (raw) {
+          sessionStorage.removeItem('dl_editor_map_v1');
+          try {
+            const parsed = JSON.parse(raw);
+            const returned = parsed && parsed.map ? parsed.map : parsed;
+            if (returned && typeof returned === 'object') {
+              map = returned;
+              fromPve = true;
+            }
+          } catch {
+            /* 回传解析失败时使用服务器版本 */
+          }
+        }
+        Editor.setMap(map, meta.id);
+        attachWork(meta, serverMap);
+        statusMsg(
+          fromPve
+            ? `已返回个人作品「${map.title || meta.title}」`
+            : `已打开我的作品「${map.title || meta.title}」`,
+        );
+        return;
+      } catch (e) {
+        statusMsg(`打开个人作品失败：${e.message}`, 'error');
+      }
+    }
+
     try {
       const raw = sessionStorage.getItem('dl_editor_map_v1');
       if (raw) {
@@ -932,5 +1207,5 @@
   // ==================== 供 mobile.js 复用的入口 ====================
   // 窄屏顶栏整体隐藏后，服务器地址与状态提示只在这里可取；
   // 其余「新建 / 本地导入 / 地图码导入 / 随机生成 / 保存 / 导出」沿用各自按钮的 click（事件处理器不变）。
-  window.MapEditorActions = { serverUrl, statusMsg, playPve, playPveTest };
+  window.MapEditorActions = { serverUrl, statusMsg, playPve, playPveTest, saveAsWork };
 })();

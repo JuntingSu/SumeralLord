@@ -7,6 +7,7 @@ import type { RoomManager } from './room/manager.js';
 import type { MapCatalog } from './maps/catalog.js';
 import type { GameManager } from './game/manager.js';
 import type { AuthTokenPayload } from './auth/jwt.js';
+import type { UserMapStore } from './maps/userMaps.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -35,6 +36,10 @@ declare module 'fastify' {
     pveMapsReloadMs: number;
     /** 个人皮肤目录（static/skin；usr_{id}.png） */
     skinDir: string;
+    /** 个人作品地图目录（static/user-maps） */
+    userMapsDir: string;
+    /** 个人作品/社区地图索引与文件存储 */
+    userMaps: UserMapStore;
   }
 
   interface FastifyRequest {

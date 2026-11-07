@@ -18,6 +18,7 @@ import Leaderboard from './pages/Leaderboard';
 import Profile from './pages/Profile';
 import ProfileSettings from './pages/ProfileSettings';
 import SkinStudio from './pages/SkinStudio';
+import MyWorks from './pages/MyWorks';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
@@ -150,6 +151,14 @@ export default function App() {
         element={
           <RequireAuth>
             <SkinStudio />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile/works"
+        element={
+          <RequireAuth>
+            <MyWorks />
           </RequireAuth>
         }
       />

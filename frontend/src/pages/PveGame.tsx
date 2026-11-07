@@ -156,6 +156,7 @@ export default function PveGame() {
           gameId: save.gameId,
           map: save.config.map,
           mapTitle: save.mapTitle,
+          mapSource: save.config.mapSource,
           seatAssignments: save.config.seatAssignments,
           seed: save.state.seed,
           timeSettings: save.state.timeSettings,
@@ -613,6 +614,7 @@ export default function PveGame() {
         state: snap.state,
         config: {
           map: config.map,
+          mapSource: config.mapSource,
           seatAssignments: config.seatAssignments,
           fogMode: config.fogMode,
           usePersonalSkin: config.usePersonalSkin,
@@ -1057,6 +1059,8 @@ export default function PveGame() {
           gameOver={gameOver as GameOverMsg}
           board={board}
           humanUserId={configRef.current?.humanUserId ?? user?.id ?? 0}
+          mapId={configRef.current?.map.id}
+          mapSource={configRef.current?.mapSource}
           onNewGame={handleNewGame}
           onBackRoom={() => clearLoadAndNavigate('/pve')}
           onBackModes={() => clearLoadAndNavigate('/modes')}

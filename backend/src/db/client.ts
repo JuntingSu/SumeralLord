@@ -59,6 +59,33 @@ export function openDb(dbPath?: string): DbHandle {
       payload TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS user_maps (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      tags TEXT NOT NULL DEFAULT '[]',
+      player_num INTEGER NOT NULL,
+      row INTEGER NOT NULL,
+      column INTEGER NOT NULL,
+      has_triggers INTEGER NOT NULL DEFAULT 0,
+      published INTEGER NOT NULL DEFAULT 0,
+      published_at INTEGER,
+      likes INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_maps_owner ON user_maps(user_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_user_maps_community ON user_maps(published, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_user_maps_popular ON user_maps(published, likes);
+    CREATE TABLE IF NOT EXISTS user_map_likes (
+      map_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (map_id, user_id)
+    );
   `);
   // 存量库补列（DEFAULT 使旧账号自动回填 100 分、旧对局 score_changes 回填 []）
   ensureColumn(sqlite, 'users', 'score', 'score REAL NOT NULL DEFAULT 100');

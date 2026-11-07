@@ -43,6 +43,12 @@ export const ERROR_CODES = {
   DEMO_REPLAY_NOT_FOUND: 'DEMO_REPLAY_NOT_FOUND',
   /** 演示回放文件超过读取上限 */
   DEMO_REPLAY_TOO_LARGE: 'DEMO_REPLAY_TOO_LARGE',
+  /** 个人作品数量达到上限 */
+  USER_MAP_LIMIT: 'USER_MAP_LIMIT',
+  /** 地图文件超过大小上限 */
+  MAP_TOO_LARGE: 'MAP_TOO_LARGE',
+  /** 无权访问/修改该资源 */
+  FORBIDDEN: 'FORBIDDEN',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
